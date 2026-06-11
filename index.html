@@ -457,11 +457,9 @@ tbody tr:hover td{background:var(--stone)}
             <div class="field-row" style="align-items:flex-end;margin-top:14px">
               <div class="field"><label>Nome *</label><input type="text" id="resNome" placeholder="Mario" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
-              <div class="field"><label>Team Lead</label><input type="text" id="resLead" placeholder="es. Olga Intoccia" list="ldSug"/><datalist id="ldSug"></datalist></div>
-              <div class="field" style="min-width:240px"><label>Progetto & Team Lead *</label>
+              <div class="field" style="min-width:240px"><label>Progetti *</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
-                  <select id="resProgettoSel" style="flex:1.5"><option value="">— Progetto —</option></select>
-                  <select id="resLeadSel" style="flex:1"><option value="">— TL —</option></select>
+                  <select id="resProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
                   <button type="button" class="btn btn-ghost2 btn-sm" onclick="addProgettoTag('res')" title="Aggiungi progetto"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div class="prj-tags" id="resProgettoTags"></div>
@@ -495,11 +493,9 @@ tbody tr:hover td{background:var(--stone)}
             <div class="field-row" style="align-items:flex-end;margin-top:14px">
               <div class="field"><label>Nome *</label><input type="text" id="editNome"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
-              <div class="field"><label>Team Lead</label><input type="text" id="editLead" list="ldSug"/></div>
-              <div class="field" style="min-width:240px"><label>Progetto & Team Lead</label>
+              <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
-                  <select id="editProgettoSel" style="flex:1.5"><option value="">— Progetto —</option></select>
-                  <select id="editLeadSel" style="flex:1"><option value="">— TL —</option></select>
+                  <select id="editProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
                   <button type="button" class="btn btn-ghost2 btn-sm" onclick="addProgettoTag('edit')" title="Aggiungi progetto"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div class="prj-tags" id="editProgettoTags"></div>
@@ -520,6 +516,7 @@ tbody tr:hover td{background:var(--stone)}
           <div class="acc-body">
             <div class="field-row" style="align-items:flex-end;margin-top:14px">
               <div class="field"><label>Nome progetto *</label><input type="text" id="newPrjName" placeholder="es. NUOVO AMS" onkeydown="if(event.key==='Enter')addProject()"/></div>
+              <div class="field"><label>Team Lead</label><select id="newPrjTLSel"><option value="">— Nessuno —</option></select></div>
               <div><button class="btn btn-amber" onclick="addProject()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
             </div>
             <div id="addPrjMsg" class="msg"></div>
@@ -569,28 +566,25 @@ async function call(action,payload){
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
 let _cache={res:[],prj:[],hrs:[],fer:[],rep:[]};
-let _prjIdByName={},_prjNameById={};
+let _prjIdByName={},_prjNameById={},_prjTLByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
 async function reloadAll(){
   const d=await call('bootstrap');
   _cache.prj=(d.progetti||[]).map(r=>r.nome);
-  _prjIdByName={};_prjNameById={};
-  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;});
-  const byRes={},tlByResProj={};
+  _prjIdByName={};_prjNameById={};_prjTLByName={};
   const nameById={};(d.risorse||[]).forEach(r=>{nameById[r.id]=r.full_name;});
+  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;_prjTLByName[r.nome]=r.team_lead_id?nameById[r.team_lead_id]||'':'';});
+  const byRes={};
   (d.allocazioni||[]).forEach(a=>{
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
-    const pName=_prjNameById[a.progetto_id];if(!pName)return;
-    if(!tlByResProj[a.risorsa_id])tlByResProj[a.risorsa_id]={};
-    tlByResProj[a.risorsa_id][pName]=a.team_lead_id?nameById[a.team_lead_id]||'':'';
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,teamLead:r.team_lead||'',progetti:(byRes[r.id]||[]).filter(Boolean),progettiLeads:tlByResProj[r.id]||{}}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,progetti:(byRes[r.id]||[]).filter(Boolean)}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:o.anno,mese:o.mese,ore_q1:o.ore_q1,note_q1:o.note_q1,ore_q2:o.ore_q2,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
-  _cache.rep=(d.rep||[]).map(rp=>{const tl=rp.team_lead_id!=null?RESOURCES.find(x=>x.id===rp.team_lead_id):null;return{id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:tl?tl.fullName:'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]};});
+  _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}));
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
@@ -605,9 +599,10 @@ async function userHasPwd(name){const r=_resByName(name);if(!r)return false;retu
 async function checkUserPwd(name,pwd){const r=_resByName(name);if(!r)return false;return!!(await call('checkUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)}));}
 async function setUserPwd(name,pwd){const r=_resByName(name);if(!r)return;await call('setUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)});}
 async function resetUserPwd(name){const r=_resByName(name);if(!r)return;await call('resetUserPwd',{risorsaId:r.id});}
-function getMembers(lead){return lead?RESOURCES.filter(r=>r.teamLead===lead).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
-function getLeadTeam(){return RESOURCES.filter(r=>Object.values(r.progettiLeads||{}).includes(currentUser)).map(r=>r.fullName);}
-function getLeads(){return[...new Set(RESOURCES.map(r=>r.teamLead).filter(Boolean))].sort();}
+function getMembers(lead){return lead?RESOURCES.filter(r=>r.progetti.some(p=>_prjTLByName[p]===lead)).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
+function getLeadTeam(){const myPrjs=Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p);return[...new Set(RESOURCES.filter(r=>r.progetti.some(p=>myPrjs.includes(p))).map(r=>r.fullName))];}
+function getLeads(){return[...new Set(Object.values(_prjTLByName).filter(Boolean))].sort();}
+function getLeadForMember(fullName){const r=RESOURCES.find(x=>x.fullName===fullName);if(!r)return'—';const tls=[...new Set(r.progetti.map(p=>_prjTLByName[p]).filter(Boolean))];return tls.join(', ')||'—';}
 function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#C8860A';}
 const HC={};
 function easterSunday(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),month=Math.floor((h+l-7*m+114)/31)-1,day=((h+l-7*m+114)%31)+1;return new Date(year,month,day);}
@@ -652,7 +647,7 @@ async function launchApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
-  isTeamLead=!isAdmin&&RESOURCES.some(r=>Object.values(r.progettiLeads||{}).includes(currentUser));
+  isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
   document.getElementById('navOre').style.display=isAdmin?'none':'flex';
   document.getElementById('navRep').style.display=isAdmin?'none':'flex';
@@ -682,11 +677,10 @@ function refreshDropdowns(){
   const leads=getLeads(),lOpts=[{v:'',l:'Tutti'},...leads.map(l=>({v:l,l:l}))];
   ['riepilogoLead','trendLead','ovLead','adminFerLead','filterResLead'].forEach(id=>popSel(id,lOpts,''));
   popSel('filterMembro',[{v:'',l:'Tutti i membri'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))],'');
-  const dl=document.getElementById('ldSug');if(dl){dl.innerHTML='';leads.forEach(l=>{const o=document.createElement('option');o.value=l;dl.appendChild(o);});}
   const sl=document.getElementById('loginSel');sl.innerHTML='<option value="">— Seleziona il tuo nome —</option>';
   RESOURCES.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;sl.appendChild(o);});
-  const rOpts=[{v:'',l:'— TL —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
-  ['resLeadSel','editLeadSel'].forEach(id=>popSel(id,rOpts,''));
+  const tlOpts=[{v:'',l:'— Nessuno —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
+  popSel('newPrjTLSel',tlOpts,'');
 }
 // ALERT
 async function checkAlerts(){
@@ -752,7 +746,7 @@ async function loadRiepilogo(){
   const av=wHours(year,month,1)+wHours(year,month,2);
   let h='<div class="table-wrap"><table><thead><tr><th>Risorsa</th><th>Team Lead</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th>Stato</th></tr></thead><tbody>';
   if(!members.length)h+='<tr><td colspan="7" style="text-align:center;color:var(--ink-3)">Nessuna risorsa</td></tr>';
-  members.forEach(m=>{const res=RESOURCES.find(r=>r.fullName===m),lead=res?.teamLead||'—',e=_hrs[m];
+  members.forEach(m=>{const lead=getLeadForMember(m),e=_hrs[m];
     if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td></tr>`;
     else{const tot=(e.ore1||0)+(e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td></tr>`;}
   });
@@ -887,11 +881,9 @@ function renderAdminFerieCalendar(){
 function getMyTeamMembers(){
   const me=RESOURCES.find(r=>r.fullName===currentUser);
   if(!me)return[currentUser];
-  const myLead=me.teamLead;
-  const myProjects=new Set((me.progetti||[me.progetto]).filter(Boolean));
+  const myProjects=new Set((me.progetti||[]).filter(Boolean));
   return RESOURCES.filter(r=>{
-    if(myLead&&r.teamLead===myLead)return true;
-    const rP=(r.progetti||[r.progetto]).filter(Boolean);
+    const rP=(r.progetti||[]).filter(Boolean);
     return rP.some(p=>myProjects.has(p));
   }).map(r=>r.fullName);
 }
@@ -927,27 +919,27 @@ function renderFerieCalendar(){
 // ACCORDION
 function toggleAcc(btn){const body=btn.closest('.card').querySelector('.acc-body');const isOpen=body.classList.contains('open');body.classList.toggle('open');btn.innerHTML=isOpen?'<i class="fa-solid fa-chevron-down"></i>':'<i class="fa-solid fa-chevron-up"></i>';}
 // PROGETTI
-async function populateProgettoSelect(prefix,selected=[],leads={}){
+async function populateProgettoSelect(prefix,selected=[]){
   const sel=document.getElementById(prefix+'ProgettoSel');if(!sel)return;
   const prjs=await getProjects();sel.innerHTML='<option value="">— Progetto —</option>';
   prjs.sort().forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o);});
   const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return;tagsDiv.innerHTML='';
   const selArr=Array.isArray(selected)?selected:(selected?[selected]:[]);
-  selArr.forEach(p=>_addTag(prefix,p,leads[p]||''));
+  selArr.forEach(p=>_addTag(prefix,p));
 }
-function _addTag(prefix,value,lead=''){
+function _addTag(prefix,value){
   if(!value)return;
   const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return;
   if([...tagsDiv.querySelectorAll('.prj-tag')].some(t=>t.dataset.value===value))return;
-  const tag=document.createElement('span');tag.className='prj-tag';tag.dataset.value=value;tag.dataset.lead=lead||'';
-  const leadHtml=lead?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${lead.split(' ')[0]}</span>`:'';
-  tag.innerHTML=`<i class="fa-solid fa-folder" style="font-size:.7rem"></i> ${value}${leadHtml}<button type="button" onclick="removeProgettoTag(this,'${prefix}')" title="Rimuovi">✕</button>`;
+  const tag=document.createElement('span');tag.className='prj-tag';tag.dataset.value=value;
+  const tl=_prjTLByName[value];
+  const tlHtml=tl?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${tl.split(' ')[0]}</span>`:'';
+  tag.innerHTML=`<i class="fa-solid fa-folder" style="font-size:.7rem"></i> ${value}${tlHtml}<button type="button" onclick="removeProgettoTag(this,'${prefix}')" title="Rimuovi">✕</button>`;
   tagsDiv.appendChild(tag);
 }
 function addProgettoTag(prefix){
   const sel=document.getElementById(prefix+'ProgettoSel');if(!sel||!sel.value)return;
-  const leadSel=document.getElementById(prefix+'LeadSel');const lead=leadSel?leadSel.value:'';
-  _addTag(prefix,sel.value,lead);sel.value='';if(leadSel)leadSel.value='';
+  _addTag(prefix,sel.value);sel.value='';
 }
 function removeProgettoTag(btn,prefix){btn.parentElement.remove();}
 function getProgettoSelected(prefix){const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return[];return[...tagsDiv.querySelectorAll('.prj-tag')].map(t=>t.dataset.value);}
@@ -955,8 +947,14 @@ function getProgettoLeads(prefix){const tagsDiv=document.getElementById(prefix+'
 async function addProject(){
   const name=document.getElementById('newPrjName').value.trim();if(!name){showMsg('addPrjMsg','Inserisci il nome del progetto.','err');return;}
   const prjs=await getProjects();if(prjs.map(p=>p.toLowerCase()).includes(name.toLowerCase())){showMsg('addPrjMsg','Progetto già esistente.','err');return;}
-  showSpinner();try{await call('addProject',{nome:name});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('newPrjName').value='';await renderProjectList();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));populateSearchByProject();showMsg('addPrjMsg','"'+name+'" aggiunto','ok');
+  const tlName=document.getElementById('newPrjTLSel')?.value||'';
+  showSpinner();try{await call('addProject',{nome:name,teamLeadName:tlName||null});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  document.getElementById('newPrjName').value='';const ts=document.getElementById('newPrjTLSel');if(ts)ts.value='';
+  await renderProjectList();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));populateSearchByProject();refreshDropdowns();showMsg('addPrjMsg','"'+name+'" aggiunto','ok');
+}
+async function saveProjectLead(id,tlName){
+  showSpinner();try{await call('saveProjectLead',{id,teamLeadName:tlName||null});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
+  await renderProjectList();refreshDropdowns();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));
 }
 async function deleteProject(name){openModal('Elimina progetto','Eliminare "'+name+'"? Verrà rimosso anche dalle allocazioni.',async()=>{showSpinner();try{await call('deleteProject',{nome:name});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderProjectList();populateProgettoSelect('res',[]);populateProgettoSelect('edit',[]);populateSearchByProject();showMsg('addPrjMsg','Progetto eliminato.','ok');},'Elimina');}
 async function renderResourcesByProject(){
@@ -964,24 +962,37 @@ async function renderResourcesByProject(){
   if(!prj){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Seleziona un progetto.</p>';return;}
   const staffed=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(prj));
   if(!staffed.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa allocata.</p>';return;}
-  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">Lead: ${r.teamLead||'—'} · ${(r.progetti||[r.progetto]).filter(Boolean).join(', ')||'—'}</div></div></div>`).join('');
+  const tl=_prjTLByName[prj]||'—';
+  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj} · TL: ${tl}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${(r.progetti||[]).join(', ')||'—'}</div></div></div>`).join('');
 }
 async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
 async function renderProjectList(){
-  const prjs=(await getProjects()).sort();const el=document.getElementById('prjList');if(!el)return;
-  if(!prjs.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
-  el.innerHTML=prjs.map(p=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)"><span style="font-size:.85rem;font-weight:500"><i class="fa-solid fa-folder" style="color:var(--amber);margin-right:7px;font-size:.8rem"></i>${p}</span><button class="btn-icon danger" onclick="deleteProject('${p.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div>`).join('');
+  const prjsFull=(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
+  if(!prjsFull.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
+  const tlOpts=RESOURCES.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('');
+  el.innerHTML=prjsFull.map(p=>{
+    const pid=_prjIdByName[p]||0,tl=_prjTLByName[p]||'';
+    const pSafe=p.replace(/'/g,"\\'");
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)">
+      <i class="fa-solid fa-folder" style="color:var(--amber);font-size:.8rem;flex-shrink:0"></i>
+      <span style="font-size:.85rem;font-weight:500;flex:1">${p}</span>
+      <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap">TL:</span>
+      <select style="font-size:.75rem;padding:2px 5px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:160px" onchange="saveProjectLead(${pid},this.value)">
+        <option value="">— Nessuno —</option>${tlOpts.replace(`value="${tl.replace(/"/g,'&quot;')}"`,`value="${tl.replace(/"/g,'&quot;')}" selected`)}
+      </select>
+      <button class="btn-icon danger" onclick="deleteProject('${pSafe}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
+    </div>`;
+  }).join('');
 }
 // RISORSE ADMIN
 async function addResource(){
-  const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim(),lead=document.getElementById('resLead').value.trim();
+  const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim();
   const progetti=getProgettoSelected('res');
   if(!nome||!cognome){showMsg('addResMsg','Nome e Cognome obbligatori.','err');return;}
   if(!progetti.length){showMsg('addResMsg','Seleziona almeno un progetto.','err');return;}
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
-  const progettiLeads=getProgettoLeads('res');
-  showSpinner();try{await call('addResource',{nome,cognome,teamLead:lead||null,progetti,progettiLeads});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('resNome').value='';document.getElementById('resCognome').value='';document.getElementById('resLead').value='';populateProgettoSelect('res',[]);
+  showSpinner();try{await call('addResource',{nome,cognome,progetti});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  document.getElementById('resNome').value='';document.getElementById('resCognome').value='';populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
 }
 async function renderResourceList(){
@@ -989,28 +1000,30 @@ async function renderResourceList(){
   const fl=document.getElementById('filterResLead');if(fl){const pv=fl.value;fl.innerHTML='<option value="">Tutti i team lead</option>';getLeads().forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;if(l===pv)o.selected=true;fl.appendChild(o);});}
   const el=document.getElementById('resourceList');if(!el)return;
   if(!RESOURCES.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa ancora.</p>';return;}
-  let filtered=RESOURCES.filter(r=>{if(lf&&r.teamLead!==lf)return false;if(search&&!r.fullName.toLowerCase().includes(search)&&!r.teamLead.toLowerCase().includes(search))return false;return true;});
+  let filtered=RESOURCES.filter(r=>{
+    if(lf&&!r.progetti.some(p=>_prjTLByName[p]===lf))return false;
+    if(search&&!r.fullName.toLowerCase().includes(search))return false;
+    return true;
+  });
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun risultato.</p>';return;}
   const pwds={};try{const res=await Promise.all(filtered.map(r=>call('userHasPwd',{risorsaId:r.id})));filtered.forEach((r,i)=>{pwds[r.id]=!!res[i];});}catch(e){console.error('stato password',e);}
-  const grouped={};filtered.forEach(r=>{const k=r.teamLead||'Senza team lead';if(!grouped[k])grouped[k]=[];grouped[k].push(r);});
   let h='';
-  Object.entries(grouped).sort().forEach(([lead,mems])=>{
-    h+=`<div class="lead-group-head"><i class="fa-solid fa-user-tie" style="margin-right:7px;font-size:.7rem"></i>${lead} <span style="font-weight:400;color:var(--ink-3)">(${mems.length})</span></div>`;
-    mems.forEach(r=>{const idx=RESOURCES.indexOf(r),hasPwd=!!pwds[r.id];
-      h+=`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">Lead: ${r.teamLead||'—'} · ${(r.progetti||[r.progetto]).filter(Boolean).join(', ')||'—'} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
-    });
+  filtered.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName)).forEach(r=>{
+    const idx=RESOURCES.indexOf(r),hasPwd=!!pwds[r.id];
+    const prjMeta=(r.progetti||[]).map(p=>{const tl=_prjTLByName[p];return tl?`${p} <span style="color:var(--amber);font-size:.65rem">→ ${tl.split(' ')[0]}</span>`:p;}).join(' · ')||'—';
+    h+=`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
 }
 async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{await resetUserPwd(name);await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata.','ok');},'Reset');}
-function startEdit(idx){const r=RESOURCES[idx];document.getElementById('editIdx').value=idx;document.getElementById('editNome').value=r.nome;document.getElementById('editCognome').value=r.cognome;document.getElementById('editLead').value=r.teamLead||'';populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean),r.progettiLeads||{});const ec=document.getElementById('editCard');ec.style.display='block';const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}ec.scrollIntoView({behavior:'smooth',block:'nearest'});}
+function startEdit(idx){const r=RESOURCES[idx];document.getElementById('editIdx').value=idx;document.getElementById('editNome').value=r.nome;document.getElementById('editCognome').value=r.cognome;populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean));const ec=document.getElementById('editCard');ec.style.display='block';const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}ec.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function cancelEdit(){document.getElementById('editCard').style.display='none';}
 async function saveEdit(){
-  const idx=+document.getElementById('editIdx').value,nome=document.getElementById('editNome').value.trim(),cognome=document.getElementById('editCognome').value.trim(),lead=document.getElementById('editLead').value.trim();
-  const progetti=getProgettoSelected('edit'),progettiLeads=getProgettoLeads('edit');if(!nome||!cognome){showMsg('editMsg','Nome e Cognome obbligatori.','err');return;}
+  const idx=+document.getElementById('editIdx').value,nome=document.getElementById('editNome').value.trim(),cognome=document.getElementById('editCognome').value.trim();
+  const progetti=getProgettoSelected('edit');if(!nome||!cognome){showMsg('editMsg','Nome e Cognome obbligatori.','err');return;}
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,teamLead:lead||null,progetti,progettiLeads});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,progetti});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}
@@ -1023,9 +1036,9 @@ async function exportExcel(){
   const allFerRows=(_read(K_FER,[])||[]).map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return res?{user:res.fullName,start:f.start,end:f.end,tipo:f.tipo,note:f.note}:null;}).filter(Boolean);
   const av=wHours(year,month,1)+wHours(year,month,2);
   const sd=[['Risorsa','Team Lead','I Q (h)','II Q (h)','Totale (h)','Disponibili','Stato']];
-  members.forEach(m=>{const res=RESOURCES.find(r=>r.fullName===m),lead=res?.teamLead||'—',e=all[m];if(e){const tot=(e.ore1||0)+(e.ore2||0);sd.push([m,lead,e.ore1||0,e.ore2||0,tot,av,tot>av?'Extra':'OK']);}else sd.push([m,lead,'—','—','—',av,'Mancante']);});
+  members.forEach(m=>{const lead=getLeadForMember(m),e=all[m];if(e){const tot=(e.ore1||0)+(e.ore2||0);sd.push([m,lead,e.ore1||0,e.ore2||0,tot,av,tot>av?'Extra':'OK']);}else sd.push([m,lead,'—','—','—',av,'Mancante']);});
   const fd=[['Risorsa','Team Lead','Tipo','Data Inizio','Data Fine','Giorni Lav.','Note']];
-  allFerRows.forEach(e=>{const res=RESOURCES.find(r=>r.fullName===e.user),lead=res?.teamLead||'—';fd.push([e.user,lead,e.tipo,fmt(e.start),fmt(e.end),wDays(e.start,e.end),e.note||'']);});
+  allFerRows.forEach(e=>{fd.push([e.user,getLeadForMember(e.user),e.tipo,fmt(e.start),fmt(e.end),wDays(e.start,e.end),e.note||'']);});
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sd),'Riepilogo Ore');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fd),'Ferie');XLSX.writeFile(wb,`TeamHours_${MONTHS[month]}_${year}.xlsx`);
 }
 async function exportICS(){
@@ -1059,8 +1072,7 @@ async function initRepPanel(){
     const rFilt=document.getElementById('repFilterRisorsa');rFilt.innerHTML='<option value="">Tutte le risorse</option>';team.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;rFilt.appendChild(o);});
     const yFilt=document.getElementById('repFilterAnno');yFilt.innerHTML='<option value="">Tutti gli anni</option>';yOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;yFilt.appendChild(o);});
     const mFilt=document.getElementById('repFilterMese');mFilt.innerHTML='<option value="">Tutti i mesi</option>';mOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;mFilt.appendChild(o);});
-    const meRes=RESOURCES.find(r=>r.fullName===currentUser);
-    const myPrjs=isAdmin?await getProjects():[...new Set(RESOURCES.flatMap(r=>Object.entries(r.progettiLeads||{}).filter(([,tl])=>tl===currentUser).map(([p])=>p)))].sort();
+    const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p).sort();
     const repPrjSel=document.getElementById('repProgetto');repPrjSel.innerHTML='<option value="">— Seleziona —</option>';myPrjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;repPrjSel.appendChild(o);});
     await buildRepGriglia();await renderRepTeam();
   }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';await renderRepMine();}
@@ -1072,7 +1084,7 @@ async function buildRepGriglia(){
   if(!progetto){wrap.style.display='none';_repGridData={};return;}
   wrap.style.display='block';
   const allRes=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(progetto));
-  const resources=isAdmin?allRes:allRes.filter(r=>r.fullName===currentUser||(r.progettiLeads||{})[progetto]===currentUser);
+  const resources=isAdmin?allRes:(_prjTLByName[progetto]===currentUser?allRes:allRes.filter(r=>r.fullName===currentUser));
   if(!resources.length){document.getElementById('repGriglia').innerHTML='<p style="color:var(--ink-3);font-size:.84rem;padding:12px">Nessuna risorsa del tuo team su questo progetto.</p>';_repGridData={};return;}
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
   const DN=['D','L','M','M','G','V','S'];
