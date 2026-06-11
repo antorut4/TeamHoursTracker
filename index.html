@@ -451,9 +451,6 @@ tbody tr:hover td{background:var(--stone)}
               <span><span class="legend-dot" style="background:var(--stone-3)"></span>Weekend</span>
             </div>
             <div class="ov-wrap"><div id="adminFerCalendar"></div></div>
-            <div style="font-family:var(--f-display);font-size:1rem;font-weight:400;color:var(--ink);margin:18px 0 10px;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-chart-bar" style="width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;background:var(--stone-2);border-radius:6px;font-size:.75rem;color:var(--ink-2)"></i> Riepilogo mese</div>
-            <div class="ov-cards" id="adminFerCards"></div>
-            <div id="adminFerOverlaps" style="margin-top:10px"></div>
           </div>
         </div>
         <div class="card">
@@ -601,7 +598,7 @@ async function checkUserPwd(name,pwd){const r=_resByName(name);if(!r)return fals
 async function setUserPwd(name,pwd){const r=_resByName(name);if(!r)return;await call('setUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)});}
 async function resetUserPwd(name){const r=_resByName(name);if(!r)return;await call('resetUserPwd',{risorsaId:r.id});}
 function getMembers(lead){return lead?RESOURCES.filter(r=>r.teamLead===lead).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
-function getLeadTeam(){const me=RESOURCES.find(r=>r.fullName===currentUser);const myP=new Set((me?.progetti||[me?.progetto]).filter(Boolean));return RESOURCES.filter(r=>{if(r.fullName===currentUser)return false;if(r.teamLead===currentUser)return true;const rP=(r.progetti||[r.progetto]).filter(Boolean);return rP.some(p=>myP.has(p));}).map(r=>r.fullName);}
+function getLeadTeam(){return RESOURCES.filter(r=>r.teamLead===currentUser).map(r=>r.fullName);}
 function getLeads(){return[...new Set(RESOURCES.map(r=>r.teamLead).filter(Boolean))].sort();}
 function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#C8860A';}
 const HC={};
@@ -647,7 +644,7 @@ async function launchApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
-  isTeamLead=!isAdmin&&(RESOURCES.some(r=>r.teamLead===currentUser)||(()=>{const me=RESOURCES.find(r=>r.fullName===currentUser);const myP=new Set((me?.progetti||[me?.progetto]).filter(Boolean));return myP.size>0&&RESOURCES.some(r=>r.fullName!==currentUser&&(r.progetti||[r.progetto]).filter(Boolean).some(p=>myP.has(p)));})());
+  isTeamLead=!isAdmin&&RESOURCES.some(r=>r.teamLead===currentUser);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
   document.getElementById('navOre').style.display=isAdmin?'none':'flex';
   document.getElementById('navRep').style.display=isAdmin?'none':'flex';
@@ -870,24 +867,17 @@ function renderAdminFerieCalendar(){
   const DN=['D','L','M','M','G','V','S'];
   const md={};members.forEach(m=>{md[m]={};});
   allFer.forEach(e=>{if(!md[e.user])return;let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){const ds=localDate(c);if(ds.startsWith(`${year}-${String(month+1).padStart(2,'0')}`))md[e.user][ds]=e.tipo;c.setDate(c.getDate()+1);}});
-  if(!members.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa.</p>';document.getElementById('adminFerCards').innerHTML='';document.getElementById('adminFerOverlaps').innerHTML='';return;}
+  if(!members.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa.</p>';return;}
   let h=`<table style="border-collapse:collapse;font-size:.73rem;width:100%"><thead><tr><th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:88px;border-radius:0">Risorsa</th>`;
   for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;h+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'var(--stone-2)':'var(--ink)'};color:${ih?'var(--amber)':iw?'var(--ink-3)':'var(--white)'};text-align:center;min-width:22px;font-weight:${ih||iw?400:600}"><div style="font-size:.58rem">${DN[wd]}</div><div>${d}</div></th>`;}
   h+=`<th style="padding:5px 6px;background:var(--ink);color:var(--white);text-align:center;min-width:32px">Tot</th></tr></thead><tbody>`;
-  const sumData=[];
   members.forEach((m,mi)=>{
     h+=`<tr style="background:${mi%2?'var(--stone)':'var(--white)'}"><td style="padding:6px 10px;font-weight:600;font-size:.76rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap">${m.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.66rem">${m.split(' ').slice(1).join(' ')}</span></td>`;
-    let tot=0;const bt={};
-    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,tipo=md[m][ds];let cb='',dot='';if(tipo){const c=TIPO_C(tipo);cb=`background:${c}18`;dot=`<div style="width:8px;height:8px;border-radius:2px;background:${c};margin:0 auto" title="${tipo}"></div>`;if(!iw&&!ih){tot++;bt[tipo]=(bt[tipo]||0)+1;}}else if(ih)cb='background:var(--amber-bg)';else if(iw)cb='background:var(--stone-2)';h+=`<td style="padding:3px 1px;text-align:center;${cb}">${dot}</td>`;}
+    let tot=0;
+    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,tipo=md[m][ds];let cb='',dot='';if(tipo){const c=TIPO_C(tipo);cb=`background:${c}18`;dot=`<div style="width:8px;height:8px;border-radius:2px;background:${c};margin:0 auto" title="${tipo}"></div>`;if(!iw&&!ih)tot++;}else if(ih)cb='background:var(--amber-bg)';else if(iw)cb='background:var(--stone-2)';h+=`<td style="padding:3px 1px;text-align:center;${cb}">${dot}</td>`;}
     h+=`<td style="padding:5px 6px;text-align:center;font-weight:700;color:var(--ink);border-left:2px solid var(--stone-3)">${tot}</td></tr>`;
-    sumData.push({name:m,days:tot,bt});
   });
   el.innerHTML=h+'</tbody></table>';
-  document.getElementById('adminFerCards').innerHTML=sumData.map(s=>{const det=Object.entries(s.bt).map(([t,n])=>`${t}: ${n}gg`).join(' · ')||'Nessuna assenza';return `<div class="ov-card"><div class="oc-name" style="color:${colorFor(s.name)}">${s.name}</div><div class="oc-num">${s.days} <span style="font-size:.75rem;font-weight:400;color:var(--ink-3)">gg</span></div><div class="oc-sub">${det}</div></div>`;}).join('');
-  const ovs=[];for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt);if(wd===0||wd===6||hol.has(ds))continue;const ab=members.filter(m=>md[m][ds]);if(ab.length>1)ovs.push({ds,names:ab,tipi:ab.map(m=>md[m][ds])});}
-  document.getElementById('adminFerOverlaps').innerHTML=ovs.length
-    ?`<div style="background:var(--warn-bg);border:1px solid rgba(139,94,10,.2);border-radius:var(--r);padding:12px 14px"><div style="font-weight:600;color:var(--warn);margin-bottom:7px;font-size:.83rem"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px"></i>Sovrapposizioni (${ovs.length} giorni)</div>${ovs.map(o=>`<div style="font-size:.79rem;color:var(--warn);margin-bottom:3px">${fmt(o.ds)} — ${o.names.map((n,i)=>`${n.split(' ')[0]} (${o.tipi[i]})`).join(', ')}</div>`).join('')}</div>`
-    :`<div style="background:var(--ok-bg);border-radius:var(--r);padding:9px 13px;font-size:.82rem;color:var(--ok)"><i class="fa-solid fa-check" style="margin-right:7px"></i>Nessuna sovrapposizione questo mese</div>`;
 }
 function getMyTeamMembers(){
   const me=RESOURCES.find(r=>r.fullName===currentUser);
@@ -1061,8 +1051,9 @@ async function buildRepGriglia(){
   if(!progetto){wrap.style.display='none';_repGridData={};return;}
   wrap.style.display='block';
   const allRes=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(progetto));
-  const teamNames=isAdmin?null:new Set(getLeadTeam());
-  const resources=isAdmin?allRes:allRes.filter(r=>teamNames.has(r.fullName));
+  const teamNamesSet=isAdmin?null:new Set(getLeadTeam());
+  // include anche il current user se è sul progetto (come TL o come risorsa)
+  const resources=isAdmin?allRes:allRes.filter(r=>r.fullName===currentUser||teamNamesSet.has(r.fullName));
   if(!resources.length){document.getElementById('repGriglia').innerHTML='<p style="color:var(--ink-3);font-size:.84rem;padding:12px">Nessuna risorsa del tuo team su questo progetto.</p>';_repGridData={};return;}
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
   const DN=['D','L','M','M','G','V','S'];
@@ -1178,7 +1169,35 @@ async function renderRepTeam(){
     return `<div class="rep-entry"><div style="flex:1"><div class="re-proj">${r.progetto}</div><div class="re-meta"><b>${r.fullName}</b> · ${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span> · Lead: ${r.teamLead||'—'}</div><div class="re-days">${daysStr}</div></div>${canDel?`<button class="btn-icon danger" onclick="deleteRep(${r.id},'${r.fullName.replace(/'/g,"\\'")}','${r.progetto.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
   }).join('');
 }
-async function renderRepMine(){const mine=await repForUser(currentUser);const el=document.getElementById('repMyList');if(!mine.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità assegnata.</p>';return;}const ferieMineMap={};await Promise.all(mine.map(async r=>{ferieMineMap[r.anno+'|'+r.mese]=await ferieGiorniSet(currentUser,r.anno,r.mese);}));el.innerHTML=mine.map(r=>{const ferie=ferieMineMap[r.anno+'|'+r.mese]||new Set();const daysStr=r.giorni.map(d=>{const iF=ferie.has(d);return `<span style="display:inline-block;background:${iF?'var(--warn-bg)':'var(--info-bg)'};color:${iF?'var(--warn)':'var(--info)'};border-radius:4px;padding:1px 6px;margin:1px 2px;font-size:.71rem" title="${iF?'Giorno di ferie!':''}">${iF?'⚠ ':''}${d} ${MONTHS[r.mese].slice(0,3)}</span>`;}).join('');const conflitti=r.giorni.filter(d=>ferie.has(d)).length;const earn=calcRepEarningsFromDays(r.giorni,r.anno,r.mese);return `<div class="rep-entry"><div><div class="re-proj">${r.progetto}</div><div class="re-meta">${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span>${conflitti?` · <span style="color:var(--warn);font-weight:600">${conflitti} giorno/i in ferie!</span>`:''}</div><div class="re-days">${daysStr}</div></div></div>`;}).join('');}
+async function renderRepMine(){
+  const mine=await repForUser(currentUser);
+  const el=document.getElementById('repMyList');
+  if(!mine.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità assegnata.</p>';return;}
+  const ferieMineMap={};
+  await Promise.all(mine.map(async r=>{ferieMineMap[r.anno+'|'+r.mese]=await ferieGiorniSet(currentUser,r.anno,r.mese);}));
+  const totGiorni=mine.reduce((s,r)=>s+r.giorni.length,0);
+  const totEuro=mine.reduce((s,r)=>s+calcRepEarningsFromDays(r.giorni,r.anno,r.mese),0);
+  const totConflitti=mine.reduce((s,r)=>{const ferie=ferieMineMap[r.anno+'|'+r.mese]||new Set();return s+r.giorni.filter(d=>ferie.has(d)).length;},0);
+  let html=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <div style="background:var(--ok-bg);border:1px solid rgba(45,106,79,.2);border-radius:var(--r);padding:10px 16px;flex:1;min-width:120px">
+      <div style="font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ok);margin-bottom:3px">Totale guadagno</div>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--ok);font-family:var(--f-display)">€${totEuro}</div>
+    </div>
+    <div style="background:var(--info-bg);border:1px solid rgba(26,78,122,.15);border-radius:var(--r);padding:10px 16px;flex:1;min-width:120px">
+      <div style="font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--info);margin-bottom:3px">Giorni totali</div>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--info);font-family:var(--f-display)">${totGiorni}</div>
+    </div>
+    ${totConflitti?`<div style="background:var(--warn-bg);border:1px solid rgba(139,94,10,.2);border-radius:var(--r);padding:10px 16px;flex:1;min-width:120px"><div style="font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);margin-bottom:3px">Conflitti ferie</div><div style="font-size:1.4rem;font-weight:700;color:var(--warn);font-family:var(--f-display)">${totConflitti}</div></div>`:''}
+  </div>`;
+  html+=mine.map(r=>{
+    const ferie=ferieMineMap[r.anno+'|'+r.mese]||new Set();
+    const daysStr=r.giorni.map(d=>{const iF=ferie.has(d),wd=new Date(r.anno,r.mese,d).getDay(),isWe=wd===0||wd===6;return `<span style="display:inline-block;background:${iF?'var(--warn-bg)':isWe?'rgba(200,134,10,.1)':'var(--info-bg)'};color:${iF?'var(--warn)':isWe?'var(--amber)':'var(--info)'};border-radius:4px;padding:1px 6px;margin:1px 2px;font-size:.71rem;font-weight:${isWe?700:400}" title="${iF?'Giorno di ferie!':isWe?'Weekend €40':'Feriale €25'}">${iF?'⚠ ':''}${d} ${MONTHS[r.mese].slice(0,3)}</span>`;}).join('');
+    const conflitti=r.giorni.filter(d=>ferie.has(d)).length;
+    const earn=calcRepEarningsFromDays(r.giorni,r.anno,r.mese);
+    return `<div class="rep-entry"><div><div class="re-proj">${r.progetto}</div><div class="re-meta">${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span>${conflitti?` · <span style="color:var(--warn);font-weight:600">${conflitti} giorno/i in ferie!</span>`:''}</div><div class="re-days">${daysStr}</div></div></div>`;
+  }).join('');
+  el.innerHTML=html;
+}
 async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Eliminare la reperibilità di "'+name+'" per "'+prog+'"?',async()=>{showSpinner();try{await call('deleteRep',{id});await reloadAll();}catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderRepTeam();showMsg('repMsg','Reperibilità eliminata.','ok');},'Elimina');}
 // AVVIO
 (async function init(){
