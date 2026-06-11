@@ -15,7 +15,7 @@ async function bootstrap(){
   const [progetti, risorse, allocazioni, ore, ferie, rep] = await Promise.all([
     sql`SELECT id, nome FROM progetti ORDER BY nome`,
     sql`SELECT id, nome, cognome, full_name, team_lead FROM risorse ORDER BY cognome, nome`,
-    sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
+    sql`SELECT risorsa_id, progetto_id, team_lead_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
     sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`
@@ -50,8 +50,14 @@ async function addResource(p){
   const [r] = await sql`INSERT INTO risorse (nome, cognome, team_lead)
                         VALUES (${p.nome}, ${p.cognome}, ${p.teamLead || null}) RETURNING id`;
   for(const nome of (p.progetti || [])){
-    await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
-              SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
+    const tlName = p.progettiLeads?.[nome] || null;
+    let tlId = null;
+    if(tlName){
+      const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${tlName}`;
+      tlId = tl ? tl.id : null;
+    }
+    await sql`INSERT INTO allocazioni (risorsa_id, progetto_id, team_lead_id)
+              SELECT ${r.id}, id, ${tlId} FROM progetti WHERE nome=${nome}`;
   }
 }
 async function saveEdit(p){
@@ -59,8 +65,14 @@ async function saveEdit(p){
             WHERE id=${p.id}`;
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
-    await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
-              SELECT ${p.id}, id FROM progetti WHERE nome=${nome}`;
+    const tlName = p.progettiLeads?.[nome] || null;
+    let tlId = null;
+    if(tlName){
+      const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${tlName}`;
+      tlId = tl ? tl.id : null;
+    }
+    await sql`INSERT INTO allocazioni (risorsa_id, progetto_id, team_lead_id)
+              SELECT ${p.id}, id, ${tlId} FROM progetti WHERE nome=${nome}`;
   }
 }
 async function deleteResource(p){ await sql`DELETE FROM risorse WHERE id=${p.id}`; } // CASCADE
