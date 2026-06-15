@@ -93,7 +93,7 @@ async function launchApp(){
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
-  const navVis=(id,show)=>{const el=document.getElementById(id);if(el)el.classList.toggle('nav-hidden',!show);};
+  const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
   navVis('navFerie',!isAdmin);
   navVis('navRep',!isAdmin);
