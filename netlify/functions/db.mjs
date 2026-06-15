@@ -20,11 +20,7 @@ async function bootstrap(){
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
     sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`
   ]);
-  let presenze = [];
-  try {
-    presenze = await sql`SELECT risorsa_id, data::text FROM presenze WHERE data BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE + 60 ORDER BY data`;
-  } catch(_) { /* tabella non ancora creata */ }
-  return { progetti, risorse, allocazioni, ore, ferie, rep, presenze };
+  return { progetti, risorse, allocazioni, ore, ferie, rep };
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -101,14 +97,11 @@ async function saveRep(p){
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
 
 // ── presenze in ufficio ──
+async function getPresenze(p){
+  const rows = await sql`SELECT risorsa_id, data::text AS data FROM presenze WHERE data BETWEEN ${p.from}::date AND ${p.to}::date ORDER BY data`;
+  return rows;
+}
 async function savePresenza(p){
-  await sql`
-    CREATE TABLE IF NOT EXISTS presenze (
-      id SERIAL PRIMARY KEY,
-      risorsa_id INTEGER NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
-      data DATE NOT NULL,
-      UNIQUE(risorsa_id, data)
-    )`;
   await sql`INSERT INTO presenze (risorsa_id, data) VALUES (${p.risorsaId}, ${p.data}) ON CONFLICT (risorsa_id, data) DO NOTHING`;
 }
 async function deletePresenza(p){
@@ -142,7 +135,7 @@ async function setAdminPwd(p){
 const ACTIONS = {
   bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
-  savePresenza, deletePresenza,
+  getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd
 };
 

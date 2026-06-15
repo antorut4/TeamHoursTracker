@@ -29,7 +29,6 @@ async function reloadAll(){
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}));
-  _cache.pres=(d.presenze||[]).map(p=>({risorsaId:p.risorsa_id,data:(p.data||'').slice(0,10)}));
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
@@ -681,9 +680,19 @@ async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Elimin
 let _presWeekOffset=0;
 function _getMonday(offset){const t=new Date(),dow=t.getDay(),diff=dow===0?-6:1-dow,m=new Date(t);m.setDate(t.getDate()+diff+offset*7);m.setHours(0,0,0,0);return m;}
 function _getWeekDays(offset){const mon=_getMonday(offset);return Array.from({length:5},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return localDate(d);});}
-function prevWeek(){_presWeekOffset--;renderPresenzeGrid();}
-function nextWeek(){_presWeekOffset++;renderPresenzeGrid();}
-function initPresenzePanel(){_presWeekOffset=0;renderPresenzeGrid();}
+function prevWeek(){_presWeekOffset--;loadPresenzeAndRender();}
+function nextWeek(){_presWeekOffset++;loadPresenzeAndRender();}
+async function initPresenzePanel(){_presWeekOffset=0;await loadPresenzeAndRender();}
+async function loadPresenzeAndRender(){
+  const from=_getWeekDays(_presWeekOffset-1)[0],to=_getWeekDays(_presWeekOffset+1)[4];
+  showSpinner();
+  try{
+    const rows=await call('getPresenze',{from,to});
+    rows.forEach(r=>{if(!_cache.pres.some(p=>p.risorsaId===r.risorsa_id&&p.data===r.data)){_cache.pres.push({risorsaId:r.risorsa_id,data:(r.data||'').slice(0,10)});}});
+  }catch(e){showMsg('presenzeMsg','Errore caricamento: '+e.message,'err');}
+  hideSpinner();
+  renderPresenzeGrid();
+}
 function renderPresenzeGrid(){
   const days=_getWeekDays(_presWeekOffset);
   const mon=_getMonday(_presWeekOffset),fri=new Date(mon);fri.setDate(mon.getDate()+4);
