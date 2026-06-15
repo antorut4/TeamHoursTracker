@@ -192,7 +192,7 @@ async function loadRiepilogo(){
   if(!members.length)h+='<tr><td colspan="7" style="text-align:center;color:var(--ink-3)">Nessuna risorsa</td></tr>';
   members.forEach(m=>{const lead=getLeadForMember(m),e=_hrs[m];
     if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td></tr>`;
-    else{const tot=(e.ore1||0)+(e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td></tr>`;}
+    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td></tr>`;}
   });
   document.getElementById('riepilogoTable').innerHTML=h+'</tbody></table></div>';
 }
@@ -219,7 +219,7 @@ async function renderTrend(){
   });
   document.getElementById('trendLegend').innerHTML=ds.map((d,i)=>`<span><span class="tdot" style="background:${d.color}"></span>${members[i]}</span>`).join('');
   const warns=[];
-  periods.forEach(({m,y})=>members.forEach(mem=>{const e=allHrs[`${mem}||${y}||${m}`];if(!e)warns.push({mem,m,y,t:'m'});else{const tot=(e.ore1||0)+(e.ore2||0),av=wHours(y,m,1)+wHours(y,m,2);if(tot>av)warns.push({mem,m,y,t:'x',tot,av});}}));
+  periods.forEach(({m,y})=>members.forEach(mem=>{const e=allHrs[`${mem}||${y}||${m}`];if(!e)warns.push({mem,m,y,t:'m'});else{const tot=(+e.ore1||0)+(+e.ore2||0),av=wHours(y,m,1)+wHours(y,m,2);if(tot>av)warns.push({mem,m,y,t:'x',tot,av});}}));
   const ae=document.getElementById('trendAlerts');
   if(!warns.length){ae.innerHTML='<p style="color:var(--ok);font-size:.84rem"><i class="fa-solid fa-check" style="margin-right:6px"></i>Nessun avviso.</p>';return;}
   ae.innerHTML=warns.slice(0,12).map(w=>w.t==='m'
@@ -480,7 +480,7 @@ async function exportExcel(){
   const allFerRows=(_read(K_FER,[])||[]).map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return res?{user:res.fullName,start:f.start,end:f.end,tipo:f.tipo,note:f.note}:null;}).filter(Boolean);
   const av=wHours(year,month,1)+wHours(year,month,2);
   const sd=[['Risorsa','Team Lead','I Q (h)','II Q (h)','Totale (h)','Disponibili','Stato']];
-  members.forEach(m=>{const lead=getLeadForMember(m),e=all[m];if(e){const tot=(e.ore1||0)+(e.ore2||0);sd.push([m,lead,e.ore1||0,e.ore2||0,tot,av,tot>av?'Extra':'OK']);}else sd.push([m,lead,'—','—','—',av,'Mancante']);});
+  members.forEach(m=>{const lead=getLeadForMember(m),e=all[m];if(e){const tot=(+e.ore1||0)+(+e.ore2||0);sd.push([m,lead,e.ore1||0,e.ore2||0,tot,av,tot>av?'Extra':'OK']);}else sd.push([m,lead,'—','—','—',av,'Mancante']);});
   const fd=[['Risorsa','Team Lead','Tipo','Data Inizio','Data Fine','Giorni Lav.','Note']];
   allFerRows.forEach(e=>{fd.push([e.user,getLeadForMember(e.user),e.tipo,fmt(e.start),fmt(e.end),wDays(e.start,e.end),e.note||'']);});
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sd),'Riepilogo Ore');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fd),'Ferie');XLSX.writeFile(wb,`TeamHours_${MONTHS[month]}_${year}.xlsx`);
