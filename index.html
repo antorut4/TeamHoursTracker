@@ -288,28 +288,6 @@
         <div class="page-header"><h1>Amministrazione</h1><p>Gestione risorse, progetti e configurazione</p></div>
         <div class="card">
           <div class="acc-header open">
-            <div class="card-title" style="margin-bottom:0"><i class="fa-regular fa-calendar-days"></i> Calendario ferie del team</div>
-            <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-up"></i></button>
-          </div>
-          <div class="acc-body open">
-            <div class="field-row" style="margin:14px 0 12px">
-              <div class="field" style="max-width:170px"><label>Mese</label><select id="adminFerMonth" onchange="renderAdminFerieCalendar()"></select></div>
-              <div class="field" style="max-width:100px"><label>Anno</label><select id="adminFerYear" onchange="renderAdminFerieCalendar()"></select></div>
-              <div class="field" style="max-width:190px"><label>Team Lead</label><select id="adminFerLead" onchange="renderAdminFerieCalendar()"><option value="">Tutti</option></select></div>
-              <div><button class="btn btn-ghost2" onclick="renderAdminFerieCalendar()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
-            </div>
-            <div class="legend">
-              <span><span class="legend-dot" style="background:#A100FF"></span>Ferie</span>
-              <span><span class="legend-dot" style="background:var(--ok)"></span>Permesso/ROL</span>
-              <span><span class="legend-dot" style="background:var(--danger)"></span>Malattia</span>
-              <span><span class="legend-dot" style="background:var(--amber-bg);border:1px solid var(--amber-rim)"></span>Festività</span>
-              <span><span class="legend-dot" style="background:var(--stone-3)"></span>Weekend</span>
-            </div>
-            <div class="ov-wrap"><div id="adminFerCalendar"></div></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="acc-header open">
             <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-user-plus"></i> Aggiungi risorsa</div>
             <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-up"></i></button>
           </div>
