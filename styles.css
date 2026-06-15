@@ -152,7 +152,7 @@ tbody tr:hover td{background:var(--stone)}
 .ov-wrap{overflow-x:auto}
 @media(max-width:768px){:root{--sidebar:0px}.sidebar{display:none}.main-content{margin-left:0;padding:16px 16px 48px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
-.login-card select option{color:var(--ink);background:#1c1c1c}
+.login-card select option{color:#ffffff;background:#1c1c1c}
 .pres-cell{width:34px;height:34px;border-radius:50%;border:2px solid var(--stone-3);background:transparent;display:inline-flex;align-items:center;justify-content:center;transition:all .15s;margin:0 auto;cursor:pointer}
 .pres-cell.on{border-color:currentColor;background:currentColor}
 .pres-cell.on i{color:#fff}

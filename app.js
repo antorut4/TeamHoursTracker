@@ -698,7 +698,8 @@ function renderPresenzeGrid(){
   const mon=_getMonday(_presWeekOffset),fri=new Date(mon);fri.setDate(mon.getDate()+4);
   document.getElementById('presenzeWeekLabel').textContent=`${mon.getDate()} ${MONTHS[mon.getMonth()].slice(0,3)} — ${fri.getDate()} ${MONTHS[fri.getMonth()].slice(0,3)} ${fri.getFullYear()}`;
   const todayStr=localDate(new Date());
-  const members=isAdmin?RESOURCES.map(r=>r.fullName):getMyTeamMembers();
+  let members=isAdmin?RESOURCES.map(r=>r.fullName):getMyTeamMembers();
+  if(!isAdmin&&!members.includes(currentUser))members=[currentUser,...members];
   const presSet=new Set(_cache.pres.map(p=>`${p.risorsaId}|${p.data}`));
   const DN=['Lun','Mar','Mer','Gio','Ven'];
   const colCnt=days.map(d=>members.filter(m=>{const r=RESOURCES.find(x=>x.fullName===m);return r&&presSet.has(`${r.id}|${d}`);}).length);
