@@ -175,3 +175,5 @@ tbody tr:hover td{background:var(--stone)}
 .pres-cell{width:34px;height:34px;border-radius:50%;border:2px solid var(--stone-3);background:transparent;display:inline-flex;align-items:center;justify-content:center;transition:all .15s;margin:0 auto;cursor:pointer}
 .pres-cell.on{border-color:currentColor;background:currentColor}
 .pres-cell.on i{color:#fff}
+
+.nav-hidden{display:none!important;}

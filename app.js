@@ -93,16 +93,17 @@ async function launchApp(){
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
-  document.getElementById('navOre').style.display=isAdmin?'none':'flex';
-  document.getElementById('navFerie').style.display=isAdmin?'none':'flex';
-  document.getElementById('navRep').style.display=isAdmin?'none':'flex';
-  document.getElementById('navPresenze').style.display='flex';
-  document.getElementById('navSectionTeam').style.display=isAdmin?'flex':'none';
-  document.getElementById('navRiepilogo').style.display=isAdmin?'flex':'none';
-  document.getElementById('navTrend').style.display=isTeamLead?'flex':'none';
-  document.getElementById('navOverview').style.display=isAdmin?'flex':'none';
-  document.getElementById('navSectionAdmin').style.display=isAdmin?'flex':'none';
-  document.getElementById('navAdmin').style.display=isAdmin?'flex':'none';
+  const navVis=(id,show)=>{const el=document.getElementById(id);if(el)el.classList.toggle('nav-hidden',!show);};
+  navVis('navOre',!isAdmin);
+  navVis('navFerie',!isAdmin);
+  navVis('navRep',!isAdmin);
+  navVis('navPresenze',true);
+  navVis('navSectionTeam',isAdmin);
+  navVis('navRiepilogo',isAdmin);
+  navVis('navTrend',false);
+  navVis('navOverview',isAdmin);
+  navVis('navSectionAdmin',isAdmin);
+  navVis('navAdmin',isAdmin);
   initApp();
   if(isAdmin)showTab('admin');else showTab('ore');
 }
