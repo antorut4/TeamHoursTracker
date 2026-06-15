@@ -94,6 +94,7 @@ async function launchApp(){
   isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
   document.getElementById('navOre').style.display=isAdmin?'none':'flex';
+  document.getElementById('navFerie').style.display=isAdmin?'none':'flex';
   document.getElementById('navRep').style.display=isAdmin?'none':'flex';
   document.getElementById('navPresenze').style.display='flex';
   document.getElementById('navSectionTeam').style.display=isAdmin?'flex':'none';
