@@ -85,6 +85,7 @@
         <div class="nav-item active" id="navOre" onclick="showTab('ore')" style="display:none"><i class="fa-regular fa-clock"></i> Le mie ore</div>
         <div class="nav-item" id="navFerie" onclick="showTab('ferie')"><i class="fa-solid fa-umbrella-beach"></i> Ferie</div>
         <div class="nav-item" id="navRep" onclick="showTab('reperibilita')" style="display:none"><i class="fa-solid fa-tower-broadcast"></i> Reperibilità</div>
+        <div class="nav-item" id="navPresenze" onclick="showTab('presenze')" style="display:none"><i class="fa-solid fa-building-user"></i> Presenze</div>
         <div class="nav-section" id="navSectionTeam" style="display:none">Team</div>
         <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Riepilogo ore</div>
         <div class="nav-item" id="navTrend" onclick="showTab('trend')" style="display:none"><i class="fa-solid fa-chart-line"></i> Trend</div>
@@ -266,6 +267,20 @@
             </div>
             <div id="repTeamList"><p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità inserita.</p></div>
           </div> 
+        </div>
+      </div>
+      <!-- PRESENZE -->
+      <div class="panel" id="panel-presenze">
+        <div class="page-header"><h1>Presenze in ufficio</h1><p>Segna i giorni in cui sei in ufficio — il tuo team lo vede in tempo reale</p></div>
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+            <button class="btn btn-ghost2 btn-sm" onclick="prevWeek()"><i class="fa-solid fa-chevron-left"></i></button>
+            <div id="presenzeWeekLabel" style="flex:1;text-align:center;font-weight:600;font-size:.9rem;color:var(--ink)"></div>
+            <button class="btn btn-ghost2 btn-sm" onclick="nextWeek()"><i class="fa-solid fa-chevron-right"></i></button>
+            <button class="btn btn-ghost2 btn-sm" onclick="_presWeekOffset=0;renderPresenzeGrid()">Questa settimana</button>
+          </div>
+          <div class="table-wrap" id="presenzeGrid"></div>
+          <div id="presenzeMsg" class="msg" style="margin-top:10px"></div>
         </div>
       </div>
       <!-- ADMIN -->

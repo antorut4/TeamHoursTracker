@@ -9,7 +9,7 @@ async function call(action,payload){
   return j.data;
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
-let _cache={res:[],prj:[],hrs:[],fer:[],rep:[]};
+let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[]};
 let _prjIdByName={},_prjNameById={},_prjTLByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
@@ -26,9 +26,10 @@ async function reloadAll(){
   });
   RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,progetti:(byRes[r.id]||[]).filter(Boolean)}));
   _cache.res=RESOURCES;
-  _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:o.anno,mese:o.mese,ore_q1:o.ore_q1,note_q1:o.note_q1,ore_q2:o.ore_q2,note_q2:o.note_q2}));
+  _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}));
+  _cache.pres=(d.presenze||[]).map(p=>({risorsaId:p.risorsa_id,data:(p.data||'').slice(0,10)}));
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
@@ -95,6 +96,7 @@ async function launchApp(){
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
   document.getElementById('navOre').style.display=isAdmin?'none':'flex';
   document.getElementById('navRep').style.display=isAdmin?'none':'flex';
+  document.getElementById('navPresenze').style.display='flex';
   document.getElementById('navSectionTeam').style.display=isAdmin?'flex':'none';
   document.getElementById('navRiepilogo').style.display=isAdmin?'flex':'none';
   document.getElementById('navTrend').style.display=isAdmin?'flex':'none';
@@ -137,8 +139,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin'];
-const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview',reperibilita:'navRep',admin:'navAdmin'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze'];
+const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze'};
 async function showTab(t){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   const an=document.getElementById(NAV_MAP[t]);if(an)an.classList.add('active');
@@ -150,6 +152,7 @@ async function showTab(t){
   if(t==='riepilogo')loadRiepilogo().catch(console.error);
   if(t==='reperibilita')initRepPanel();
   if(t==='ferie'&&!isAdmin){renderFerieCalendar();}
+  if(t==='presenze')initPresenzePanel();
 }
 // ORE
 async function loadOreForm(){
@@ -674,6 +677,51 @@ async function renderRepMine(){
   el.innerHTML=html;
 }
 async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Eliminare la reperibilità di "'+name+'" per "'+prog+'"?',async()=>{showSpinner();try{await call('deleteRep',{id});await reloadAll();}catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderRepTeam();showMsg('repMsg','Reperibilità eliminata.','ok');},'Elimina');}
+// PRESENZE
+let _presWeekOffset=0;
+function _getMonday(offset){const t=new Date(),dow=t.getDay(),diff=dow===0?-6:1-dow,m=new Date(t);m.setDate(t.getDate()+diff+offset*7);m.setHours(0,0,0,0);return m;}
+function _getWeekDays(offset){const mon=_getMonday(offset);return Array.from({length:5},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return localDate(d);});}
+function prevWeek(){_presWeekOffset--;renderPresenzeGrid();}
+function nextWeek(){_presWeekOffset++;renderPresenzeGrid();}
+function initPresenzePanel(){_presWeekOffset=0;renderPresenzeGrid();}
+function renderPresenzeGrid(){
+  const days=_getWeekDays(_presWeekOffset);
+  const mon=_getMonday(_presWeekOffset),fri=new Date(mon);fri.setDate(mon.getDate()+4);
+  document.getElementById('presenzeWeekLabel').textContent=`${mon.getDate()} ${MONTHS[mon.getMonth()].slice(0,3)} — ${fri.getDate()} ${MONTHS[fri.getMonth()].slice(0,3)} ${fri.getFullYear()}`;
+  const todayStr=localDate(new Date());
+  const members=isAdmin?RESOURCES.map(r=>r.fullName):getMyTeamMembers();
+  const presSet=new Set(_cache.pres.map(p=>`${p.risorsaId}|${p.data}`));
+  const DN=['Lun','Mar','Mer','Gio','Ven'];
+  const colCnt=days.map(d=>members.filter(m=>{const r=RESOURCES.find(x=>x.fullName===m);return r&&presSet.has(`${r.id}|${d}`);}).length);
+  let h=`<table style="border-collapse:collapse;font-size:.82rem;width:100%"><thead><tr><th style="padding:8px 12px;text-align:left;border-bottom:2px solid var(--stone-3);min-width:120px;color:var(--ink-3);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em">Risorsa</th>`;
+  days.forEach((d,i)=>{
+    const dt=new Date(d+'T12:00:00'),isHol=getHol(dt.getFullYear()).has(d),isToday=d===todayStr;
+    h+=`<th style="padding:6px 4px;text-align:center;border-bottom:2px solid ${isToday?'var(--amber)':'var(--stone-3)'};min-width:80px"><div style="font-size:.63rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:${isHol?'var(--amber)':isToday?'var(--amber)':'var(--ink-3)'}">${DN[i]}</div><div style="font-size:1.05rem;font-weight:700;color:${isToday?'var(--amber)':'var(--ink)'};margin:2px 0">${dt.getDate()}</div><div style="font-size:.65rem;font-weight:600;color:${isHol?'var(--amber)':colCnt[i]?'var(--ok)':'var(--ink-3);opacity:.5'}">${isHol?'festivo':colCnt[i]?colCnt[i]+' presenti':'—'}</div></th>`;
+  });
+  h+=`</tr></thead><tbody>`;
+  members.forEach((m,mi)=>{
+    const r=RESOURCES.find(x=>x.fullName===m);if(!r)return;
+    const isMe=!isAdmin&&m===currentUser,color=colorFor(m);
+    h+=`<tr style="background:${mi%2?'var(--stone)':'var(--white)'}"><td style="padding:8px 12px;font-weight:${isMe?700:500};border-right:1px solid var(--stone-3);white-space:nowrap"><span style="color:${isMe?'var(--amber)':'var(--ink)'}">${m.split(' ')[0]}${isMe?' ★':''}</span><span style="font-size:.7rem;color:var(--ink-3);display:block;font-weight:400">${m.split(' ').slice(1).join(' ')}</span></td>`;
+    days.forEach(d=>{
+      const dt=new Date(d+'T12:00:00'),isHol=getHol(dt.getFullYear()).has(d),isPresent=presSet.has(`${r.id}|${d}`);
+      if(isHol){h+=`<td style="padding:6px 4px;text-align:center;background:var(--amber-bg)"></td>`;}
+      else if(isMe){h+=`<td style="padding:6px 4px;text-align:center" onclick="togglePresenzaDay('${d}',${r.id})"><div class="pres-cell${isPresent?' on':''}" style="color:${color}" id="presCell_${r.id}_${d.replace(/-/g,'_')}">${isPresent?'<i class="fa-solid fa-check"></i>':''}</div></td>`;}
+      else{h+=`<td style="padding:6px 4px;text-align:center">${isPresent?`<div style="width:14px;height:14px;border-radius:50%;background:${color};margin:0 auto" title="${m}"></div>`:`<div style="width:14px;height:14px;border-radius:50%;border:1.5px solid var(--stone-3);margin:0 auto;opacity:.35"></div>`}</td>`;}
+    });
+    h+=`</tr>`;
+  });
+  document.getElementById('presenzeGrid').innerHTML=h+`</tbody></table>`;
+}
+async function togglePresenzaDay(dateStr,risorsaId){
+  const isPresent=_cache.pres.some(p=>p.risorsaId===risorsaId&&p.data===dateStr);
+  showSpinner();
+  try{
+    if(isPresent){await call('deletePresenza',{risorsaId,data:dateStr});_cache.pres=_cache.pres.filter(p=>!(p.risorsaId===risorsaId&&p.data===dateStr));}
+    else{await call('savePresenza',{risorsaId,data:dateStr});_cache.pres.push({risorsaId,data:dateStr});}
+  }catch(e){hideSpinner();showMsg('presenzeMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();renderPresenzeGrid();
+}
 // AVVIO
 (async function init(){
   showSpinner();

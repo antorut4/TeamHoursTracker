@@ -12,15 +12,16 @@ const sql = neon(process.env.DATABASE_URL);
 
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
 async function bootstrap(){
-  const [progetti, risorse, allocazioni, ore, ferie, rep] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, presenze] = await Promise.all([
     sql`SELECT id, nome, team_lead_id FROM progetti ORDER BY nome`,
     sql`SELECT id, nome, cognome, full_name FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
-    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`
+    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
+    sql`SELECT risorsa_id, data::text FROM presenze WHERE data BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE + 60 ORDER BY data`
   ]);
-  return { progetti, risorse, allocazioni, ore, ferie, rep };
+  return { progetti, risorse, allocazioni, ore, ferie, rep, presenze };
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -96,6 +97,14 @@ async function saveRep(p){
 }
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
 
+// ── presenze in ufficio ──
+async function savePresenza(p){
+  await sql`INSERT INTO presenze (risorsa_id, data) VALUES (${p.risorsaId}, ${p.data}) ON CONFLICT (risorsa_id, data) DO NOTHING`;
+}
+async function deletePresenza(p){
+  await sql`DELETE FROM presenze WHERE risorsa_id=${p.risorsaId} AND data=${p.data}`;
+}
+
 // ── password: l'hash entra, ma non esce mai (ritorniamo solo boolean/void) ──
 async function userHasPwd(p){
   const [r] = await sql`SELECT 1 FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`;
@@ -123,6 +132,7 @@ async function setAdminPwd(p){
 const ACTIONS = {
   bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
+  savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd
 };
 
