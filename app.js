@@ -99,7 +99,7 @@ async function launchApp(){
   document.getElementById('navPresenze').style.display='flex';
   document.getElementById('navSectionTeam').style.display=isAdmin?'flex':'none';
   document.getElementById('navRiepilogo').style.display=isAdmin?'flex':'none';
-  document.getElementById('navTrend').style.display=isAdmin?'none':'flex';
+  document.getElementById('navTrend').style.display=isTeamLead?'flex':'none';
   document.getElementById('navOverview').style.display=isAdmin?'flex':'none';
   document.getElementById('navSectionAdmin').style.display=isAdmin?'flex':'none';
   document.getElementById('navAdmin').style.display=isAdmin?'flex':'none';
