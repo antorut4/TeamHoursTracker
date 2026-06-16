@@ -180,6 +180,7 @@ tbody tr:hover td{background:var(--stone)}
   :root{--sidebar:0px}
   .sidebar{width:230px;left:-230px;transition:left .25s ease}
   .sidebar.mobile-open{left:0;box-shadow:4px 0 40px rgba(0,0,0,.6)}
+  .sidebar-brand{display:none}
   .sidebar-close-btn{display:flex}
   .mobile-topbar{display:flex}
   .main-content{margin-left:0;padding:64px 16px 48px}
