@@ -437,6 +437,7 @@ async function renderProjectList(){
 }
 // RISORSE ADMIN
 async function addResource(){
+  addProgettoTag('res');
   const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim();
   const progetti=getProgettoSelected('res');
   if(!nome||!cognome){showMsg('addResMsg','Nome e Cognome obbligatori.','err');return;}
@@ -471,6 +472,7 @@ async function confirmResetPwd(idx,name){openModal('Reset password','Resettare l
 function startEdit(idx){const r=RESOURCES[idx];document.getElementById('editIdx').value=idx;document.getElementById('editNome').value=r.nome;document.getElementById('editCognome').value=r.cognome;populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean));const ec=document.getElementById('editCard');ec.style.display='block';const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}ec.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function cancelEdit(){document.getElementById('editCard').style.display='none';}
 async function saveEdit(){
+  addProgettoTag('edit');
   const idx=+document.getElementById('editIdx').value,nome=document.getElementById('editNome').value.trim(),cognome=document.getElementById('editCognome').value.trim();
   const progetti=getProgettoSelected('edit');if(!nome||!cognome){showMsg('editMsg','Nome e Cognome obbligatori.','err');return;}
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
