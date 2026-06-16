@@ -149,8 +149,17 @@ tbody tr:hover td{background:var(--stone)}
 .overlap-warn{display:none;background:var(--warn-bg);border:1px solid rgba(125,78,0,.2);border-radius:var(--r);padding:9px 13px;font-size:.8rem;color:var(--warn);margin-top:8px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.76rem;color:var(--ink-2);margin-bottom:12px}
 .legend-dot{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:middle;margin-right:4px}
-.ov-wrap{overflow-x:auto}
-@media(max-width:768px){:root{--sidebar:0px}.sidebar{display:none}.main-content{margin-left:0;padding:16px 16px 48px}}
+.ov-wrap{overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 260px)}
+.ov-wrap thead th{position:sticky;top:0;z-index:2}
+@media(max-width:768px){
+  :root{--sidebar:0px}
+  .sidebar{width:230px;left:-230px;transition:left .25s ease}
+  .sidebar.mobile-open{left:0;box-shadow:4px 0 40px rgba(0,0,0,.6)}
+  .sidebar-close-btn{display:flex}
+  .mobile-topbar{display:flex}
+  .main-content{margin-left:0;padding:64px 16px 48px}
+  .mobile-nav-overlay.visible{display:block}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 /* Select del login: forza il popup nativo in tema scuro */
 .login-card select{
@@ -177,3 +186,21 @@ tbody tr:hover td{background:var(--stone)}
 .pres-cell.on i{color:#fff}
 
 .nav-hidden{display:none!important;}
+
+/* Accenture brand in sidebar */
+.brand-acc-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.brand-acc-label{font-size:.88rem;font-weight:700;color:var(--white);letter-spacing:.02em;font-family:sans-serif;flex:1}
+.brand-app-name{font-family:var(--f-display);font-size:1.05rem;font-weight:700;color:rgba(255,255,255,.55);line-height:1.2;letter-spacing:-.01em}
+.sidebar-close-btn{display:none;align-items:center;justify-content:center;width:28px;height:28px;background:rgba(255,255,255,.1);border:none;border-radius:50%;color:rgba(255,255,255,.7);cursor:pointer;font-size:.85rem;flex-shrink:0;margin-left:auto}
+.sidebar-close-btn:hover{background:rgba(255,255,255,.18);color:#fff}
+
+/* Mobile top bar */
+.mobile-topbar{display:none;position:fixed;top:0;left:0;right:0;height:56px;background:#000;z-index:99;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.1)}
+.mobile-brand{display:flex;align-items:center;gap:9px}
+.mobile-brand-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:var(--amber);border-radius:5px;color:#fff;font-size:15px;font-weight:900;font-family:sans-serif;letter-spacing:-.05em}
+.mobile-brand-label{font-size:.9rem;font-weight:700;color:#fff;letter-spacing:.02em;font-family:sans-serif}
+.hamburger-btn{display:flex;align-items:center;justify-content:center;width:38px;height:38px;background:rgba(255,255,255,.08);border:none;border-radius:var(--r);color:#fff;font-size:1.05rem;cursor:pointer}
+.hamburger-btn:hover{background:rgba(255,255,255,.16)}
+
+/* Mobile nav overlay */
+.mobile-nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:98;backdrop-filter:blur(2px)}

@@ -66,12 +66,24 @@
     </div>
   </div>
 </div>
+<div class="mobile-topbar" id="mobileTopbar">
+  <div class="mobile-brand">
+    <div class="mobile-brand-icon">&gt;</div>
+    <span class="mobile-brand-label">Accenture</span>
+  </div>
+  <button class="hamburger-btn" onclick="toggleMobileNav()"><i class="fa-solid fa-bars"></i></button>
+</div>
+<div class="mobile-nav-overlay" id="mobileOverlay" onclick="closeMobileNav()"></div>
 <div id="app">
   <div class="app-layout">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="brand-icon" style="font-size:20px;font-weight:900;letter-spacing:-.05em;font-family:sans-serif">&gt;</div>
-        <h2>Team Hours<br>Tracker</h2>
+        <div class="brand-acc-row">
+          <div class="brand-icon" style="font-size:20px;font-weight:900;letter-spacing:-.05em;font-family:sans-serif">&gt;</div>
+          <span class="brand-acc-label">Accenture</span>
+          <button class="sidebar-close-btn" onclick="closeMobileNav()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <h2 class="brand-app-name">Team Hours<br>Tracker</h2>
       </div>
       <div class="sidebar-user">
         <div class="user-avatar" id="userAvatar">?</div>

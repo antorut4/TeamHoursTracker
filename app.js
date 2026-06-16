@@ -142,7 +142,10 @@ async function checkAlerts(){
 // TABS
 const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze'];
 const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze'};
+function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
+function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
+  closeMobileNav();
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   const an=document.getElementById(NAV_MAP[t]);if(an)an.classList.add('active');
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
