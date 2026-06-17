@@ -181,24 +181,13 @@
       </div>
       <!-- FERIE -->
       <div class="panel" id="panel-ferie">
-        <div class="page-header"><h1>Ferie e permessi</h1><p>Gestisci le tue assenze e visualizza quelle del team</p></div>
+        <div class="page-header"><h1>Ferie e permessi</h1><p>Clicca su un giorno del tuo nome per aggiungere o rimuovere un'assenza</p></div>
         <div class="card">
-          <div class="card-title"><i class="fa-solid fa-plus"></i> Inserisci assenza</div>
-          <div class="field-row">
-            <div class="field"><label>Data inizio</label><input type="date" id="ferieStart" onchange="checkOverlap()"/></div>
-            <div class="field"><label>Data fine</label><input type="date" id="ferieEnd" onchange="checkOverlap()"/></div>
-            <div class="field" style="max-width:120px"><label>Tipo</label>
-              <select id="ferieTipo"><option>Ferie</option><option>Permesso</option><option>ROL</option><option>Malattia</option></select>
-            </div>
-            <div class="field"><label>Note</label><input type="text" id="ferieNote" placeholder="Facoltativo"/></div>
-            <div><button class="btn btn-ink" onclick="saveFerie()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="card-title" style="margin-bottom:0"><i class="fa-regular fa-calendar-days"></i> Calendario del team</div>
+            <button class="btn btn-ghost2 btn-sm" onclick="exportICS()"><i class="fa-regular fa-calendar"></i> Esporta .ics</button>
           </div>
-          <div id="overlapWarn" class="overlap-warn"></div>
-          <div id="ferieMsg" class="msg"></div>
-          <div style="margin-top:10px"><button class="btn btn-ghost2 btn-sm" onclick="exportICS()"><i class="fa-regular fa-calendar"></i> Esporta .ics</button></div>
-        </div>
-        <div class="card">
-          <div class="card-title"><i class="fa-regular fa-calendar-days"></i> Calendario del team</div>
+          <div id="ferieMsg" class="msg" style="margin-bottom:8px"></div>
           <div class="field-row" style="margin-bottom:12px">
             <div class="field" style="max-width:170px"><label>Mese</label><select id="ferieCalMonth" onchange="renderFerieCalendar()"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="ferieCalYear" onchange="renderFerieCalendar()"></select></div>
@@ -402,6 +391,18 @@
       </div>
     </main>
   </div>
+</div>
+<!-- Ferie day picker -->
+<div class="ferie-picker-overlay" id="feriePickerOverlay" onclick="closeFeriePicker()"></div>
+<div class="ferie-picker-box" id="feriePickerBox">
+  <div class="ferie-picker-title">Aggiungi assenza</div>
+  <div id="feriePickerDate" class="ferie-picker-date"></div>
+  <div class="ferie-picker-btns">
+    <button class="ferie-type-btn" onclick="pickFerieTipo('Ferie')"><span class="ftb-dot" style="background:#A100FF"></span> Ferie</button>
+    <button class="ferie-type-btn" onclick="pickFerieTipo('Malattia')"><span class="ftb-dot" style="background:var(--danger)"></span> Malattia</button>
+    <button class="ferie-type-btn" onclick="pickFerieTipo('Permesso/ROL')"><span class="ftb-dot" style="background:var(--ok)"></span> Permesso / ROL</button>
+  </div>
+  <button class="btn btn-ghost2 btn-sm" onclick="closeFeriePicker()">Annulla</button>
 </div>
 <script src="app.js"></script>
 </body>

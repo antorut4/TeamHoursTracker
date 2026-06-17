@@ -356,7 +356,7 @@ function renderFerieCalendar(){
     const isMe=m===currentUser;
     h+=`<tr style="background:${isMe?'rgba(161,0,255,.07)':mi%2?'var(--stone)':'var(--white)'}"><td style="padding:6px 10px;font-weight:600;font-size:.76rem;color:${isMe?'var(--amber)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap">${m.split(' ')[0]}${isMe?' ★':''}<br><span style="font-weight:400;color:var(--ink-3);font-size:.66rem">${m.split(' ').slice(1).join(' ')}</span></td>`;
     let tot=0;const bt={};
-    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,tipo=md[m][ds];let cb='',dot='';if(tipo){const c=TIPO_C(tipo);cb=`background:${c}18`;dot=`<div style="width:8px;height:8px;border-radius:2px;background:${c};margin:0 auto" title="${tipo}"></div>`;if(!iw&&!ih){tot++;bt[tipo]=(bt[tipo]||0)+1;}}else if(ih)cb='background:var(--amber-bg)';else if(iw)cb='background:var(--stone-2)';h+=`<td style="padding:3px 1px;text-align:center;${cb}">${dot}</td>`;}
+    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,tipo=md[m][ds];let cb='',dot='';if(tipo){const c=TIPO_C(tipo);cb=`background:${c}18`;dot=`<div style="width:8px;height:8px;border-radius:2px;background:${c};margin:0 auto" title="${tipo}"></div>`;if(!iw&&!ih){tot++;bt[tipo]=(bt[tipo]||0)+1;}}else if(ih)cb='background:var(--amber-bg)';else if(iw)cb='background:var(--stone-2)';if(isMe&&!ih&&!iw){const ph=dot||`<div style="width:6px;height:6px;border-radius:50%;border:1.5px dashed rgba(0,0,0,.18);margin:0 auto"></div>`;h+=`<td style="padding:3px 1px;text-align:center;${cb};cursor:pointer" onclick="toggleFerieDay('${ds}')" title="${tipo?tipo+' — clicca per eliminare':'Aggiungi assenza'}">${ph}</td>`;}else{h+=`<td style="padding:3px 1px;text-align:center;${cb}">${dot}</td>`;}}
     h+=`<td style="padding:5px 6px;text-align:center;font-weight:700;color:var(--ink);border-left:2px solid var(--stone-3)">${tot}</td></tr>`;
     sumData.push({name:m,days:tot,bt});
   });
@@ -684,6 +684,36 @@ async function renderRepMine(){
 }
 async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Eliminare la reperibilità di "'+name+'" per "'+prog+'"?',async()=>{showSpinner();try{await call('deleteRep',{id});await reloadAll();}catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderRepTeam();showMsg('repMsg','Reperibilità eliminata.','ok');},'Elimina');}
 // PRESENZE
+// FERIE DAY-CLICK
+let _feriePickerDate=null;
+function toggleFerieDay(dateStr){
+  const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
+  const existing=(_cache.fer||[]).find(f=>f.risorsaId===r.id&&f.start<=dateStr&&f.end>=dateStr);
+  if(existing){
+    const label=existing.start===existing.end?fmt(dateStr):`${fmt(existing.start)} → ${fmt(existing.end)} (${existing.tipo})`;
+    openModal('Rimuovi assenza',`Eliminare l'assenza del ${label}?`,async()=>{
+      showSpinner();try{await call('deleteFerie',{id:existing.id});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+      hideSpinner();renderFerieCalendar();showMsg('ferieMsg','Assenza rimossa.','ok');
+    },'Elimina');
+  }else{showFeriePicker(dateStr);}
+}
+function showFeriePicker(dateStr){
+  _feriePickerDate=dateStr;
+  document.getElementById('feriePickerDate').textContent=fmt(dateStr);
+  document.getElementById('feriePickerOverlay').classList.add('open');
+  document.getElementById('feriePickerBox').classList.add('open');
+}
+function closeFeriePicker(){
+  _feriePickerDate=null;
+  document.getElementById('feriePickerOverlay').classList.remove('open');
+  document.getElementById('feriePickerBox').classList.remove('open');
+}
+async function pickFerieTipo(tipo){
+  const dateStr=_feriePickerDate;closeFeriePicker();if(!dateStr)return;
+  const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
+  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start:dateStr,end:dateStr,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
+}
 let _presWeekOffset=0;
 function _getMonday(offset){const t=new Date(),dow=t.getDay(),diff=dow===0?-6:1-dow,m=new Date(t);m.setDate(t.getDate()+diff+offset*7);m.setHours(0,0,0,0);return m;}
 function _getWeekDays(offset){const mon=_getMonday(offset);return Array.from({length:5},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return localDate(d);});}

@@ -175,6 +175,17 @@ tbody tr:hover td{background:var(--stone)}
 .hamburger-btn:hover{background:rgba(255,255,255,.16)}
 /* Mobile nav overlay */
 .mobile-nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99;backdrop-filter:blur(2px)}
+/* Ferie day picker */
+.ferie-picker-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;backdrop-filter:blur(2px)}
+.ferie-picker-overlay.open{display:block}
+.ferie-picker-box{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:var(--r-xl);padding:28px 24px;z-index:201;width:min(300px,90vw);box-shadow:0 8px 40px rgba(0,0,0,.2);flex-direction:column;align-items:center;gap:14px;text-align:center}
+.ferie-picker-box.open{display:flex}
+.ferie-picker-title{font-family:var(--f-display);font-size:1.05rem;font-weight:700;color:var(--ink)}
+.ferie-picker-date{font-size:.83rem;color:var(--ink-3);margin-top:-8px}
+.ferie-picker-btns{display:flex;flex-direction:column;gap:8px;width:100%}
+.ferie-type-btn{display:flex;align-items:center;gap:11px;padding:11px 16px;border:1.5px solid var(--stone-3);border-radius:var(--r);background:var(--stone);color:var(--ink);font-family:var(--f-body);font-size:.88rem;font-weight:600;cursor:pointer;transition:all .15s;width:100%}
+.ferie-type-btn:hover{background:var(--white);border-color:var(--ink-2);transform:translateY(-1px)}
+.ftb-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0;display:inline-block}
 /* ── Media queries (devono stare DOPO i default per poterli sovrascrivere) ── */
 @media(max-width:768px){
   :root{--sidebar:0px}
