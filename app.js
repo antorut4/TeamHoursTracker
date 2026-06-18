@@ -131,13 +131,17 @@ async function initApp(){
   await renderFerieList();
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
-  if(isAdmin){await renderResourceList();await renderProjectList();await populateSearchByProject();}
+  if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     await renderResourceList();
     // Nascondi i card riservati al super-admin
     ['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
     // Nascondi il filtro team lead nell'elenco risorse (il manager vede solo il suo team)
     const flEl=document.getElementById('filterResLead');if(flEl)flEl.closest('.search-row') && (flEl.style.display='none');
+    // Nascondi il selettore manager nel form aggiungi risorsa (sarà auto-assegnato)
+    const mgrFieldRes=document.getElementById('resManagerSel')?.closest('.field');if(mgrFieldRes)mgrFieldRes.style.display='none';
+    // Nascondi il selettore manager nel form modifica risorsa
+    const mgrFieldEdit=document.getElementById('editManagerSel')?.closest('.field');if(mgrFieldEdit)mgrFieldEdit.style.display='none';
     // Aggiorna intestazione pannello admin
     const ph=document.querySelector('#panel-admin .page-header p');if(ph)ph.textContent='Gestione delle tue risorse';
   }
@@ -530,7 +534,7 @@ async function addResource(){
   addProgettoTag('res');
   const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim();
   const progetti=getProgettoSelected('res');
-  const managerName=document.getElementById('resManagerSel')?.value||'';
+  const managerName=isTeamLead?currentUser:(document.getElementById('resManagerSel')?.value||'');
   const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
   const managerId=managerRes?managerRes.id:null;
   const isManager=!!(document.getElementById('resIsManager')?.checked);
@@ -551,7 +555,7 @@ async function renderResourceList(){
   const el=document.getElementById('resourceList');if(!el)return;
   if(!RESOURCES.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa ancora.</p>';return;}
   let filtered=RESOURCES.filter(r=>{
-    if(isTeamLead&&!isAdmin&&!r.progetti.some(p=>_prjTLByName[p]===currentUser))return false;
+    if(isTeamLead&&!isAdmin&&r.managerName!==currentUser)return false;
     if(lf&&!r.progetti.some(p=>_prjTLByName[p]===lf))return false;
     if(search&&!r.fullName.toLowerCase().includes(search))return false;
     return true;
