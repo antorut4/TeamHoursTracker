@@ -115,6 +115,7 @@ async function launchApp(){
   navVis('navRiepilogo',isAdmin||isTeamLead);
   navVis('navTrend',false);
   navVis('navOverview',isAdmin||isTeamLead);
+  navVis('navRepOverview',isTeamLead&&!isAdmin);
   navVis('navSectionAdmin',isAdmin||isTeamLead);
   navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
@@ -169,7 +170,7 @@ async function checkAlerts(){
 }
 // TABS
 const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze'];
-const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze'};
+const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -183,6 +184,7 @@ async function showTab(t){
   if(t==='admin')renderAdminFerieCalendar();
   if(t==='riepilogo')loadRiepilogo().catch(console.error);
   if(t==='reperibilita')initRepPanel();
+  if(t==='rep-overview')initRepOverviewPanel();
   if(t==='ferie'&&!isAdmin){renderFerieCalendar();}
   if(t==='presenze')initPresenzePanel();
 }
@@ -809,6 +811,52 @@ async function renderRepMine(){
   el.innerHTML=html;
 }
 async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Eliminare la reperibilità di "'+name+'" per "'+prog+'"?',async()=>{showSpinner();try{await call('deleteRep',{id});await reloadAll();}catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderRepTeam();showMsg('repMsg','Reperibilità eliminata.','ok');},'Elimina');}
+// OVERVIEW REPERIBILITÀ (solo manager)
+async function initRepOverviewPanel(){
+  const now=new Date();
+  const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
+  popSel('repOvMonth',mOpts,now.getMonth());popSel('repOvYear',yOpts,now.getFullYear());
+  await renderRepOverview();
+}
+async function renderRepOverview(){
+  const month=+document.getElementById('repOvMonth').value,year=+document.getElementById('repOvYear').value;
+  const el=document.getElementById('repOverviewContent');if(!el)return;
+  const myResources=RESOURCES.filter(r=>r.managerName===currentUser);
+  const myResIds=new Set(myResources.map(r=>r.id));
+  const repEntries=(_cache.rep||[]).filter(r=>r.anno===year&&r.mese===month&&myResIds.has(r.risorsaId));
+  if(!repEntries.length){el.innerHTML='<div class="card"><p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata per questo mese.</p></div>';return;}
+  const byProject={};repEntries.forEach(r=>{if(!byProject[r.progetto])byProject[r.progetto]=[];byProject[r.progetto].push(r);});
+  const dim=new Date(year,month+1,0).getDate(),hol=getHol(year),DN=['D','L','M','M','G','V','S'];
+  let html='';
+  for(const [progetto,entries] of Object.entries(byProject).sort(([a],[b])=>a.localeCompare(b))){
+    const resOnPrj=myResources.filter(r=>entries.some(e=>e.risorsaId===r.id));
+    const tl=_prjTLByName[progetto]||'—';
+    html+=`<div class="card" style="margin-bottom:16px">`;
+    html+=`<div class="card-title"><i class="fa-solid fa-folder"></i> ${progetto} <span style="font-size:.72rem;color:var(--ink-3);font-weight:400;margin-left:6px">TL: ${tl}</span></div>`;
+    html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
+    html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
+    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
+      html+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih||iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
+    html+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
+    html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th></tr></thead><tbody>`;
+    resOnPrj.forEach((r,ri)=>{
+      const entry=entries.find(e=>e.risorsaId===r.id);
+      const days=entry?new Set(entry.giorni):new Set();
+      html+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
+      html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
+      for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d);
+        html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?'rgba(0,123,255,.12)':ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?'var(--info)':'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white">${on?'✓':''}</div></td>`;}
+      const earn=entry?calcRepEarningsFromDays(entry.giorni,year,month):0;
+      html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem">${days.size}</td>`;
+      html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;color:var(--ok);font-size:.72rem;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
+    });
+    html+=`</tbody></table></div>`;
+    const totGg=entries.reduce((s,e)=>s+e.giorni.length,0),totEur=entries.reduce((s,e)=>s+calcRepEarningsFromDays(e.giorni,year,month),0);
+    html+=`<div style="margin-top:10px;padding:8px 12px;background:var(--stone);border-radius:var(--r);display:flex;gap:16px;flex-wrap:wrap;font-size:.78rem">`;
+    html+=`<span><b>${resOnPrj.length}</b> risorsa/e</span><span><b>${totGg}</b> giorni totali</span><span style="color:var(--ok);font-weight:700">€${totEur} totale</span></div></div>`;
+  }
+  el.innerHTML=html;
+}
 // PRESENZE
 // FERIE DAY-CLICK
 let _feriePickerDate=null;

@@ -103,6 +103,7 @@
         <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Riepilogo ore</div>
         <div class="nav-item" id="navTrend" onclick="showTab('trend')" style="display:none"><i class="fa-solid fa-chart-line"></i> Trend</div>
         <div class="nav-item" id="navOverview" onclick="showTab('overview')" style="display:none"><i class="fa-regular fa-calendar-days"></i> Overview ferie</div>
+        <div class="nav-item" id="navRepOverview" onclick="showTab('rep-overview')" style="display:none"><i class="fa-solid fa-tower-broadcast"></i> Ov. Reperibilità</div>
         <div class="nav-section" id="navSectionAdmin" style="display:none">Sistema</div>
         <div class="nav-item" id="navAdmin" onclick="showTab('admin')" style="display:none"><i class="fa-solid fa-gear"></i> Admin</div>
       </nav>
@@ -284,6 +285,18 @@
           <div class="table-wrap" id="presenzeGrid"></div>
           <div id="presenzeMsg" class="msg" style="margin-top:10px"></div>
         </div>
+      </div>
+      <!-- OVERVIEW REPERIBILITÀ -->
+      <div class="panel" id="panel-rep-overview">
+        <div class="page-header"><h1>Overview Reperibilità</h1><p>Reperibilità del team per progetto e per mese</p></div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-sliders"></i> Filtri</div>
+          <div class="field-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+            <div class="field" style="min-width:140px"><label>Mese</label><select id="repOvMonth" onchange="renderRepOverview()"></select></div>
+            <div class="field" style="min-width:100px"><label>Anno</label><select id="repOvYear" onchange="renderRepOverview()"></select></div>
+          </div>
+        </div>
+        <div id="repOverviewContent"></div>
       </div>
       <!-- ADMIN -->
       <div class="panel" id="panel-admin">
