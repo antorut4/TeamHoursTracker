@@ -94,20 +94,20 @@ async function launchApp(){
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
-  document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Team Lead':'Collaboratore');
+  document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':'Collaboratore');
   const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
   navVis('navFerie',!isAdmin);
   navVis('navRep',!isAdmin);
   navVis('navPresenze',true);
-  navVis('navSectionTeam',isAdmin);
-  navVis('navRiepilogo',isAdmin);
+  navVis('navSectionTeam',isAdmin||isTeamLead);
+  navVis('navRiepilogo',isAdmin||isTeamLead);
   navVis('navTrend',false);
-  navVis('navOverview',isAdmin);
-  navVis('navSectionAdmin',isAdmin);
-  navVis('navAdmin',isAdmin);
+  navVis('navOverview',isAdmin||isTeamLead);
+  navVis('navSectionAdmin',isAdmin||isTeamLead);
+  navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
-  if(isAdmin)showTab('admin');else showTab('ore');
+  if(isAdmin||isTeamLead)showTab('admin');else showTab('ore');
 }
 // INIT
 async function initApp(){
@@ -121,6 +121,15 @@ async function initApp(){
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
   if(isAdmin){await renderResourceList();await renderProjectList();await populateSearchByProject();}
+  else if(isTeamLead){
+    await renderResourceList();
+    // Nascondi i card riservati al super-admin
+    ['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+    // Nascondi il filtro team lead nell'elenco risorse (il manager vede solo il suo team)
+    const flEl=document.getElementById('filterResLead');if(flEl)flEl.closest('.search-row') && (flEl.style.display='none');
+    // Aggiorna intestazione pannello admin
+    const ph=document.querySelector('#panel-admin .page-header p');if(ph)ph.textContent='Gestione delle tue risorse';
+  }
 }
 function refreshDropdowns(){
   const leads=getLeads(),lOpts=[{v:'',l:'Tutti'},...leads.map(l=>({v:l,l:l}))];
@@ -205,7 +214,8 @@ async function renderMyOre(){
 // RIEPILOGO
 async function loadRiepilogo(){
   const month=+document.getElementById('riepilogoMonth').value,year=+document.getElementById('riepilogoYear').value;
-  const lf=document.getElementById('riepilogoLead').value,members=getMembers(lf);
+  const _rLeadFld=document.getElementById('riepilogoLead');if(_rLeadFld)_rLeadFld.closest('.field').style.display=(isTeamLead&&!isAdmin)?'none':'';
+  const lf=(isTeamLead&&!isAdmin)?currentUser:(_rLeadFld?.value||''),members=getMembers(lf);
   let _hrs={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)_hrs[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
   const av=wHours(year,month,1)+wHours(year,month,2);
   const canWbs=isAdmin||isTeamLead;
@@ -358,7 +368,8 @@ async function renderFerieList(){
 // OVERVIEW
 async function renderOverview(){
   const month=+document.getElementById('ovMonth').value,year=+document.getElementById('ovYear').value;
-  const lf=document.getElementById('ovLead').value,members=getMembers(lf);
+  const _ovLeadFld=document.getElementById('ovLead');if(_ovLeadFld)_ovLeadFld.closest('.field').style.display=(isTeamLead&&!isAdmin)?'none':'';
+  const lf=(isTeamLead&&!isAdmin)?currentUser:(_ovLeadFld?.value||''),members=getMembers(lf);
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
   let allFer=(_read(K_FER,[])||[]).map(f=>{const r=RESOURCES.find(x=>x.id===f.risorsaId);return r?{user:r.fullName,start:f.start,end:f.end,tipo:f.tipo}:null;}).filter(Boolean);
   const DN=['D','L','M','M','G','V','S'];
@@ -442,7 +453,9 @@ function toggleAcc(btn){const body=btn.closest('.card').querySelector('.acc-body
 // PROGETTI
 async function populateProgettoSelect(prefix,selected=[]){
   const sel=document.getElementById(prefix+'ProgettoSel');if(!sel)return;
-  const prjs=await getProjects();sel.innerHTML='<option value="">— Progetto —</option>';
+  let prjs=await getProjects();
+  if(isTeamLead&&!isAdmin){const myP=new Set(Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p));prjs=prjs.filter(p=>myP.has(p));}
+  sel.innerHTML='<option value="">— Progetto —</option>';
   prjs.sort().forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o);});
   const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return;tagsDiv.innerHTML='';
   const selArr=Array.isArray(selected)?selected:(selected?[selected]:[]);
@@ -523,6 +536,7 @@ async function renderResourceList(){
   const el=document.getElementById('resourceList');if(!el)return;
   if(!RESOURCES.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa ancora.</p>';return;}
   let filtered=RESOURCES.filter(r=>{
+    if(isTeamLead&&!isAdmin&&!r.progetti.some(p=>_prjTLByName[p]===currentUser))return false;
     if(lf&&!r.progetti.some(p=>_prjTLByName[p]===lf))return false;
     if(search&&!r.fullName.toLowerCase().includes(search))return false;
     return true;
@@ -554,7 +568,7 @@ async function changeAdminPwd(){const p1=document.getElementById('newPwd1').valu
 // EXPORT
 async function exportExcel(){
   const month=+document.getElementById('riepilogoMonth').value,year=+document.getElementById('riepilogoYear').value;
-  const lf=document.getElementById('riepilogoLead').value,members=getMembers(lf);
+  const lf=(isTeamLead&&!isAdmin)?currentUser:(document.getElementById('riepilogoLead')?.value||''),members=getMembers(lf);
   let all={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)all[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
   const allFerRows=(_read(K_FER,[])||[]).map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return res?{user:res.fullName,start:f.start,end:f.end,tipo:f.tipo,note:f.note}:null;}).filter(Boolean);
   const av=wHours(year,month,1)+wHours(year,month,2);
