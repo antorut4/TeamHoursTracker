@@ -115,7 +115,7 @@ async function launchApp(){
   navVis('navRiepilogo',isAdmin||isTeamLead);
   navVis('navTrend',false);
   navVis('navOverview',isAdmin||isTeamLead);
-  navVis('navRepOverview',isTeamLead&&!isAdmin);
+  navVis('navRepOverview',isAdmin||isTeamLead);
   navVis('navSectionAdmin',isAdmin||isTeamLead);
   navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
@@ -821,7 +821,7 @@ async function initRepOverviewPanel(){
 async function renderRepOverview(){
   const month=+document.getElementById('repOvMonth').value,year=+document.getElementById('repOvYear').value;
   const el=document.getElementById('repOverviewContent');if(!el)return;
-  const myResources=RESOURCES.filter(r=>r.managerName===currentUser);
+  const myResources=isAdmin?RESOURCES:RESOURCES.filter(r=>r.managerName===currentUser);
   const myResIds=new Set(myResources.map(r=>r.id));
   const repEntries=(_cache.rep||[]).filter(r=>r.anno===year&&r.mese===month&&myResIds.has(r.risorsaId));
   if(!repEntries.length){el.innerHTML='<div class="card"><p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata per questo mese.</p></div>';return;}
