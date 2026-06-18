@@ -24,7 +24,7 @@ async function reloadAll(){
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
@@ -41,10 +41,8 @@ const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null
 let currentUser=null,isAdmin=false,isTeamLead=false,RESOURCES=[];
 function simpleHash(str){let h=5381;for(let i=0;i<str.length;i++)h=((h<<5)+h)+str.charCodeAt(i);return(h>>>0).toString(36);}
 function _resByName(name){return RESOURCES.find(x=>x.fullName===name);}
-async function userHasPwd(name){const r=_resByName(name);if(!r)return false;return!!(await call('userHasPwd',{risorsaId:r.id}));}
-async function checkUserPwd(name,pwd){const r=_resByName(name);if(!r)return false;return!!(await call('checkUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)}));}
-async function setUserPwd(name,pwd){const r=_resByName(name);if(!r)return;await call('setUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)});}
-async function resetUserPwd(name){const r=_resByName(name);if(!r)return;await call('resetUserPwd',{risorsaId:r.id});}
+function _resByEmail(email){const e=(email||'').toLowerCase().trim();return RESOURCES.find(x=>x.email===e);}
+let _loginRisorsaId=null;
 function getMembers(manager){return manager?RESOURCES.filter(r=>r.managerName===manager).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
 function getLeadTeam(){return RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);}
 function getLeads(){return RESOURCES.filter(r=>r.isManager).map(r=>r.fullName).sort();}
@@ -65,30 +63,42 @@ function MC(){document.getElementById('MO').classList.remove('open');_mcb=null;}
 document.getElementById('MK').onclick=()=>{document.getElementById('MO').classList.remove('open');if(_mcb){const f=_mcb;_mcb=null;f();}};
 // LOGIN
 function showStep(id){['stepSelect','stepFirstAccess','stepPwd','stepAdmin'].forEach(s=>document.getElementById(s).style.display=s===id?'block':'none');}
-function goStepSelect(){showStep('stepSelect');}
+function goStepSelect(){document.getElementById('loginSub').textContent='Inserisci la tua email per accedere';showStep('stepSelect');document.getElementById('loginEmail').value='';document.getElementById('errEmail').style.display='none';}
 function goAdminLogin(){document.getElementById('loginSub').textContent='Accesso amministratore';showStep('stepAdmin');document.getElementById('adminPwd').value='';document.getElementById('errAdmin').style.display='none';}
-async function goStepPwd(){
-  const val=document.getElementById('loginSel').value;if(!val){document.getElementById('errSel').style.display='block';return;}document.getElementById('errSel').style.display='none';
-  let has=false;showSpinner();try{has=await userHasPwd(val);}catch(e){hideSpinner();alert('Errore di connessione: '+e.message);return;}hideSpinner();
-  if(!has){document.getElementById('loginSub').textContent=`Benvenuto/a, ${val}`;showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';}
-  else{document.getElementById('loginSub').textContent='Bentornato/a';document.getElementById('loginWhoLabel').textContent=val;showStep('stepPwd');document.getElementById('pwdInput').value='';document.getElementById('errPwd').style.display='none';setTimeout(()=>document.getElementById('pwdInput').focus(),100);}
+async function goStepPwdByEmail(){
+  const email=document.getElementById('loginEmail').value.trim();
+  const errEl=document.getElementById('errEmail');
+  if(!email||!email.includes('@')){errEl.textContent='Inserisci un indirizzo email valido.';errEl.style.display='block';return;}
+  const r=_resByEmail(email);
+  if(!r){errEl.textContent='Nessun account trovato per questa email.';errEl.style.display='block';return;}
+  errEl.style.display='none';_loginRisorsaId=r.id;
+  let has=false;showSpinner();try{has=await call('userHasPwd',{risorsaId:r.id});}catch(e){hideSpinner();alert('Errore di connessione: '+e.message);return;}hideSpinner();
+  if(!has){document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';}
+  else{document.getElementById('loginSub').textContent='Bentornato/a';document.getElementById('loginWhoLabel').textContent=r.fullName;showStep('stepPwd');document.getElementById('pwdInput').value='';document.getElementById('errPwd').style.display='none';setTimeout(()=>document.getElementById('pwdInput').focus(),100);}
 }
 async function doFirstAccess(){
-  const name=document.getElementById('loginSel').value,p1=document.getElementById('pwd1stA').value,p2=document.getElementById('pwd1stB').value,errEl=document.getElementById('err1st');
-  if(p1.length<6){errEl.textContent='Minimo 6 caratteri.';errEl.style.display='block';return;}if(p1!==p2){errEl.textContent='Le password non coincidono.';errEl.style.display='block';return;}errEl.style.display='none';
-  await setUserPwd(name,p1);currentUser=name;isAdmin=false;await launchApp();
+  if(!_loginRisorsaId)return;
+  const p1=document.getElementById('pwd1stA').value,p2=document.getElementById('pwd1stB').value,errEl=document.getElementById('err1st');
+  if(p1.length<6){errEl.textContent='Minimo 6 caratteri.';errEl.style.display='block';return;}
+  if(p1!==p2){errEl.textContent='Le password non coincidono.';errEl.style.display='block';return;}
+  errEl.style.display='none';
+  showSpinner();try{await call('setUserPwd',{risorsaId:_loginRisorsaId,hash:simpleHash(p1)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
+  const r=RESOURCES.find(x=>x.id===_loginRisorsaId);currentUser=r?r.fullName:'';isAdmin=false;await launchApp();
 }
 async function doUserLogin(){
-  const name=document.getElementById('loginSel').value,pwd=document.getElementById('pwdInput').value;let ok=false;
-  showSpinner();try{ok=await checkUserPwd(name,pwd);}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
-  if(!ok){document.getElementById('errPwd').style.display='block';return;}document.getElementById('errPwd').style.display='none';currentUser=name;isAdmin=false;await launchApp();
+  if(!_loginRisorsaId)return;
+  const pwd=document.getElementById('pwdInput').value;let ok=false;
+  showSpinner();try{ok=await call('checkUserPwd',{risorsaId:_loginRisorsaId,hash:simpleHash(pwd)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
+  if(!ok){document.getElementById('errPwd').style.display='block';return;}
+  document.getElementById('errPwd').style.display='none';
+  const r=RESOURCES.find(x=>x.id===_loginRisorsaId);currentUser=r?r.fullName:'';isAdmin=false;await launchApp();
 }
 async function doAdminLogin(){
   const pwd=document.getElementById('adminPwd').value;let ok=false;
   showSpinner();try{ok=await call('checkAdminPwd',{hash:simpleHash(pwd)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
   if(!ok){document.getElementById('errAdmin').style.display='block';return;}document.getElementById('errAdmin').style.display='none';document.getElementById('adminPwd').value='';currentUser='ADMIN';isAdmin=true;await launchApp();
 }
-function doLogout(){currentUser=null;isAdmin=false;document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';document.getElementById('loginSub').textContent='Seleziona il tuo nome per accedere';document.getElementById('loginSel').value='';goStepSelect();}
+function doLogout(){currentUser=null;isAdmin=false;_loginRisorsaId=null;document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
 async function launchApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
@@ -135,8 +145,6 @@ function refreshDropdowns(){
   const leads=getLeads(),lOpts=[{v:'',l:'Tutti'},...leads.map(l=>({v:l,l:l}))];
   ['riepilogoLead','trendLead','ovLead','adminFerLead','filterResLead'].forEach(id=>popSel(id,lOpts,''));
   popSel('filterMembro',[{v:'',l:'Tutti i membri'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))],'');
-  const sl=document.getElementById('loginSel');sl.innerHTML='<option value="">— Seleziona il tuo nome —</option>';
-  RESOURCES.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;sl.appendChild(o);});
   const tlOpts=[{v:'',l:'— Nessuno —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
   popSel('newPrjTLSel',tlOpts,'');
   // selettori manager nel form aggiungi/modifica risorsa
@@ -524,10 +532,13 @@ async function addResource(){
   const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
   const managerId=managerRes?managerRes.id:null;
   const isManager=!!(document.getElementById('resIsManager')?.checked);
+  const email=(document.getElementById('resEmail')?.value||'').trim().toLowerCase()||null;
   if(!nome||!cognome){showMsg('addResMsg','Nome e Cognome obbligatori.','err');return;}
+  if(!email){showMsg('addResMsg','Email obbligatoria.','err');return;}
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
-  showSpinner();try{await call('addResource',{nome,cognome,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('resNome').value='';document.getElementById('resCognome').value='';
+  if(document.getElementById('resEmail'))document.getElementById('resEmail').value='';
   if(document.getElementById('resIsManager'))document.getElementById('resIsManager').checked=false;
   populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
@@ -551,19 +562,20 @@ async function renderResourceList(){
     const prjMeta=(r.progetti||[]).join(' · ')||'—';
     const mgrBadge=r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
     const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${r.managerName}</span> · `:'';
-    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${mgrMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${r.email}</span> · `:'';
+    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
 }
-async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{await resetUserPwd(name);await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata.','ok');},'Reset');}
+async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{const rid=RESOURCES[idx].id;await call('resetUserPwd',{risorsaId:rid});await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata.','ok');},'Reset');}
 function startEdit(idx){
   const r=RESOURCES[idx];
   document.getElementById('editIdx').value=idx;
   document.getElementById('editNome').value=r.nome;
   document.getElementById('editCognome').value=r.cognome;
   populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean));
-  // pre-popola manager e isManager
+  const eeEl=document.getElementById('editEmail');if(eeEl)eeEl.value=r.email||'';
   const emSel=document.getElementById('editManagerSel');if(emSel)emSel.value=r.managerName||'';
   const emChk=document.getElementById('editIsManager');if(emChk)emChk.checked=!!r.isManager;
   const ec=document.getElementById('editCard');ec.style.display='block';
@@ -580,8 +592,9 @@ async function saveEdit(){
   const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
   const managerId=managerRes?managerRes.id:null;
   const isManager=!!(document.getElementById('editIsManager')?.checked);
+  const email=(document.getElementById('editEmail')?.value||'').trim().toLowerCase()||null;
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}

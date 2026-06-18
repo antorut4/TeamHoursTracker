@@ -14,7 +14,7 @@ const sql = neon(process.env.DATABASE_URL);
 async function bootstrap(){
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows] = await Promise.all([
     sql`SELECT id, nome, team_lead_id FROM progetti ORDER BY nome`,
-    sql`SELECT id, nome, cognome, full_name, manager_id, is_manager FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
@@ -70,7 +70,8 @@ async function deleteProject(p){ await sql`DELETE FROM progetti WHERE nome=${p.n
 async function addResource(p){
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
-  const [r] = await sql`INSERT INTO risorse (nome, cognome, manager_id, is_manager) VALUES (${p.nome}, ${p.cognome}, ${managerId}, ${isManager}) RETURNING id`;
+  const email = p.email || null;
+  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}) RETURNING id`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
               SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
@@ -79,7 +80,8 @@ async function addResource(p){
 async function saveEdit(p){
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
-  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, manager_id=${managerId}, is_manager=${isManager} WHERE id=${p.id}`;
+  const email = p.email || null;
+  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager} WHERE id=${p.id}`;
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)

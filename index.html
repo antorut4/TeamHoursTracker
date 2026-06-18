@@ -29,14 +29,14 @@
     <div class="login-wordmark">
       <div class="wm-icon" style="font-size:28px;font-weight:900;letter-spacing:-.05em;font-family:sans-serif">&gt;</div>
       <h1>Team Hours</h1>
-      <p id="loginSub">Seleziona il tuo nome per accedere</p>
+      <p id="loginSub">Inserisci la tua email per accedere</p>
     </div>
     <div class="login-card">
       <div id="stepSelect">
-        <label for="loginSel">Membro del team</label>
-        <select id="loginSel"><option value="">— Seleziona il tuo nome —</option></select>
-        <div class="login-err" id="errSel">Seleziona un nome dalla lista.</div>
-        <button class="btn-primary" onclick="goStepPwd()">Continua</button>
+        <label for="loginEmail">Email aziendale</label>
+        <input type="email" id="loginEmail" placeholder="nome.cognome@accenture.com" onkeydown="if(event.key==='Enter')goStepPwdByEmail()"/>
+        <div class="login-err" id="errEmail">Email non trovata.</div>
+        <button class="btn-primary" onclick="goStepPwdByEmail()">Continua</button>
         <button class="btn-ghost" onclick="goAdminLogin()">Accesso amministratore</button>
       </div>
       <div id="stepFirstAccess" style="display:none">
@@ -297,6 +297,7 @@
             <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
               <div class="field"><label>Nome *</label><input type="text" id="resNome" placeholder="Mario" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
+              <div class="field" style="min-width:210px"><label>Email *</label><input type="email" id="resEmail" placeholder="nome.cognome@accenture.com"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="resManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
@@ -337,6 +338,7 @@
             <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
               <div class="field"><label>Nome *</label><input type="text" id="editNome"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
+              <div class="field" style="min-width:210px"><label>Email</label><input type="email" id="editEmail" placeholder="nome.cognome@accenture.com"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="editManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
