@@ -12,15 +12,21 @@ const sql = neon(process.env.DATABASE_URL);
 
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
 async function bootstrap(){
-  const [progetti, risorse, allocazioni, ore, ferie, rep] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows] = await Promise.all([
     sql`SELECT id, nome, team_lead_id FROM progetti ORDER BY nome`,
     sql`SELECT id, nome, cognome, full_name FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
-    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`
+    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`
   ]);
-  return { progetti, risorse, allocazioni, ore, ferie, rep };
+  const wbs = {};
+  wbsRows.forEach(r => {
+    const key = r.chiave.substring(4); // strip 'wbs_' prefix → '{risorsaId}_{anno}_{mese}'
+    try { wbs[key] = JSON.parse(r.valore); } catch {}
+  });
+  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs };
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -122,6 +128,14 @@ async function setUserPwd(p){
             ON CONFLICT (risorsa_id) DO UPDATE SET pwd_hash=EXCLUDED.pwd_hash, updated_at=NOW()`;
 }
 async function resetUserPwd(p){ await sql`DELETE FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`; }
+
+// ── WBS (stored in config as wbs_{risorsaId}_{anno}_{mese}) ──
+async function saveWbs(p){
+  const chiave = `wbs_${p.risorsaId}_${p.anno}_${p.mese}`;
+  const valore = JSON.stringify(p.entries || []);
+  await sql`INSERT INTO config (chiave, valore) VALUES (${chiave}, ${valore})
+            ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+}
 async function checkAdminPwd(p){
   const [r] = await sql`SELECT 1 FROM config WHERE chiave='admin_pwd' AND valore=${p.hash}`;
   return !!r;
@@ -136,7 +150,8 @@ const ACTIONS = {
   bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
-  userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd
+  userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
+  saveWbs
 };
 
 export async function handler(event){

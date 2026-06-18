@@ -9,7 +9,7 @@ async function call(action,payload){
   return j.data;
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
-let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[]};
+let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{}};
 let _prjIdByName={},_prjNameById={},_prjTLByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
@@ -29,9 +29,11 @@ async function reloadAll(){
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}));
+  _cache.wbs=d.wbs||{};
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
+function getWbsForMember(risorsaId,anno,mese){return _cache.wbs[`${risorsaId}_${anno}_${mese}`]||[];}
 const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':'#007A4C';
 const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
@@ -163,9 +165,20 @@ async function loadOreForm(){
   const month=+document.getElementById('oreMonth').value,year=+document.getElementById('oreYear').value;
   const h1=wHours(year,month,1),h2=wHours(year,month,2);
   const box=document.getElementById('oreInfoBox');box.style.display='block';
-  box.innerHTML=`<i class="fa-regular fa-calendar" style="margin-right:7px"></i><b>${MONTHS[month]} ${year}</b> &nbsp;—&nbsp; I quindicina: <b>${h1}h</b> &nbsp;|&nbsp; II quindicina: <b>${h2}h</b>`;
   const r=RESOURCES.find(x=>x.fullName===currentUser);let e={};
   if(r){const rec=(_read(K_HRS,[])||[]).find(o=>o.risorsaId===r.id&&o.anno===year&&o.mese===month);if(rec)e=rec;}
+  let wbsHtml='';
+  if(r){
+    const wbs=getWbsForMember(r.id,year,month);
+    if(wbs.length>0){
+      const q1=wbs.filter(x=>x.q==='1Q'),q2=wbs.filter(x=>x.q==='2Q');
+      wbsHtml=`<div class="wbs-info-box"><div class="wbs-info-label"><i class="fa-solid fa-code-branch"></i> WBS assegnate dal manager</div><div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px">`;
+      if(q1.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">I Quindicina</div>${q1.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` &nbsp;<b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}</div>`).join('')}</div>`;
+      if(q2.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">II Quindicina</div>${q2.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` &nbsp;<b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}</div>`).join('')}</div>`;
+      wbsHtml+=`</div></div>`;
+    }
+  }
+  box.innerHTML=`<i class="fa-regular fa-calendar" style="margin-right:7px"></i><b>${MONTHS[month]} ${year}</b> &nbsp;—&nbsp; I quindicina: <b>${h1}h</b> &nbsp;|&nbsp; II quindicina: <b>${h2}h</b>${wbsHtml}`;
   document.getElementById('ore1').value=e.ore_q1!=null?e.ore_q1:h1;document.getElementById('note1').value=e.note_q1||'';
   document.getElementById('ore2').value=e.ore_q2!=null?e.ore_q2:h2;document.getElementById('note2').value=e.note_q2||'';
 }
@@ -195,13 +208,68 @@ async function loadRiepilogo(){
   const lf=document.getElementById('riepilogoLead').value,members=getMembers(lf);
   let _hrs={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)_hrs[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
   const av=wHours(year,month,1)+wHours(year,month,2);
-  let h='<div class="table-wrap"><table><thead><tr><th>Risorsa</th><th>Team Lead</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th>Stato</th></tr></thead><tbody>';
-  if(!members.length)h+='<tr><td colspan="7" style="text-align:center;color:var(--ink-3)">Nessuna risorsa</td></tr>';
-  members.forEach(m=>{const lead=getLeadForMember(m),e=_hrs[m];
-    if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td></tr>`;
-    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td></tr>`;}
+  const canWbs=isAdmin||isTeamLead;
+  const cols=canWbs?8:7;
+  let h=`<div class="table-wrap"><table><thead><tr><th>Risorsa</th><th>Team Lead</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th>Stato</th>${canWbs?'<th></th>':''}</tr></thead><tbody>`;
+  if(!members.length)h+=`<tr><td colspan="${cols}" style="text-align:center;color:var(--ink-3)">Nessuna risorsa</td></tr>`;
+  members.forEach(m=>{
+    const lead=getLeadForMember(m),e=_hrs[m];
+    const res=RESOURCES.find(x=>x.fullName===m),rid=res?res.id:0;
+    const wbsEntries=res?getWbsForMember(rid,year,month):[];
+    const hasWbs=wbsEntries.length>0;
+    const panelId=`wbsp-${rid}-${month}-${year}`;
+    const wbsTd=canWbs?`<td style="white-space:nowrap"><button class="btn btn-ghost2 btn-sm${hasWbs?' btn-wbs-set':''}" onclick="toggleWbsPanel('${panelId}',${rid},${month},${year})"><i class="fa-solid fa-code-branch"></i> WBS</button></td>`:'';
+    if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td>${wbsTd}</tr>`;
+    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td>${wbsTd}</tr>`;}
+    if(canWbs)h+=`<tr id="${panelId}" style="display:none"><td colspan="${cols}" style="padding:0">${buildWbsPanelHtml(rid,m,month,year,wbsEntries)}</td></tr>`;
   });
   document.getElementById('riepilogoTable').innerHTML=h+'</tbody></table></div>';
+}
+function toggleWbsPanel(panelId,risorsaId,month,year){
+  const row=document.getElementById(panelId);if(!row)return;
+  const isOpen=row.style.display!=='none';
+  document.querySelectorAll('[id^="wbsp-"]').forEach(el=>{el.style.display='none';});
+  if(!isOpen)row.style.display='';
+}
+function buildWbsPanelHtml(risorsaId,memberName,month,year,entries){
+  const q1=entries.filter(e=>e.q==='1Q'),q2=entries.filter(e=>e.q==='2Q');
+  function colHtml(q,list){
+    const cid=`wbs-rows-${risorsaId}-${month}-${year}-${q}`;
+    let s=`<div id="${cid}">`;
+    if(!list.length)s+=wbsRowHtml(risorsaId,month,year,q,0,'','');
+    else list.forEach((e,i)=>{s+=wbsRowHtml(risorsaId,month,year,q,i,e.progetto||'',e.codice||'');});
+    s+=`</div><button class="btn btn-ghost2 btn-sm" style="margin-top:6px" onclick="addWbsRow(${risorsaId},${month},${year},'${q}')"><i class="fa-solid fa-plus"></i> Aggiungi WBS</button>`;
+    return s;
+  }
+  const label1=`<div class="wbs-col-head"><span>I</span> Quindicina (1–15)</div>`;
+  const label2=`<div class="wbs-col-head"><span>II</span> Quindicina (16–fine)</div>`;
+  return `<div class="wbs-panel"><div class="wbs-panel-title"><i class="fa-solid fa-code-branch"></i> WBS per <b>${memberName}</b> — ${MONTHS[month]} ${year}</div><div class="wbs-cols"><div class="wbs-col">${label1}${colHtml('1Q',q1)}</div><div class="wbs-col">${label2}${colHtml('2Q',q2)}</div></div><div style="display:flex;gap:10px;align-items:center;margin-top:14px"><button class="btn btn-ink" onclick="saveWbsForMember(${risorsaId},${month},${year})"><i class="fa-solid fa-floppy-disk"></i> Salva WBS</button><div id="wbs-msg-${risorsaId}-${month}-${year}" class="msg"></div></div></div>`;
+}
+function wbsRowHtml(risorsaId,month,year,q,idx,progetto,codice){
+  const rid=`wbsr-${risorsaId}-${month}-${year}-${q}-${idx}`;
+  const pE=(progetto||'').replace(/"/g,'&quot;'),cE=(codice||'').replace(/"/g,'&quot;');
+  return `<div class="wbs-row" id="${rid}"><input type="text" class="wbs-input" placeholder="Nome progetto" value="${pE}"/><input type="text" class="wbs-input wbs-code" placeholder="Codice WBS" value="${cE}"/><button class="btn-icon danger" onclick="removeWbsRow('${rid}')" title="Rimuovi"><i class="fa-solid fa-xmark"></i></button></div>`;
+}
+function addWbsRow(risorsaId,month,year,q){
+  const c=document.getElementById(`wbs-rows-${risorsaId}-${month}-${year}-${q}`);if(!c)return;
+  c.insertAdjacentHTML('beforeend',wbsRowHtml(risorsaId,month,year,q,c.children.length,'',''));
+}
+function removeWbsRow(rowId){const el=document.getElementById(rowId);if(el)el.remove();}
+async function saveWbsForMember(risorsaId,month,year){
+  const entries=[];
+  ['1Q','2Q'].forEach(q=>{
+    const c=document.getElementById(`wbs-rows-${risorsaId}-${month}-${year}-${q}`);if(!c)return;
+    [...c.querySelectorAll('.wbs-row')].forEach(row=>{
+      const inp=row.querySelectorAll('input');
+      const progetto=(inp[0]?.value||'').trim(),codice=(inp[1]?.value||'').trim();
+      if(progetto||codice)entries.push({q,progetto,codice});
+    });
+  });
+  const msgId=`wbs-msg-${risorsaId}-${month}-${year}`;
+  showSpinner();
+  try{await call('saveWbs',{risorsaId,anno:year,mese:month,entries});_cache.wbs[`${risorsaId}_${year}_${month}`]=entries;}
+  catch(err){hideSpinner();showMsg(msgId,'Errore: '+err.message,'err');return;}
+  hideSpinner();showMsg(msgId,'WBS salvata','ok');
 }
 // TREND
 async function renderTrend(){
