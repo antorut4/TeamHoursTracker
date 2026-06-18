@@ -38,7 +38,7 @@ const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':'#007A4C';
 const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
 const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
-let currentUser=null,isAdmin=false,isTeamLead=false,RESOURCES=[];
+let currentUser=null,isAdmin=false,isTeamLead=false,isProjectTL=false,RESOURCES=[];
 function simpleHash(str){let h=5381;for(let i=0;i<str.length;i++)h=((h<<5)+h)+str.charCodeAt(i);return(h>>>0).toString(36);}
 function _resByName(name){return RESOURCES.find(x=>x.fullName===name);}
 function _resByEmail(email){const e=(email||'').toLowerCase().trim();return RESOURCES.find(x=>x.email===e);}
@@ -104,7 +104,8 @@ async function launchApp(){
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&(RESOURCES.find(r=>r.fullName===currentUser)?.isManager||false);
-  document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':'Collaboratore');
+  isProjectTL=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
+  document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':(isProjectTL?'Team Leader':'Collaboratore'));
   const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
   navVis('navFerie',!isAdmin);
@@ -326,7 +327,8 @@ async function renderTrend(){
   ).join('');
 }
 // FERIE RISORSE
-function getFerieRisorseMonitorate(){if(isAdmin)return null;const saved=S.get(K_FRIS)||{};if(saved[currentUser]===undefined)return[currentUser];return saved[currentUser];}
+function getFerieRisorseMonitorate(){if(isAdmin)return null;const saved=S.get(K_FRIS)||{};if(saved[currentUser]===undefined)return getMyProjectColleagues();return saved[currentUser];}
+function getMyProjectColleagues(){const myRes=RESOURCES.find(r=>r.fullName===currentUser);if(!myRes)return[currentUser];const myPrjs=new Set(myRes.progetti||[]);if(!myPrjs.size)return[currentUser];const colleagues=RESOURCES.filter(r=>r.fullName!==currentUser&&(r.progetti||[]).some(p=>myPrjs.has(p))).map(r=>r.fullName).sort((a,b)=>a.localeCompare(b));return[currentUser,...colleagues];}
 function saveFerieRisorse(lista){const saved=S.get(K_FRIS)||{};saved[currentUser]=lista;S.set(K_FRIS,saved);}
 function initFerieRisorseCard(){
   if(isAdmin){document.getElementById('ferieRisorseCard').style.display='none';return;}
@@ -423,7 +425,7 @@ function renderAdminFerieCalendar(){
 }
 function getMyTeamMembers(){
   if(isTeamLead){const t=RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);return t.includes(currentUser)?t:[currentUser,...t];}
-  return[currentUser];
+  return getMyProjectColleagues();
 }
 function renderFerieCalendar(){
   const el=document.getElementById('ferieCalendar');if(!el)return;
@@ -635,11 +637,11 @@ function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return d
 function calcRepEarnings(resourceName,year,month){const gd=_repGridData[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
   const now=new Date();
-  if(isTeamLead||isAdmin){
+  if(isProjectTL||isAdmin){
     document.getElementById('repUserView').style.display='none';document.getElementById('repLeadView').style.display='block';
     const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
     popSel('repMonth',mOpts,now.getMonth());popSel('repYear',yOpts,now.getFullYear());
-    const team=isAdmin?RESOURCES:RESOURCES.filter(r=>getLeadTeam().includes(r.fullName));
+    const team=isAdmin?RESOURCES:RESOURCES.filter(r=>(r.progetti||[]).some(p=>_prjTLByName[p]===currentUser));
     const rFilt=document.getElementById('repFilterRisorsa');rFilt.innerHTML='<option value="">Tutte le risorse</option>';team.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;rFilt.appendChild(o);});
     const yFilt=document.getElementById('repFilterAnno');yFilt.innerHTML='<option value="">Tutti gli anni</option>';yOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;yFilt.appendChild(o);});
     const mFilt=document.getElementById('repFilterMese');mFilt.innerHTML='<option value="">Tutti i mesi</option>';mOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;mFilt.appendChild(o);});
@@ -759,14 +761,14 @@ async function saveReperibilita(){
 }
 async function renderRepTeam(){
   const fRis=document.getElementById('repFilterRisorsa')?.value||'',fAnno=document.getElementById('repFilterAnno')?.value||'',fMese=document.getElementById('repFilterMese')?.value;
-  const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):getLeadTeam();
+  const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):RESOURCES.filter(r=>(r.progetti||[]).some(p=>_prjTLByName[p]===currentUser)).map(r=>r.fullName);
   let filtered=(await getRepStore()).filter(r=>{if(!isAdmin&&!teamNames.includes(r.fullName))return false;if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
   const el=document.getElementById('repTeamList');
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata.</p>';return;}
   const ferieMap={};await Promise.all(filtered.map(async r=>{ferieMap[r.fullName+'|'+r.anno+'|'+r.mese]=await ferieGiorniSet(r.fullName,r.anno,r.mese);}));
   el.innerHTML=filtered.map(r=>{const ferie=ferieMap[r.fullName+'|'+r.anno+'|'+r.mese]||new Set();
     const daysStr=r.giorni.map(d=>{const iF=ferie.has(d);return `<span style="display:inline-block;background:${iF?'var(--warn-bg)':'var(--info-bg)'};color:${iF?'var(--warn)':'var(--info)'};border-radius:4px;padding:1px 6px;margin:1px 2px;font-size:.71rem">${iF?'⚠ ':''}${d} ${MONTHS[r.mese].slice(0,3)}</span>`;}).join('');
-    const canDel=isAdmin||(isTeamLead&&getLeadTeam().includes(r.fullName));
+    const canDel=isAdmin||(isProjectTL&&_prjTLByName[r.progetto]===currentUser);
     const earn=calcRepEarningsFromDays(r.giorni,r.anno,r.mese);
     return `<div class="rep-entry"><div style="flex:1"><div class="re-proj">${r.progetto}</div><div class="re-meta"><b>${r.fullName}</b> · ${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span> · Lead: ${r.teamLead||'—'}</div><div class="re-days">${daysStr}</div></div>${canDel?`<button class="btn-icon danger" onclick="deleteRep(${r.id},'${r.fullName.replace(/'/g,"\\'")}','${r.progetto.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
   }).join('');
