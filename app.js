@@ -134,8 +134,9 @@ async function initApp(){
   if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     await renderResourceList();
-    // Nascondi i card riservati al super-admin
-    ['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+    // Nascondi i card riservati al super-admin (gestione progetti è visibile al manager, filtrata)
+    ['adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+    await renderProjectList();await populateSearchByProject();
     // Nascondi il filtro team lead nell'elenco risorse (il manager vede solo il suo team)
     const flEl=document.getElementById('filterResLead');if(flEl)flEl.closest('.search-row') && (flEl.style.display='none');
     // Nascondi il selettore manager nel form aggiungi risorsa (sarà auto-assegnato)
@@ -510,9 +511,10 @@ async function renderResourcesByProject(){
   const tl=_prjTLByName[prj]||'—';
   el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj} · TL: ${tl}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${(r.progetti||[]).join(', ')||'—'}</div></div></div>`).join('');
 }
-async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
+async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(isTeamLead&&!isAdmin)?_getManagerProjects():(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
+function _getManagerProjects(){const myResPrjs=new Set(RESOURCES.filter(r=>r.managerName===currentUser).flatMap(r=>r.progetti||[]));return(_cache.prj||[]).filter(p=>myResPrjs.has(p)).sort();}
 async function renderProjectList(){
-  const prjsFull=(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
+  const prjsFull=(isTeamLead&&!isAdmin)?_getManagerProjects():(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
   if(!prjsFull.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
   const tlOpts=RESOURCES.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('');
   el.innerHTML=prjsFull.map(p=>{
