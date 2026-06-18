@@ -214,3 +214,7 @@ tbody tr:hover td{background:var(--stone)}
 .wbs-info-box{margin-top:10px;padding:10px 13px;background:var(--amber-bg);border-radius:var(--r);border:1px solid rgba(193,79,255,.25)}
 .wbs-info-label{font-size:.73rem;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:6px}
 .btn-wbs-set{border-color:var(--amber)!important;color:var(--amber)!important}
+/* Manager checkbox */
+.mgr-check-label{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:.82rem;font-weight:500;color:var(--ink-2);padding:7px 11px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--stone);transition:border-color .15s,background .15s;white-space:nowrap}
+.mgr-check-label:has(input:checked){border-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
+.mgr-check-label input{accent-color:var(--amber);width:14px;height:14px}

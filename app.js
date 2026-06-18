@@ -24,7 +24,7 @@ async function reloadAll(){
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,progetti:(byRes[r.id]||[]).filter(Boolean)}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
@@ -45,10 +45,10 @@ async function userHasPwd(name){const r=_resByName(name);if(!r)return false;retu
 async function checkUserPwd(name,pwd){const r=_resByName(name);if(!r)return false;return!!(await call('checkUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)}));}
 async function setUserPwd(name,pwd){const r=_resByName(name);if(!r)return;await call('setUserPwd',{risorsaId:r.id,hash:simpleHash(pwd)});}
 async function resetUserPwd(name){const r=_resByName(name);if(!r)return;await call('resetUserPwd',{risorsaId:r.id});}
-function getMembers(lead){return lead?RESOURCES.filter(r=>r.progetti.some(p=>_prjTLByName[p]===lead)).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
-function getLeadTeam(){const myPrjs=Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p);return[...new Set(RESOURCES.filter(r=>r.progetti.some(p=>myPrjs.includes(p))).map(r=>r.fullName))];}
-function getLeads(){return[...new Set(Object.values(_prjTLByName).filter(Boolean))].sort();}
-function getLeadForMember(fullName){const r=RESOURCES.find(x=>x.fullName===fullName);if(!r)return'—';const tls=[...new Set(r.progetti.map(p=>_prjTLByName[p]).filter(Boolean))];return tls.join(', ')||'—';}
+function getMembers(manager){return manager?RESOURCES.filter(r=>r.managerName===manager).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
+function getLeadTeam(){return RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);}
+function getLeads(){return RESOURCES.filter(r=>r.isManager).map(r=>r.fullName).sort();}
+function getLeadForMember(fullName){const r=RESOURCES.find(x=>x.fullName===fullName);return r?.managerName||'—';}
 function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#A100FF';}
 const HC={};
 function easterSunday(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),month=Math.floor((h+l-7*m+114)/31)-1,day=((h+l-7*m+114)%31)+1;return new Date(year,month,day);}
@@ -93,7 +93,7 @@ async function launchApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
-  isTeamLead=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
+  isTeamLead=!isAdmin&&(RESOURCES.find(r=>r.fullName===currentUser)?.isManager||false);
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':'Collaboratore');
   const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
@@ -139,6 +139,9 @@ function refreshDropdowns(){
   RESOURCES.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;sl.appendChild(o);});
   const tlOpts=[{v:'',l:'— Nessuno —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
   popSel('newPrjTLSel',tlOpts,'');
+  // selettori manager nel form aggiungi/modifica risorsa
+  const mgrOpts=[{v:'',l:'— Nessun manager —'},...leads.map(l=>({v:l,l:l}))];
+  ['resManagerSel','editManagerSel'].forEach(id=>popSel(id,mgrOpts,''));
 }
 // ALERT
 async function checkAlerts(){
@@ -411,13 +414,8 @@ function renderAdminFerieCalendar(){
   el.innerHTML=h+'</tbody></table>';
 }
 function getMyTeamMembers(){
-  const me=RESOURCES.find(r=>r.fullName===currentUser);
-  if(!me)return[currentUser];
-  const myProjects=new Set((me.progetti||[]).filter(Boolean));
-  return RESOURCES.filter(r=>{
-    const rP=(r.progetti||[]).filter(Boolean);
-    return rP.some(p=>myProjects.has(p));
-  }).map(r=>r.fullName);
+  if(isTeamLead){const t=RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);return t.includes(currentUser)?t:[currentUser,...t];}
+  return[currentUser];
 }
 function renderFerieCalendar(){
   const el=document.getElementById('ferieCalendar');if(!el)return;
@@ -453,8 +451,7 @@ function toggleAcc(btn){const body=btn.closest('.card').querySelector('.acc-body
 // PROGETTI
 async function populateProgettoSelect(prefix,selected=[]){
   const sel=document.getElementById(prefix+'ProgettoSel');if(!sel)return;
-  let prjs=await getProjects();
-  if(isTeamLead&&!isAdmin){const myP=new Set(Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p));prjs=prjs.filter(p=>myP.has(p));}
+  const prjs=await getProjects();
   sel.innerHTML='<option value="">— Progetto —</option>';
   prjs.sort().forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o);});
   const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return;tagsDiv.innerHTML='';
@@ -523,11 +520,16 @@ async function addResource(){
   addProgettoTag('res');
   const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim();
   const progetti=getProgettoSelected('res');
+  const managerName=document.getElementById('resManagerSel')?.value||'';
+  const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
+  const managerId=managerRes?managerRes.id:null;
+  const isManager=!!(document.getElementById('resIsManager')?.checked);
   if(!nome||!cognome){showMsg('addResMsg','Nome e Cognome obbligatori.','err');return;}
-  if(!progetti.length){showMsg('addResMsg','Seleziona almeno un progetto.','err');return;}
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
-  showSpinner();try{await call('addResource',{nome,cognome,progetti});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('resNome').value='';document.getElementById('resCognome').value='';populateProgettoSelect('res',[]);
+  showSpinner();try{await call('addResource',{nome,cognome,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  document.getElementById('resNome').value='';document.getElementById('resCognome').value='';
+  if(document.getElementById('resIsManager'))document.getElementById('resIsManager').checked=false;
+  populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
 }
 async function renderResourceList(){
@@ -546,21 +548,40 @@ async function renderResourceList(){
   let h='';
   filtered.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName)).forEach(r=>{
     const idx=RESOURCES.indexOf(r),hasPwd=!!pwds[r.id];
-    const prjMeta=(r.progetti||[]).map(p=>{const tl=_prjTLByName[p];return tl?`${p} <span style="color:var(--amber);font-size:.65rem">→ ${tl.split(' ')[0]}</span>`:p;}).join(' · ')||'—';
-    h+=`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    const prjMeta=(r.progetti||[]).join(' · ')||'—';
+    const mgrBadge=r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
+    const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${r.managerName}</span> · `:'';
+    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${mgrMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
 }
 async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{await resetUserPwd(name);await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata.','ok');},'Reset');}
-function startEdit(idx){const r=RESOURCES[idx];document.getElementById('editIdx').value=idx;document.getElementById('editNome').value=r.nome;document.getElementById('editCognome').value=r.cognome;populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean));const ec=document.getElementById('editCard');ec.style.display='block';const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}ec.scrollIntoView({behavior:'smooth',block:'nearest'});}
+function startEdit(idx){
+  const r=RESOURCES[idx];
+  document.getElementById('editIdx').value=idx;
+  document.getElementById('editNome').value=r.nome;
+  document.getElementById('editCognome').value=r.cognome;
+  populateProgettoSelect('edit',r.progetti||[r.progetto].filter(Boolean));
+  // pre-popola manager e isManager
+  const emSel=document.getElementById('editManagerSel');if(emSel)emSel.value=r.managerName||'';
+  const emChk=document.getElementById('editIsManager');if(emChk)emChk.checked=!!r.isManager;
+  const ec=document.getElementById('editCard');ec.style.display='block';
+  const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');
+  if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}
+  ec.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
 function cancelEdit(){document.getElementById('editCard').style.display='none';}
 async function saveEdit(){
   addProgettoTag('edit');
   const idx=+document.getElementById('editIdx').value,nome=document.getElementById('editNome').value.trim(),cognome=document.getElementById('editCognome').value.trim();
   const progetti=getProgettoSelected('edit');if(!nome||!cognome){showMsg('editMsg','Nome e Cognome obbligatori.','err');return;}
+  const managerName=document.getElementById('editManagerSel')?.value||'';
+  const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
+  const managerId=managerRes?managerRes.id:null;
+  const isManager=!!(document.getElementById('editIsManager')?.checked);
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,progetti});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}

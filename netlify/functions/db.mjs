@@ -14,7 +14,7 @@ const sql = neon(process.env.DATABASE_URL);
 async function bootstrap(){
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows] = await Promise.all([
     sql`SELECT id, nome, team_lead_id FROM progetti ORDER BY nome`,
-    sql`SELECT id, nome, cognome, full_name FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, cognome, full_name, manager_id, is_manager FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
@@ -68,14 +68,18 @@ async function deleteProject(p){ await sql`DELETE FROM progetti WHERE nome=${p.n
 
 // ── risorse + allocazioni (full_name lo genera il trigger; team_lead è testo) ──
 async function addResource(p){
-  const [r] = await sql`INSERT INTO risorse (nome, cognome) VALUES (${p.nome}, ${p.cognome}) RETURNING id`;
+  const managerId = p.managerId || null;
+  const isManager = !!p.isManager;
+  const [r] = await sql`INSERT INTO risorse (nome, cognome, manager_id, is_manager) VALUES (${p.nome}, ${p.cognome}, ${managerId}, ${isManager}) RETURNING id`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
               SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
   }
 }
 async function saveEdit(p){
-  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome} WHERE id=${p.id}`;
+  const managerId = p.managerId || null;
+  const isManager = !!p.isManager;
+  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, manager_id=${managerId}, is_manager=${isManager} WHERE id=${p.id}`;
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
@@ -83,6 +87,15 @@ async function saveEdit(p){
   }
 }
 async function deleteResource(p){ await sql`DELETE FROM risorse WHERE id=${p.id}`; } // CASCADE
+
+// ── manager assignment (separata dall'edit per aggiornamenti rapidi inline) ──
+async function setResourceManager(p){
+  const managerId = p.managerId || null;
+  await sql`UPDATE risorse SET manager_id=${managerId} WHERE id=${p.risorsaId}`;
+}
+async function toggleIsManager(p){
+  await sql`UPDATE risorse SET is_manager=${!!p.value} WHERE id=${p.risorsaId}`;
+}
 
 // ── reperibilità (lookup nomi -> id; upsert su UNIQUE risorsa_id,progetto_id,anno,mese) ──
 async function saveRep(p){
@@ -151,7 +164,7 @@ const ACTIONS = {
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs
+  saveWbs, setResourceManager, toggleIsManager
 };
 
 export async function handler(event){

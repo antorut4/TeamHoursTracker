@@ -294,17 +294,21 @@
             <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-up"></i></button>
           </div>
           <div class="acc-body open">
-            <div class="field-row" style="align-items:flex-end;margin-top:14px">
+            <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
               <div class="field"><label>Nome *</label><input type="text" id="resNome" placeholder="Mario" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
-              <div class="field" style="min-width:240px"><label>Progetti *</label>
+              <div class="field" style="min-width:180px"><label>Manager</label><select id="resManagerSel"><option value="">— Nessun manager —</option></select></div>
+              <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
                   <select id="resProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
                   <button type="button" class="btn btn-ghost2 btn-sm" onclick="addProgettoTag('res')" title="Aggiungi progetto"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 <div class="prj-tags" id="resProgettoTags"></div>
               </div>
-              <div><button class="btn btn-amber" onclick="addResource()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <label class="mgr-check-label"><input type="checkbox" id="resIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+                <button class="btn btn-amber" onclick="addResource()"><i class="fa-solid fa-plus"></i> Aggiungi</button>
+              </div>
             </div>
             <div id="addResMsg" class="msg"></div>
           </div>
@@ -330,9 +334,10 @@
           </div>
           <div class="acc-body open">
             <input type="hidden" id="editIdx"/>
-            <div class="field-row" style="align-items:flex-end;margin-top:14px">
+            <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
               <div class="field"><label>Nome *</label><input type="text" id="editNome"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
+              <div class="field" style="min-width:180px"><label>Manager</label><select id="editManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
                   <select id="editProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
@@ -340,9 +345,12 @@
                 </div>
                 <div class="prj-tags" id="editProgettoTags"></div>
               </div>
-              <div style="display:flex;gap:7px">
-                <button class="btn btn-amber" onclick="saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
-                <button class="btn btn-ghost2" onclick="cancelEdit()">Annulla</button>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <label class="mgr-check-label"><input type="checkbox" id="editIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+                <div style="display:flex;gap:7px">
+                  <button class="btn btn-amber" onclick="saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
+                  <button class="btn btn-ghost2" onclick="cancelEdit()">Annulla</button>
+                </div>
               </div>
             </div>
             <div id="editMsg" class="msg"></div>
