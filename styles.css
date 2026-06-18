@@ -209,7 +209,8 @@ tbody tr:hover td{background:var(--stone)}
 .wbs-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
 .wbs-input{flex:1;height:32px;padding:0 9px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);font-size:.82rem;color:var(--ink);font-family:var(--f-body);outline:none;transition:border-color .15s,box-shadow .15s;width:0}
 .wbs-input:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(161,0,255,.1)}
-.wbs-code{max-width:130px;flex:0 0 130px;font-family:monospace}
+.wbs-code{max-width:120px;flex:0 0 120px;font-family:monospace}
+.wbs-ore{max-width:68px;flex:0 0 68px;text-align:right}
 .wbs-info-box{margin-top:10px;padding:10px 13px;background:var(--amber-bg);border-radius:var(--r);border:1px solid rgba(193,79,255,.25)}
 .wbs-info-label{font-size:.73rem;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:6px}
 .btn-wbs-set{border-color:var(--amber)!important;color:var(--amber)!important}

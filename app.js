@@ -173,8 +173,8 @@ async function loadOreForm(){
     if(wbs.length>0){
       const q1=wbs.filter(x=>x.q==='1Q'),q2=wbs.filter(x=>x.q==='2Q');
       wbsHtml=`<div class="wbs-info-box"><div class="wbs-info-label"><i class="fa-solid fa-code-branch"></i> WBS assegnate dal manager</div><div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px">`;
-      if(q1.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">I Quindicina</div>${q1.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` &nbsp;<b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}</div>`).join('')}</div>`;
-      if(q2.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">II Quindicina</div>${q2.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` &nbsp;<b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}</div>`).join('')}</div>`;
+      if(q1.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">I Quindicina</div>${q1.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${x.ore}h</span>`:''}</div>`).join('')}</div>`;
+      if(q2.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">II Quindicina</div>${q2.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${x.ore}h</span>`:''}</div>`).join('')}</div>`;
       wbsHtml+=`</div></div>`;
     }
   }
@@ -236,8 +236,8 @@ function buildWbsPanelHtml(risorsaId,memberName,month,year,entries){
   function colHtml(q,list){
     const cid=`wbs-rows-${risorsaId}-${month}-${year}-${q}`;
     let s=`<div id="${cid}">`;
-    if(!list.length)s+=wbsRowHtml(risorsaId,month,year,q,0,'','');
-    else list.forEach((e,i)=>{s+=wbsRowHtml(risorsaId,month,year,q,i,e.progetto||'',e.codice||'');});
+    if(!list.length)s+=wbsRowHtml(risorsaId,month,year,q,0,'','','');
+    else list.forEach((e,i)=>{s+=wbsRowHtml(risorsaId,month,year,q,i,e.progetto||'',e.codice||'',e.ore!=null?e.ore:'');});
     s+=`</div><button class="btn btn-ghost2 btn-sm" style="margin-top:6px" onclick="addWbsRow(${risorsaId},${month},${year},'${q}')"><i class="fa-solid fa-plus"></i> Aggiungi WBS</button>`;
     return s;
   }
@@ -245,14 +245,15 @@ function buildWbsPanelHtml(risorsaId,memberName,month,year,entries){
   const label2=`<div class="wbs-col-head"><span>II</span> Quindicina (16–fine)</div>`;
   return `<div class="wbs-panel"><div class="wbs-panel-title"><i class="fa-solid fa-code-branch"></i> WBS per <b>${memberName}</b> — ${MONTHS[month]} ${year}</div><div class="wbs-cols"><div class="wbs-col">${label1}${colHtml('1Q',q1)}</div><div class="wbs-col">${label2}${colHtml('2Q',q2)}</div></div><div style="display:flex;gap:10px;align-items:center;margin-top:14px"><button class="btn btn-ink" onclick="saveWbsForMember(${risorsaId},${month},${year})"><i class="fa-solid fa-floppy-disk"></i> Salva WBS</button><div id="wbs-msg-${risorsaId}-${month}-${year}" class="msg"></div></div></div>`;
 }
-function wbsRowHtml(risorsaId,month,year,q,idx,progetto,codice){
+function wbsRowHtml(risorsaId,month,year,q,idx,progetto,codice,ore){
   const rid=`wbsr-${risorsaId}-${month}-${year}-${q}-${idx}`;
   const pE=(progetto||'').replace(/"/g,'&quot;'),cE=(codice||'').replace(/"/g,'&quot;');
-  return `<div class="wbs-row" id="${rid}"><input type="text" class="wbs-input" placeholder="Nome progetto" value="${pE}"/><input type="text" class="wbs-input wbs-code" placeholder="Codice WBS" value="${cE}"/><button class="btn-icon danger" onclick="removeWbsRow('${rid}')" title="Rimuovi"><i class="fa-solid fa-xmark"></i></button></div>`;
+  const oV=ore!=null&&ore!==''?ore:'';
+  return `<div class="wbs-row" id="${rid}"><input type="text" class="wbs-input" placeholder="Progetto" value="${pE}"/><input type="text" class="wbs-input wbs-code" placeholder="Codice WBS" value="${cE}"/><input type="number" class="wbs-input wbs-ore" placeholder="Ore" min="0" step="0.5" value="${oV}"/><button class="btn-icon danger" onclick="removeWbsRow('${rid}')" title="Rimuovi"><i class="fa-solid fa-xmark"></i></button></div>`;
 }
 function addWbsRow(risorsaId,month,year,q){
   const c=document.getElementById(`wbs-rows-${risorsaId}-${month}-${year}-${q}`);if(!c)return;
-  c.insertAdjacentHTML('beforeend',wbsRowHtml(risorsaId,month,year,q,c.children.length,'',''));
+  c.insertAdjacentHTML('beforeend',wbsRowHtml(risorsaId,month,year,q,c.children.length,'','',''));
 }
 function removeWbsRow(rowId){const el=document.getElementById(rowId);if(el)el.remove();}
 async function saveWbsForMember(risorsaId,month,year){
@@ -262,7 +263,8 @@ async function saveWbsForMember(risorsaId,month,year){
     [...c.querySelectorAll('.wbs-row')].forEach(row=>{
       const inp=row.querySelectorAll('input');
       const progetto=(inp[0]?.value||'').trim(),codice=(inp[1]?.value||'').trim();
-      if(progetto||codice)entries.push({q,progetto,codice});
+      const oreVal=inp[2]?.value;const ore=oreVal!==''&&oreVal!=null?+oreVal:null;
+      if(progetto||codice)entries.push({q,progetto,codice,ore});
     });
   });
   const msgId=`wbs-msg-${risorsaId}-${month}-${year}`;
