@@ -130,12 +130,14 @@
           <div class="q-row" style="margin-bottom:14px">
             <div class="q-box">
               <div class="q-box-head"><span>I</span> Quindicina (1–15)</div>
-              <div class="field" style="margin-bottom:10px"><label>Ore lavorate</label><input type="number" id="ore1" min="0" max="300" step="0.5"/></div>
+              <div class="field" style="margin-bottom:6px"><label>Ore lavorate</label><input type="number" id="ore1" min="0" max="300" step="0.5" oninput="checkOreStrao()"/></div>
+              <div id="oreWarn1" style="display:none;font-size:.76rem;color:var(--warn);background:var(--warn-bg);border-radius:var(--r);padding:5px 10px;margin-bottom:8px"><i class="fa-solid fa-bolt" style="margin-right:5px"></i><span id="oreWarn1Txt"></span></div>
               <div class="field"><label>Note</label><input type="text" id="note1" placeholder="Facoltativo"/></div>
             </div>
             <div class="q-box">
               <div class="q-box-head"><span>II</span> Quindicina (16–fine)</div>
-              <div class="field" style="margin-bottom:10px"><label>Ore lavorate</label><input type="number" id="ore2" min="0" max="300" step="0.5"/></div>
+              <div class="field" style="margin-bottom:6px"><label>Ore lavorate</label><input type="number" id="ore2" min="0" max="300" step="0.5" oninput="checkOreStrao()"/></div>
+              <div id="oreWarn2" style="display:none;font-size:.76rem;color:var(--warn);background:var(--warn-bg);border-radius:var(--r);padding:5px 10px;margin-bottom:8px"><i class="fa-solid fa-bolt" style="margin-right:5px"></i><span id="oreWarn2Txt"></span></div>
               <div class="field"><label>Note</label><input type="text" id="note2" placeholder="Facoltativo"/></div>
             </div>
           </div>
