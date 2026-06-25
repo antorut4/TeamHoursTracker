@@ -243,6 +243,7 @@
             <div class="card-title"><i class="fa-solid fa-plus"></i> Inserisci reperibilità</div>
             <div class="field-row" style="flex-wrap:wrap">
               <div class="field" style="max-width:210px"><label>Progetto *</label><select id="repProgetto" onchange="buildRepGriglia()"><option value="">— Seleziona —</option></select></div>
+              <div class="field" style="max-width:180px"><label>Etichetta turno <span style="font-weight:400;color:var(--ink-3)">(opz.)</span></label><input type="text" id="repEtichetta" placeholder="es. Turno 1" oninput="buildRepGriglia()"/></div>
               <div class="field" style="max-width:220px"><label>Mese / Anno</label>
                 <div style="display:flex;gap:6px"><select id="repMonth" onchange="buildRepGriglia()" style="flex:1"></select><select id="repYear" onchange="buildRepGriglia()" style="flex:1"></select></div>
               </div>
@@ -311,7 +312,7 @@
               <div class="field"><label>Nome *</label><input type="text" id="resNome" placeholder="Mario" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field" style="min-width:210px"><label>Email *</label><input type="email" id="resEmail" placeholder="nome.cognome@accenture.com"/></div>
-              <div class="field" style="max-width:130px" id="resLCField"><label>LC (€)</label><input type="number" id="resLC" min="0" step="0.01" placeholder="Load Cost"/></div>
+              <div class="field" style="max-width:130px" id="resLCField"><label>LC (€)</label><input type="text" id="resLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="resManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
@@ -353,7 +354,7 @@
               <div class="field"><label>Nome *</label><input type="text" id="editNome"/></div>
               <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
               <div class="field" style="min-width:210px"><label>Email</label><input type="email" id="editEmail" placeholder="nome.cognome@accenture.com"/></div>
-              <div class="field" style="max-width:130px" id="editLCField"><label>LC (€)</label><input type="number" id="editLC" min="0" step="0.01" placeholder="Load Cost"/></div>
+              <div class="field" style="max-width:130px" id="editLCField"><label>LC (€)</label><input type="text" id="editLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="editManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">

@@ -105,7 +105,7 @@ async function toggleIsManager(p){
   await sql`UPDATE risorse SET is_manager=${!!p.value} WHERE id=${p.risorsaId}`;
 }
 
-// ── reperibilità (lookup nomi -> id; upsert su UNIQUE risorsa_id,progetto_id,anno,mese) ──
+// ── reperibilità — supporta etichetta turno se la colonna esiste, altrimenti fallback ──
 async function saveRep(p){
   const [proj] = await sql`SELECT id FROM progetti WHERE nome=${p.progetto}`;
   if(!proj) throw new Error('Progetto non trovato: ' + p.progetto);
@@ -114,12 +114,22 @@ async function saveRep(p){
     const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLead}`;
     tlId = tl ? tl.id : null;
   }
-  await sql`
-    INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni)
-    VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni || [])}::jsonb)
-    ON CONFLICT (risorsa_id, progetto_id, anno, mese)
-    DO UPDATE SET team_lead_id=EXCLUDED.team_lead_id, giorni=EXCLUDED.giorni
-  `;
+  const etichetta = p.etichetta || '';
+  try {
+    await sql`
+      INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni, etichetta)
+      VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni || [])}::jsonb, ${etichetta})
+      ON CONFLICT (risorsa_id, progetto_id, anno, mese, etichetta)
+      DO UPDATE SET team_lead_id=EXCLUDED.team_lead_id, giorni=EXCLUDED.giorni
+    `;
+  } catch {
+    await sql`
+      INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni)
+      VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni || [])}::jsonb)
+      ON CONFLICT (risorsa_id, progetto_id, anno, mese)
+      DO UPDATE SET team_lead_id=EXCLUDED.team_lead_id, giorni=EXCLUDED.giorni
+    `;
+  }
 }
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
 
