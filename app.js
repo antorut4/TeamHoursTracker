@@ -759,9 +759,20 @@ async function buildRepGriglia(){
     h+=`<td id="reptot_eur_${etiKey}" style="text-align:right;font-weight:700;font-size:.72rem;color:var(--ok);padding:5px 8px;border-left:1px solid var(--stone-3)">€${initEur}</td>`;
     h+=`</tr></tfoot></table></div>`;
   }
+  // ── riepilogo per risorsa (somma di tutti i turni) ──
+  h+=`<div style="margin-top:14px"><div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Totale per risorsa</div><div style="display:flex;flex-wrap:wrap;gap:8px">`;
+  resources.forEach(r=>{
+    let resGg=0,resEur=0;
+    for(const eti of tipi){const gd=_repGridData[eti]?.[r.fullName];if(gd){resGg+=gd.selectedDays.size;resEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}}
+    h+=`<div style="background:var(--stone-1);border:1px solid var(--stone-3);border-radius:var(--r);padding:7px 12px;min-width:150px">`;
+    h+=`<div style="font-size:.74rem;font-weight:600;color:var(--ink);margin-bottom:2px">${r.fullName}</div>`;
+    h+=`<div style="font-size:.72rem;color:var(--ink-3)"><span id="reptot_res_gg_${r.id}" style="font-weight:700;color:var(--ink)">${resGg}</span> gg&nbsp;·&nbsp;<span id="reptot_res_eur_${r.id}" style="font-weight:700;color:var(--ok)">€${resEur}</span></div>`;
+    h+=`</div>`;
+  });
+  h+=`</div></div>`;
   let grandGg=0,grandEur=0;
   for(const[,gb]of Object.entries(_repGridData)){for(const[,gd]of Object.entries(gb)){grandGg+=gd.selectedDays.size;grandEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}}
-  h+=`<div style="margin-top:12px;padding:10px 16px;background:var(--ink);color:var(--white);border-radius:var(--r);display:flex;align-items:center;gap:12px;font-size:.83rem;flex-wrap:wrap"><i class="fa-solid fa-sigma" style="color:var(--amber)"></i><span style="opacity:.75">Totale assegnato:</span><span id="repGrandTotalGg" style="font-weight:700">${grandGg}</span><span style="opacity:.5">giorni ·</span><span id="repGrandTotalEur" style="color:var(--amber);font-weight:700">€${grandEur}</span></div>`;
+  h+=`<div style="margin-top:10px;padding:10px 16px;background:var(--ink);color:var(--white);border-radius:var(--r);display:flex;align-items:center;gap:12px;font-size:.83rem;flex-wrap:wrap"><i class="fa-solid fa-sigma" style="color:var(--amber)"></i><span style="opacity:.75">Totale assegnato:</span><span id="repGrandTotalGg" style="font-weight:700">${grandGg}</span><span style="opacity:.5">giorni ·</span><span id="repGrandTotalEur" style="color:var(--amber);font-weight:700">€${grandEur}</span></div>`;
   document.getElementById('repGriglia').innerHTML=h;
 }
 function toggleRepDayGrid(resourceName,d,etichetta){
@@ -830,17 +841,26 @@ function clearRepGriglia(){
 function updateRepTotals(){
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
   let grandGg=0,grandEur=0;
+  const perRes={};
   for(const[etichetta,gridByName]of Object.entries(_repGridData)){
     const etiKey=etichetta||'main';
     let totGg=0,totEur=0;
     for(const[name,gd]of Object.entries(gridByName)){
-      totGg+=gd.selectedDays.size;
-      totEur+=calcRepEarnings(name,year,month,etichetta);
+      const gg=gd.selectedDays.size,eur=calcRepEarnings(name,year,month,etichetta);
+      totGg+=gg;totEur+=eur;
+      const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
+      if(!perRes[r.id]){perRes[r.id]={gg:0,eur:0};}
+      perRes[r.id].gg+=gg;perRes[r.id].eur+=eur;
     }
     grandGg+=totGg;grandEur+=totEur;
     const tGgEl=document.getElementById(`reptot_gg_${etiKey}`),tEurEl=document.getElementById(`reptot_eur_${etiKey}`);
     if(tGgEl)tGgEl.textContent=totGg;
     if(tEurEl)tEurEl.textContent=`€${totEur}`;
+  }
+  for(const[rid,tot]of Object.entries(perRes)){
+    const rGgEl=document.getElementById(`reptot_res_gg_${rid}`),rEurEl=document.getElementById(`reptot_res_eur_${rid}`);
+    if(rGgEl)rGgEl.textContent=tot.gg;
+    if(rEurEl)rEurEl.textContent=`€${tot.eur}`;
   }
   const gGgEl=document.getElementById('repGrandTotalGg'),gEurEl=document.getElementById('repGrandTotalEur');
   if(gGgEl)gGgEl.textContent=grandGg;
