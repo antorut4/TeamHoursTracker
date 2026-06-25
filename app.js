@@ -750,8 +750,18 @@ async function buildRepGriglia(){
       h+=`<td id="repgg_${r.id}_${etiKey}" class="rep-earn-gg">${gd.selectedDays.size}</td>`;
       h+=`<td id="repeur_${r.id}_${etiKey}" class="rep-earn" style="padding:5px 8px;text-align:right;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
     });
-    h+=`</tbody></table></div>`;
+    let initGg=0,initEur=0;
+    for(const[,gd]of Object.entries(_repGridData[etichetta])){initGg+=gd.selectedDays.size;initEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}
+    h+=`</tbody><tfoot><tr style="background:var(--stone-2);border-top:2px solid var(--stone-3)">`;
+    h+=`<td style="position:sticky;left:0;background:var(--stone-2);padding:5px 10px;font-weight:700;font-size:.74rem;color:var(--ink)">Totale</td>`;
+    h+=`<td colspan="${dim}" style="background:var(--stone-2)"></td>`;
+    h+=`<td id="reptot_gg_${etiKey}" style="text-align:center;font-weight:700;font-size:.72rem;padding:5px 4px">${initGg}</td>`;
+    h+=`<td id="reptot_eur_${etiKey}" style="text-align:right;font-weight:700;font-size:.72rem;color:var(--ok);padding:5px 8px;border-left:1px solid var(--stone-3)">€${initEur}</td>`;
+    h+=`</tr></tfoot></table></div>`;
   }
+  let grandGg=0,grandEur=0;
+  for(const[,gb]of Object.entries(_repGridData)){for(const[,gd]of Object.entries(gb)){grandGg+=gd.selectedDays.size;grandEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}}
+  h+=`<div style="margin-top:12px;padding:10px 16px;background:var(--ink);color:var(--white);border-radius:var(--r);display:flex;align-items:center;gap:12px;font-size:.83rem;flex-wrap:wrap"><i class="fa-solid fa-sigma" style="color:var(--amber)"></i><span style="opacity:.75">Totale assegnato:</span><span id="repGrandTotalGg" style="font-weight:700">${grandGg}</span><span style="opacity:.5">giorni ·</span><span id="repGrandTotalEur" style="color:var(--amber);font-weight:700">€${grandEur}</span></div>`;
   document.getElementById('repGriglia').innerHTML=h;
 }
 function toggleRepDayGrid(resourceName,d,etichetta){
@@ -767,6 +777,7 @@ function toggleRepDayGrid(resourceName,d,etichetta){
   const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);
   if(ggEl)ggEl.textContent=gd.selectedDays.size;
   if(eurEl)eurEl.textContent=`€${earn}`;
+  updateRepTotals();
 }
 async function applyRepRange(){
   const start=document.getElementById('repRangeStart').value,end=document.getElementById('repRangeEnd').value;
@@ -799,6 +810,7 @@ async function applyRepRange(){
       if(ggEl)ggEl.textContent=gd.selectedDays.size;if(eurEl)eurEl.textContent=`€${earn}`;
     }
   }
+  updateRepTotals();
 }
 function clearRepGriglia(){
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
@@ -813,6 +825,26 @@ function clearRepGriglia(){
       if(ggEl)ggEl.textContent='0';if(eurEl)eurEl.textContent='€0';
     }
   }
+  updateRepTotals();
+}
+function updateRepTotals(){
+  const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
+  let grandGg=0,grandEur=0;
+  for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+    const etiKey=etichetta||'main';
+    let totGg=0,totEur=0;
+    for(const[name,gd]of Object.entries(gridByName)){
+      totGg+=gd.selectedDays.size;
+      totEur+=calcRepEarnings(name,year,month,etichetta);
+    }
+    grandGg+=totGg;grandEur+=totEur;
+    const tGgEl=document.getElementById(`reptot_gg_${etiKey}`),tEurEl=document.getElementById(`reptot_eur_${etiKey}`);
+    if(tGgEl)tGgEl.textContent=totGg;
+    if(tEurEl)tEurEl.textContent=`€${totEur}`;
+  }
+  const gGgEl=document.getElementById('repGrandTotalGg'),gEurEl=document.getElementById('repGrandTotalEur');
+  if(gGgEl)gGgEl.textContent=grandGg;
+  if(gEurEl)gEurEl.textContent=`€${grandEur}`;
 }
 async function saveReperibilita(){
   const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
