@@ -10,7 +10,7 @@ async function call(action,payload){
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
 let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{}};
-let _prjIdByName={},_prjNameById={},_prjTLByName={};
+let _prjIdByName={},_prjNameById={},_prjTLByName={},_prjWbsByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
 async function reloadAll(){
@@ -18,13 +18,13 @@ async function reloadAll(){
   _cache.prj=(d.progetti||[]).map(r=>r.nome);
   _prjIdByName={};_prjNameById={};_prjTLByName={};
   const nameById={};(d.risorse||[]).forEach(r=>{nameById[r.id]=r.full_name;});
-  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;_prjTLByName[r.nome]=r.team_lead_id?nameById[r.team_lead_id]||'':'';});
+  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;_prjTLByName[r.nome]=r.team_lead_id?nameById[r.team_lead_id]||'':'';_prjWbsByName[r.nome]=r.wbs||'';});
   const byRes={};
   (d.allocazioni||[]).forEach(a=>{
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
@@ -132,6 +132,7 @@ async function initApp(){
   await renderFerieList();
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
+  ['resLCField','editLCField'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=(isAdmin||isTeamLead)?'':'none';});
   if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     await renderResourceList();
@@ -206,7 +207,8 @@ async function loadOreForm(){
       wbsHtml+=`</div></div>`;
     }
   }
-  box.innerHTML=`<i class="fa-regular fa-calendar" style="margin-right:7px"></i><b>${MONTHS[month]} ${year}</b> &nbsp;—&nbsp; I quindicina: <b>${h1}h</b> &nbsp;|&nbsp; II quindicina: <b>${h2}h</b>${wbsHtml}`;
+  const lcHtml=r&&r.loadCost!=null?`<div style="margin-top:10px;padding:8px 12px;background:var(--amber-bg);border-radius:var(--r);display:inline-flex;align-items:center;gap:8px;font-size:.83rem"><i class="fa-solid fa-euro-sign" style="color:var(--amber)"></i><span style="color:var(--ink-2)">Il tuo Load Cost:</span> <b style="color:var(--amber)">€${r.loadCost}</b></div>`:'';
+  box.innerHTML=`<i class="fa-regular fa-calendar" style="margin-right:7px"></i><b>${MONTHS[month]} ${year}</b> &nbsp;—&nbsp; I quindicina: <b>${h1}h</b> &nbsp;|&nbsp; II quindicina: <b>${h2}h</b>${wbsHtml}${lcHtml}`;
   document.getElementById('ore1').value=e.ore_q1!=null?e.ore_q1:h1;document.getElementById('note1').value=e.note_q1||'';
   document.getElementById('ore2').value=e.ore_q2!=null?e.ore_q2:h2;document.getElementById('note2').value=e.note_q2||'';
 }
@@ -238,8 +240,9 @@ async function loadRiepilogo(){
   let _hrs={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)_hrs[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
   const av=wHours(year,month,1)+wHours(year,month,2);
   const canWbs=isAdmin||isTeamLead;
-  const cols=canWbs?8:7;
-  let h=`<div class="table-wrap"><table><thead><tr><th>Risorsa</th><th>Team Lead</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th>Stato</th>${canWbs?'<th></th>':''}</tr></thead><tbody>`;
+  const canLC=isAdmin||isTeamLead;
+  const cols=canWbs?(canLC?9:8):7;
+  let h=`<div class="table-wrap"><table><thead><tr><th>Risorsa</th><th>Team Lead</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th>Stato</th>${canLC?'<th style="white-space:nowrap">LC (€)</th>':''}${canWbs?'<th></th>':''}</tr></thead><tbody>`;
   if(!members.length)h+=`<tr><td colspan="${cols}" style="text-align:center;color:var(--ink-3)">Nessuna risorsa</td></tr>`;
   members.forEach(m=>{
     const lead=getLeadForMember(m),e=_hrs[m];
@@ -248,8 +251,9 @@ async function loadRiepilogo(){
     const hasWbs=wbsEntries.length>0;
     const panelId=`wbsp-${rid}-${month}-${year}`;
     const wbsTd=canWbs?`<td style="white-space:nowrap"><button class="btn btn-ghost2 btn-sm${hasWbs?' btn-wbs-set':''}" onclick="toggleWbsPanel('${panelId}',${rid},${month},${year})"><i class="fa-solid fa-code-branch"></i> WBS</button></td>`:'';
-    if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td>${wbsTd}</tr>`;
-    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td>${wbsTd}</tr>`;}
+    const lcTd=canLC?`<td style="white-space:nowrap;font-size:.82rem;color:var(--amber);font-weight:600">${res&&res.loadCost!=null?'€'+res.loadCost:'—'}</td>`:'';
+    if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td>${lcTd}${wbsTd}</tr>`;
+    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td>${lcTd}${wbsTd}</tr>`;}
     if(canWbs)h+=`<tr id="${panelId}" style="display:none"><td colspan="${cols}" style="padding:0">${buildWbsPanelHtml(rid,m,month,year,wbsEntries)}</td></tr>`;
   });
   document.getElementById('riepilogoTable').innerHTML=h+'</tbody></table></div>';
@@ -496,13 +500,17 @@ async function addProject(){
   const name=document.getElementById('newPrjName').value.trim();if(!name){showMsg('addPrjMsg','Inserisci il nome del progetto.','err');return;}
   const prjs=await getProjects();if(prjs.map(p=>p.toLowerCase()).includes(name.toLowerCase())){showMsg('addPrjMsg','Progetto già esistente.','err');return;}
   const tlName=document.getElementById('newPrjTLSel')?.value||'';
-  showSpinner();try{await call('addProject',{nome:name,teamLeadName:tlName||null});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('newPrjName').value='';const ts=document.getElementById('newPrjTLSel');if(ts)ts.value='';
+  const wbs=(document.getElementById('newPrjWbs')?.value||'').trim();
+  showSpinner();try{await call('addProject',{nome:name,teamLeadName:tlName||null,wbs:wbs||null});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  document.getElementById('newPrjName').value='';const ts=document.getElementById('newPrjTLSel');if(ts)ts.value='';const ws=document.getElementById('newPrjWbs');if(ws)ws.value='';
   await renderProjectList();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));populateSearchByProject();refreshDropdowns();showMsg('addPrjMsg','"'+name+'" aggiunto','ok');
 }
 async function saveProjectLead(id,tlName){
   showSpinner();try{await call('saveProjectLead',{id,teamLeadName:tlName||null});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
   await renderProjectList();refreshDropdowns();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));
+}
+async function saveProjectWbs(id,wbs){
+  try{await call('saveProjectWbs',{id,wbs:wbs||null});const nome=_prjNameById[id];if(nome)_prjWbsByName[nome]=wbs||'';}catch(e){alert('Errore WBS: '+e.message);}
 }
 async function deleteProject(name){openModal('Elimina progetto','Eliminare "'+name+'"? Verrà rimosso anche dalle allocazioni.',async()=>{showSpinner();try{await call('deleteProject',{nome:name});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderProjectList();populateProgettoSelect('res',[]);populateProgettoSelect('edit',[]);populateSearchByProject();showMsg('addPrjMsg','Progetto eliminato.','ok');},'Elimina');}
 async function renderResourcesByProject(){
@@ -529,6 +537,8 @@ async function renderProjectList(){
       <select style="font-size:.75rem;padding:2px 5px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:160px" onchange="saveProjectLead(${pid},this.value)">
         <option value="">— Nessuno —</option>${tlOpts.replace(`value="${tl.replace(/"/g,'&quot;')}"`,`value="${tl.replace(/"/g,'&quot;')}" selected`)}
       </select>
+      <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap;flex-shrink:0">WBS:</span>
+      <input type="text" placeholder="Codice WBS" value="${(_prjWbsByName[p]||'').replace(/"/g,'&quot;')}" style="font-size:.75rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:120px" onblur="saveProjectWbs(${pid},this.value)" onkeydown="if(event.key==='Enter')saveProjectWbs(${pid},this.value)"/>
       <button class="btn-icon danger" onclick="deleteProject('${pSafe}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
     </div>`;
   }).join('');
@@ -546,9 +556,11 @@ async function addResource(){
   if(!nome||!cognome){showMsg('addResMsg','Nome e Cognome obbligatori.','err');return;}
   if(!email){showMsg('addResMsg','Email obbligatoria.','err');return;}
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
-  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  const loadCost=(document.getElementById('resLC')?.value||'');
+  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('resNome').value='';document.getElementById('resCognome').value='';
   if(document.getElementById('resEmail'))document.getElementById('resEmail').value='';
+  if(document.getElementById('resLC'))document.getElementById('resLC').value='';
   if(document.getElementById('resIsManager'))document.getElementById('resIsManager').checked=false;
   populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
@@ -573,7 +585,8 @@ async function renderResourceList(){
     const mgrBadge=r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
     const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${r.managerName}</span> · `:'';
     const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${r.email}</span> · `:'';
-    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    const lcMeta=(isAdmin||isTeamLead)&&r.loadCost!=null?`<span style="color:var(--amber);font-size:.72rem;font-weight:600"><i class="fa-solid fa-euro-sign" style="margin-right:2px"></i>LC: ${r.loadCost}</span> · `:'';
+    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
@@ -588,6 +601,7 @@ function startEdit(idx){
   const eeEl=document.getElementById('editEmail');if(eeEl)eeEl.value=r.email||'';
   const emSel=document.getElementById('editManagerSel');if(emSel)emSel.value=r.managerName||'';
   const emChk=document.getElementById('editIsManager');if(emChk)emChk.checked=!!r.isManager;
+  const elcEl=document.getElementById('editLC');if(elcEl)elcEl.value=r.loadCost!=null?r.loadCost:'';
   const ec=document.getElementById('editCard');ec.style.display='block';
   const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');
   if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}
@@ -604,7 +618,8 @@ async function saveEdit(){
   const isManager=!!(document.getElementById('editIsManager')?.checked);
   const email=(document.getElementById('editEmail')?.value||'').trim().toLowerCase()||null;
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  const loadCost=(document.getElementById('editLC')?.value||'');
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}

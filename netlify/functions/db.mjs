@@ -13,8 +13,8 @@ const sql = neon(process.env.DATABASE_URL);
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
 async function bootstrap(){
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows] = await Promise.all([
-    sql`SELECT id, nome, team_lead_id FROM progetti ORDER BY nome`,
-    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, team_lead_id, wbs FROM progetti ORDER BY nome`,
+    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
@@ -54,7 +54,8 @@ async function addProject(p){
     const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLeadName}`;
     tlId = tl ? tl.id : null;
   }
-  await sql`INSERT INTO progetti (nome, team_lead_id) VALUES (${p.nome}, ${tlId})`;
+  const wbs = p.wbs || null;
+  await sql`INSERT INTO progetti (nome, team_lead_id, wbs) VALUES (${p.nome}, ${tlId}, ${wbs})`;
 }
 async function saveProjectLead(p){
   let tlId = null;
@@ -64,6 +65,9 @@ async function saveProjectLead(p){
   }
   await sql`UPDATE progetti SET team_lead_id=${tlId} WHERE id=${p.id}`;
 }
+async function saveProjectWbs(p){
+  await sql`UPDATE progetti SET wbs=${p.wbs||null} WHERE id=${p.id}`;
+}
 async function deleteProject(p){ await sql`DELETE FROM progetti WHERE nome=${p.nome}`; }
 
 // ── risorse + allocazioni (full_name lo genera il trigger; team_lead è testo) ──
@@ -71,7 +75,8 @@ async function addResource(p){
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
-  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}) RETURNING id`;
+  const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
+  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager, load_cost) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}, ${loadCost}) RETURNING id`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
               SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
@@ -81,7 +86,8 @@ async function saveEdit(p){
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
-  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager} WHERE id=${p.id}`;
+  const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
+  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager}, load_cost=${loadCost} WHERE id=${p.id}`;
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
@@ -162,7 +168,7 @@ async function setAdminPwd(p){
 
 // ── routing: whitelist esplicita delle action consentite ──
 const ACTIONS = {
-  bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead,
+  bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
