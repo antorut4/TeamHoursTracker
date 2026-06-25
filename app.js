@@ -9,7 +9,7 @@ async function call(action,payload){
   return j.data;
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
-let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{}};
+let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{}};
 let _prjIdByName={},_prjNameById={},_prjTLByName={},_prjWbsByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
@@ -30,10 +30,12 @@ async function reloadAll(){
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[],etichetta:rp.etichetta||''}));
   _cache.wbs=d.wbs||{};
+  _cache.repTipi=d.repTipi||{};
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
 function getWbsForMember(risorsaId,anno,mese){return _cache.wbs[`${risorsaId}_${anno}_${mese}`]||[];}
+function getRepTipiForPrj(progetto){const pid=_prjIdByName[progetto];const tipi=pid&&_cache.repTipi[String(pid)];return(tipi&&tipi.length)?tipi:[''];}
 const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':'#007A4C';
 const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
@@ -282,7 +284,7 @@ function wbsRowHtml(risorsaId,month,year,q,idx,progetto,codice,ore){
   const rid=`wbsr-${risorsaId}-${month}-${year}-${q}-${idx}`;
   const cE=(codice||'').replace(/"/g,'&quot;');
   const oV=ore!=null&&ore!==''?ore:'';
-  const prjs=isAdmin?_cache.prj:_cache.prj.filter(p=>_prjTLByName[p]===currentUser);
+  const res=RESOURCES.find(x=>x.id===risorsaId);const prjs=res?.progetti||[];
   const opts='<option value="">— Progetto —</option>'+prjs.map(p=>`<option value="${p.replace(/"/g,'&quot;')}"${p===progetto?' selected':''}>${p}</option>`).join('');
   return `<div class="wbs-row" id="${rid}"><select class="wbs-input wbs-prj-sel" onchange="onWbsProgettoChange(this,'${rid}')">${opts}</select><input type="text" class="wbs-input wbs-code" placeholder="Codice WBS" value="${cE}"/><input type="number" class="wbs-input wbs-ore" placeholder="Ore" min="0" step="0.5" value="${oV}"/><button class="btn-icon danger" onclick="removeWbsRow('${rid}')" title="Rimuovi"><i class="fa-solid fa-xmark"></i></button></div>`;
 }
@@ -537,9 +539,11 @@ async function renderProjectList(){
   el.innerHTML=prjsFull.map(p=>{
     const pid=_prjIdByName[p]||0,tl=_prjTLByName[p]||'';
     const pSafe=p.replace(/'/g,"\\'");
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)">
+    const tipi=_cache.repTipi[String(pid)]||[];
+    const tipiTags=tipi.length?tipi.map(t=>`<span style="background:var(--info-bg);color:var(--info);border-radius:4px;padding:1px 7px;font-size:.7rem;display:inline-flex;align-items:center;gap:3px">${t} <button onclick="removeRepTipoUI(${pid},'${t.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:var(--info);padding:0;line-height:1;font-size:.75rem">×</button></span>`).join(''):'<span style="font-size:.7rem;color:var(--ink-3);font-style:italic">predefinita</span>';
+    return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)">
       <i class="fa-solid fa-folder" style="color:var(--amber);font-size:.8rem;flex-shrink:0"></i>
-      <span style="font-size:.85rem;font-weight:500;flex:1">${p}</span>
+      <span style="font-size:.85rem;font-weight:500;flex:1;min-width:80px">${p}</span>
       <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap">TL:</span>
       <select style="font-size:.75rem;padding:2px 5px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:160px" onchange="saveProjectLead(${pid},this.value)">
         <option value="">— Nessuno —</option>${tlOpts.replace(`value="${tl.replace(/"/g,'&quot;')}"`,`value="${tl.replace(/"/g,'&quot;')}" selected`)}
@@ -547,8 +551,28 @@ async function renderProjectList(){
       <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap;flex-shrink:0">WBS:</span>
       <input type="text" placeholder="Codice WBS" value="${(_prjWbsByName[p]||'').replace(/"/g,'&quot;')}" style="font-size:.75rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:120px" onblur="saveProjectWbs(${pid},this.value)" onkeydown="if(event.key==='Enter')saveProjectWbs(${pid},this.value)"/>
       <button class="btn-icon danger" onclick="deleteProject('${pSafe}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
+      <div style="flex:1 1 100%;display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:5px;border-top:1px solid var(--line)">
+        <span style="font-size:.72rem;color:var(--ink-3);font-weight:600;white-space:nowrap"><i class="fa-solid fa-tower-broadcast" style="margin-right:3px"></i>Reperibilità:</span>
+        <div style="display:flex;gap:3px;flex-wrap:wrap">${tipiTags}</div>
+        <button class="btn btn-ghost2 btn-sm" onclick="addRepTipoUI(${pid})" style="font-size:.7rem;padding:1px 7px"><i class="fa-solid fa-plus"></i> Aggiungi</button>
+      </div>
     </div>`;
   }).join('');
+}
+function addRepTipoUI(pid){
+  const label=prompt('Nome tipo reperibilità (es. Turno 1):');
+  if(!label||!label.trim())return;
+  const tipi=[...(_cache.repTipi[String(pid)]||[])];
+  if(tipi.includes(label.trim()))return;
+  tipi.push(label.trim());
+  saveRepTipiJS(pid,tipi);
+}
+function removeRepTipoUI(pid,tipo){
+  const tipi=(_cache.repTipi[String(pid)]||[]).filter(t=>t!==tipo);
+  saveRepTipiJS(pid,tipi);
+}
+async function saveRepTipiJS(pid,tipi){
+  showSpinner();try{await call('saveRepTipi',{id:pid,tipi});_cache.repTipi[String(pid)]=tipi;await renderProjectList();}catch(e){alert('Errore: '+e.message);}hideSpinner();
 }
 // RISORSE ADMIN
 async function addResource(){
@@ -664,7 +688,7 @@ async function getRepStore(){return(_read(K_REP,[])||[]).map(rp=>{const r=RESOUR
 async function repForUser(fullName){const all=await getRepStore();return all.filter(r=>r.fullName===fullName);}
 let _repGridData={};
 function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return days.reduce((tot,d)=>{const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt);return tot+(wd===0||wd===6||hol.has(ds)?40:25);},0);}
-function calcRepEarnings(resourceName,year,month){const gd=_repGridData[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
+function calcRepEarnings(resourceName,year,month,etichetta){const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
   const now=new Date();
   if(isProjectTL||isAdmin){
