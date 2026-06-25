@@ -684,7 +684,7 @@ async function exportBackup(){
 }
 async function importBackup(event){if(event&&event.target)event.target.value='';alert('Ripristino da file disabilitato.\n\nI dati sono sul database condiviso: usa gli snapshot / PITR dalla console Neon.');}
 // REPERIBILITA
-async function getRepStore(){return(_read(K_REP,[])||[]).map(rp=>{const r=RESOURCES.find(x=>x.id===rp.risorsaId);return r?{id:rp.id,fullName:r.fullName,progetto:rp.progetto,teamLead:rp.teamLead||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}:null;}).filter(Boolean);}
+async function getRepStore(){return(_read(K_REP,[])||[]).map(rp=>{const r=RESOURCES.find(x=>x.id===rp.risorsaId);return r?{id:rp.id,fullName:r.fullName,progetto:rp.progetto,etichetta:rp.etichetta||'',teamLead:rp.teamLead||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}:null;}).filter(Boolean);}
 async function repForUser(fullName){const all=await getRepStore();return all.filter(r=>r.fullName===fullName);}
 let _repGridData={};
 function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return days.reduce((tot,d)=>{const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt);return tot+(wd===0||wd===6||hol.has(ds)?40:25);},0);}
@@ -707,53 +707,64 @@ async function initRepPanel(){
 async function ferieGiorniSet(fullName,year,month){const r=RESOURCES.find(x=>x.fullName===fullName);const mine=r?(_read(K_FER,[])||[]).filter(f=>f.risorsaId===r.id):[];const set=new Set();mine.forEach(e=>{let cur=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(cur<=en){if(cur.getFullYear()===year&&cur.getMonth()===month)set.add(cur.getDate());cur.setDate(cur.getDate()+1);}});return set;}
 async function buildRepGriglia(){
   const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
-  const etichetta=(document.getElementById('repEtichetta')?.value||'').trim();
   const wrap=document.getElementById('repGrigliaWrap');
   if(!progetto){wrap.style.display='none';_repGridData={};return;}
   wrap.style.display='block';
   const allRes=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(progetto));
   const resources=isAdmin?allRes:(_prjTLByName[progetto]===currentUser?allRes:allRes.filter(r=>r.fullName===currentUser));
   if(!resources.length){document.getElementById('repGriglia').innerHTML='<p style="color:var(--ink-3);font-size:.84rem;padding:12px">Nessuna risorsa del tuo team su questo progetto.</p>';_repGridData={};return;}
+  const tipi=getRepTipiForPrj(progetto);
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
   const DN=['D','L','M','M','G','V','S'];
   _repGridData={};
   const existingRep=(_cache.rep||[]);
-  for(const r of resources){
-    const ferieSet=await ferieGiorniSet(r.fullName,year,month);
-    const existing=existingRep.filter(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto&&rp.etichetta===etichetta);
-    const existingDays=new Set(existing.flatMap(rp=>rp.giorni));
-    _repGridData[r.fullName]={ferieSet,selectedDays:existingDays,rid:r.id};
-  }
-  let h=`<table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
-  h+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
-  for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
-    h+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih?'var(--amber)':iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-weight:${ih||iw?600:500};font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
-  h+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
-  h+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guadagno</th></tr></thead><tbody>`;
-  resources.forEach((r,ri)=>{
-    const gd=_repGridData[r.fullName];
-    h+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-    h+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
-    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,isFerie=gd.ferieSet.has(d),isSel=gd.selectedDays.has(d);
-      if(isFerie){h+=`<td style="background:var(--danger-bg);border:1px solid rgba(201,0,60,.12);padding:3px 1px;text-align:center" title="In ferie"><div class="rep-day-blocked">F</div></td>`;}
-      else{h+=`<td style="border:1px solid var(--line);padding:3px 1px;text-align:center;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div class="rep-day${ih?' festivo':iw?' weekend':''}${isSel?' on':''}" id="rd_${r.id}_${d}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d})"></div></td>`;}
+  for(const etichetta of tipi){
+    _repGridData[etichetta]={};
+    for(const r of resources){
+      const ferieSet=await ferieGiorniSet(r.fullName,year,month);
+      const existing=existingRep.filter(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto&&(rp.etichetta||'')===(etichetta||''));
+      const existingDays=new Set(existing.flatMap(rp=>rp.giorni));
+      _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:existingDays,rid:r.id};
     }
-    const earn=calcRepEarnings(r.fullName,year,month);
-    h+=`<td id="repgg_${r.id}" class="rep-earn-gg">${gd.selectedDays.size}</td>`;
-    h+=`<td id="repeur_${r.id}" class="rep-earn" style="padding:5px 8px;text-align:right;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
-  });
-  h+=`</tbody></table>`;
+  }
+  let h='';
+  for(const etichetta of tipi){
+    const etiKey=etichetta||'main';
+    if(tipi.length>1||etichetta){h+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:12px 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px">${etichetta||'Reperibilità'}</div>`;}
+    h+=`<div style="overflow-x:auto;margin-bottom:16px"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
+    h+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
+    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
+      h+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih?'var(--amber)':iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-weight:${ih||iw?600:500};font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
+    h+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
+    h+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guadagno</th></tr></thead><tbody>`;
+    resources.forEach((r,ri)=>{
+      const gd=_repGridData[etichetta][r.fullName];
+      const etiEsc=etichetta.replace(/'/g,"\\'");
+      h+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
+      h+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
+      for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,isFerie=gd.ferieSet.has(d),isSel=gd.selectedDays.has(d);
+        if(isFerie){h+=`<td style="background:var(--danger-bg);border:1px solid rgba(201,0,60,.12);padding:3px 1px;text-align:center" title="In ferie"><div class="rep-day-blocked">F</div></td>`;}
+        else{h+=`<td style="border:1px solid var(--line);padding:3px 1px;text-align:center;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div class="rep-day${ih?' festivo':iw?' weekend':''}${isSel?' on':''}" id="rd_${r.id}_${d}_${etiKey}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d},'${etiEsc}')"></div></td>`;}
+      }
+      const earn=calcRepEarnings(r.fullName,year,month,etichetta);
+      h+=`<td id="repgg_${r.id}_${etiKey}" class="rep-earn-gg">${gd.selectedDays.size}</td>`;
+      h+=`<td id="repeur_${r.id}_${etiKey}" class="rep-earn" style="padding:5px 8px;text-align:right;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
+    });
+    h+=`</tbody></table></div>`;
+  }
   document.getElementById('repGriglia').innerHTML=h;
 }
-function toggleRepDayGrid(resourceName,d){
-  const gd=_repGridData[resourceName];if(!gd)return;
+function toggleRepDayGrid(resourceName,d,etichetta){
+  etichetta=etichetta||'';
+  const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return;
   const r=RESOURCES.find(x=>x.fullName===resourceName);if(!r)return;
-  const el=document.getElementById(`rd_${r.id}_${d}`);if(!el)return;
+  const etiKey=etichetta||'main';
+  const el=document.getElementById(`rd_${r.id}_${d}_${etiKey}`);if(!el)return;
   if(gd.selectedDays.has(d)){gd.selectedDays.delete(d);el.classList.remove('on');}
   else{gd.selectedDays.add(d);el.classList.add('on');}
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
-  const earn=calcRepEarnings(resourceName,year,month);
-  const ggEl=document.getElementById(`repgg_${r.id}`),eurEl=document.getElementById(`repeur_${r.id}`);
+  const earn=calcRepEarnings(resourceName,year,month,etichetta);
+  const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);
   if(ggEl)ggEl.textContent=gd.selectedDays.size;
   if(eurEl)eurEl.textContent=`€${earn}`;
 }
@@ -766,53 +777,66 @@ async function applyRepRange(){
   while(cur<=en){
     if(cur.getFullYear()===year&&cur.getMonth()===month){
       const d=cur.getDate();
-      for(const[name,gd]of Object.entries(_repGridData)){
-        if(!gd.ferieSet.has(d)){
-          gd.selectedDays.add(d);
-          const r=RESOURCES.find(x=>x.fullName===name);
-          if(r){const el=document.getElementById(`rd_${r.id}_${d}`);if(el)el.classList.add('on');}
+      for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+        const etiKey=etichetta||'main';
+        for(const[name,gd]of Object.entries(gridByName)){
+          if(!gd.ferieSet.has(d)){
+            gd.selectedDays.add(d);
+            const r=RESOURCES.find(x=>x.fullName===name);
+            if(r){const el=document.getElementById(`rd_${r.id}_${d}_${etiKey}`);if(el)el.classList.add('on');}
+          }
         }
       }
     }
     cur.setDate(cur.getDate()+1);
   }
-  for(const[name,gd]of Object.entries(_repGridData)){
-    const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
-    const earn=calcRepEarnings(name,year,month);
-    const ggEl=document.getElementById(`repgg_${r.id}`),eurEl=document.getElementById(`repeur_${r.id}`);
-    if(ggEl)ggEl.textContent=gd.selectedDays.size;if(eurEl)eurEl.textContent=`€${earn}`;
+  for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+    const etiKey=etichetta||'main';
+    for(const[name,gd]of Object.entries(gridByName)){
+      const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
+      const earn=calcRepEarnings(name,year,month,etichetta);
+      const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);
+      if(ggEl)ggEl.textContent=gd.selectedDays.size;if(eurEl)eurEl.textContent=`€${earn}`;
+    }
   }
 }
 function clearRepGriglia(){
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
-  for(const[name,gd]of Object.entries(_repGridData)){
-    gd.selectedDays=new Set();
-    const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
-    const dim=new Date(year,month+1,0).getDate();
-    for(let d=1;d<=dim;d++){const el=document.getElementById(`rd_${r.id}_${d}`);if(el)el.classList.remove('on');}
-    const ggEl=document.getElementById(`repgg_${r.id}`),eurEl=document.getElementById(`repeur_${r.id}`);
-    if(ggEl)ggEl.textContent='0';if(eurEl)eurEl.textContent='€0';
+  const dim=new Date(year,month+1,0).getDate();
+  for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+    const etiKey=etichetta||'main';
+    for(const[name,gd]of Object.entries(gridByName)){
+      gd.selectedDays=new Set();
+      const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
+      for(let d=1;d<=dim;d++){const el=document.getElementById(`rd_${r.id}_${d}_${etiKey}`);if(el)el.classList.remove('on');}
+      const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);
+      if(ggEl)ggEl.textContent='0';if(eurEl)eurEl.textContent='€0';
+    }
   }
 }
 async function saveReperibilita(){
   const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
-  const etichetta=(document.getElementById('repEtichetta')?.value||'').trim();
   if(!progetto){showMsg('repMsg','Seleziona il progetto.','err');return;}
-  const toSave=Object.entries(_repGridData).filter(([,gd])=>gd.selectedDays.size>0);
-  if(!toSave.length){showMsg('repMsg','Seleziona almeno un giorno per almeno una risorsa.','err');return;}
+  let hasAny=false;
+  for(const[,gridByName]of Object.entries(_repGridData)){for(const[,gd]of Object.entries(gridByName)){if(gd.selectedDays.size>0){hasAny=true;break;}}if(hasAny)break;}
+  if(!hasAny){showMsg('repMsg','Seleziona almeno un giorno per almeno una risorsa.','err');return;}
   const tlName=(currentUser&&currentUser!=='ADMIN')?currentUser:null;
+  const savedNames=new Set();
   showSpinner();
   try{
-    for(const[name,gd]of toSave){
-      const rRes=RESOURCES.find(x=>x.fullName===name);if(!rRes?.id)continue;
-      const giorni=[...gd.selectedDays].sort((a,b)=>a-b);
-      await call('saveRep',{risorsaId:rRes.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
+    for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+      for(const[name,gd]of Object.entries(gridByName)){
+        if(gd.selectedDays.size===0)continue;
+        const rRes=RESOURCES.find(x=>x.fullName===name);if(!rRes?.id)continue;
+        const giorni=[...gd.selectedDays].sort((a,b)=>a-b);
+        await call('saveRep',{risorsaId:rRes.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
+        savedNames.add(name.split(' ')[0]);
+      }
     }
     await reloadAll();
   }catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
-  const names=toSave.map(([n])=>n.split(' ')[0]).join(', ');
-  showMsg('repMsg','Reperibilità salvata per '+names,'ok');
+  showMsg('repMsg','Reperibilità salvata per '+[...savedNames].join(', '),'ok');
   await buildRepGriglia();await renderRepTeam();
 }
 async function renderRepTeam(){

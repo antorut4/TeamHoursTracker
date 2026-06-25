@@ -12,21 +12,27 @@ const sql = neon(process.env.DATABASE_URL);
 
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
 async function bootstrap(){
-  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT id, nome, team_lead_id, wbs FROM progetti ORDER BY nome`,
     sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
     sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
-    sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`
   ]);
   const wbs = {};
   wbsRows.forEach(r => {
     const key = r.chiave.substring(4); // strip 'wbs_' prefix → '{risorsaId}_{anno}_{mese}'
     try { wbs[key] = JSON.parse(r.valore); } catch {}
   });
-  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs };
+  const repTipi = {};
+  repTipiRows.forEach(r => {
+    const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
+    try { repTipi[pid] = JSON.parse(r.valore); } catch {}
+  });
+  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi };
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -160,6 +166,14 @@ async function setUserPwd(p){
 }
 async function resetUserPwd(p){ await sql`DELETE FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`; }
 
+// ── rep tipi (stored in config as rep_tipi_{progetto_id}) ──
+async function saveRepTipi(p){
+  const chiave = `rep_tipi_${p.id}`;
+  const valore = JSON.stringify(p.tipi || []);
+  await sql`INSERT INTO config (chiave, valore) VALUES (${chiave}, ${valore})
+            ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+}
+
 // ── WBS (stored in config as wbs_{risorsaId}_{anno}_{mese}) ──
 async function saveWbs(p){
   const chiave = `wbs_${p.risorsaId}_${p.anno}_${p.mese}`;
@@ -182,7 +196,7 @@ const ACTIONS = {
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs, setResourceManager, toggleIsManager
+  saveWbs, setResourceManager, toggleIsManager, saveRepTipi
 };
 
 export async function handler(event){
