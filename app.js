@@ -237,12 +237,18 @@ async function renderMyOre(){
   if(!r){el.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna ora inserita.</p>';return;}
   const rows=(_read(K_HRS,[])||[]).filter(o=>o.risorsaId===r.id).sort((a,b)=>(b.anno-a.anno)||(b.mese-a.mese));
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna ora inserita.</p>';return;}
-  let h='<div class="table-wrap"><table><thead><tr><th>Mese</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th></tr></thead><tbody>';
+  let h='<div class="table-wrap"><table><thead><tr><th>Mese</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th></th></tr></thead><tbody>';
   rows.forEach(e=>{const tot=(+e.ore_q1||0)+(+e.ore_q2||0),av=wHours(e.anno,e.mese,1)+wHours(e.anno,e.mese,2);const extra=tot-av;
     const straoBadge=extra>0?` <span style="font-size:.69rem;font-weight:700;color:var(--warn);background:var(--warn-bg);border-radius:10px;padding:1px 7px;white-space:nowrap"><i class="fa-solid fa-bolt" style="margin-right:3px"></i>+${Math.round(extra*10)/10}h strao</span>`:'';
-    h+=`<tr style="${extra>0?'background:var(--warn-bg)':''}"><td><b>${MONTHS[e.mese]} ${e.anno}</b></td><td>${e.ore_q1!=null?e.ore_q1+'h':'—'}${e.note_q1?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q1})</span>`:''}</td><td>${e.ore_q2!=null?e.ore_q2+'h':'—'}${e.note_q2?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q2})</span>`:''}</td><td><b>${tot}h</b>${straoBadge}</td><td style="color:var(--ink-3)">${av}h</td></tr>`;
+    h+=`<tr style="${extra>0?'background:var(--warn-bg)':''}"><td><b>${MONTHS[e.mese]} ${e.anno}</b></td><td>${e.ore_q1!=null?e.ore_q1+'h':'—'}${e.note_q1?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q1})</span>`:''}</td><td>${e.ore_q2!=null?e.ore_q2+'h':'—'}${e.note_q2?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q2})</span>`:''}</td><td><b>${tot}h</b>${straoBadge}</td><td style="color:var(--ink-3)">${av}h</td><td><button class="btn-icon danger" onclick="deleteMyOre(${e.id},'${MONTHS[e.mese]} ${e.anno}')" title="Elimina inserimento"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button></td></tr>`;
   });
   el.innerHTML=h+'</tbody></table></div>';
+}
+async function deleteMyOre(id,label){
+  openModal('Elimina ore','Eliminare le ore di "'+label+'"?',async()=>{
+    showSpinner();try{await call('deleteOre',{id});await reloadAll();}catch(e){hideSpinner();showMsg('oreMsg','Errore: '+e.message,'err');return;}
+    hideSpinner();showMsg('oreMsg','Ore eliminate.','ok');await renderMyOre();checkAlerts();
+  },'Elimina');
 }
 // RIEPILOGO
 async function loadRiepilogo(){
@@ -480,7 +486,7 @@ function renderFerieCalendar(){
     sumData.push({name:m,days:tot,bt});
   });
   el.innerHTML=h+'</tbody></table>';
-  document.getElementById('ferieCalCards').innerHTML=sumData.map(s=>{const det=Object.entries(s.bt).map(([t,n])=>`${t}: ${n}gg`).join(' · ')||'Nessuna assenza';return `<div class="ov-card"><div class="oc-name" style="color:${colorFor(s.name)}">${s.name}</div><div class="oc-num">${s.days} <span style="font-size:.75rem;font-weight:400;color:var(--ink-3)">gg</span></div><div class="oc-sub">${det}</div></div>`;}).join('');
+  document.getElementById('ferieCalCards').innerHTML=`<div style="border:1px solid var(--line);border-radius:var(--r);overflow:hidden">`+sumData.map((s,i)=>{const det=Object.entries(s.bt).map(([t,n])=>`<span style="background:${TIPO_C(t)}18;color:${TIPO_C(t)};border-radius:3px;padding:1px 6px;font-size:.69rem;font-weight:600">${t} ${n}gg</span>`).join(' ')||'<span style="color:var(--ink-3);font-size:.75rem">Nessuna assenza</span>';const color=colorFor(s.name);return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:${i%2?'var(--stone)':'var(--white)'};${i>0?'border-top:1px solid var(--line)':''}"><span style="font-weight:600;color:${color};flex:1;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</span><span style="font-weight:700;font-size:.92rem;color:var(--ink);min-width:28px;text-align:right">${s.days}</span><span style="font-size:.7rem;color:var(--ink-3);min-width:18px">gg</span><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${det}</div></div>`;}).join('')+`</div>`;
   const ovs=[];for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt);if(wd===0||wd===6||hol.has(ds))continue;const ab=members.filter(m=>md[m][ds]);if(ab.length>1)ovs.push({ds,names:ab,tipi:ab.map(m=>md[m][ds])});}
   document.getElementById('ferieCalOverlaps').innerHTML=ovs.length
     ?`<div style="background:var(--warn-bg);border:1px solid rgba(125,78,0,.2);border-radius:var(--r);padding:12px 14px"><div style="font-weight:600;color:var(--warn);margin-bottom:7px;font-size:.83rem"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px"></i>Sovrapposizioni (${ovs.length} giorni)</div>${ovs.map(o=>`<div style="font-size:.79rem;color:var(--warn);margin-bottom:3px">${fmt(o.ds)} — ${o.names.map((n,i)=>`${n.split(' ')[0]} (${o.tipi[i]})`).join(', ')}</div>`).join('')}</div>`
@@ -1007,9 +1013,12 @@ function toggleFerieDay(dateStr){
 }
 function showFeriePicker(dateStr){
   _feriePickerDate=dateStr;
-  document.getElementById('feriePickerDate').textContent=fmt(dateStr);
+  const sEl=document.getElementById('feriePickerStart'),eEl=document.getElementById('feriePickerEnd');
+  if(sEl)sEl.value=dateStr;
+  if(eEl)eEl.value=dateStr;
   document.getElementById('feriePickerOverlay').classList.add('open');
   document.getElementById('feriePickerBox').classList.add('open');
+  setTimeout(()=>{if(eEl)eEl.focus();},80);
 }
 function closeFeriePicker(){
   _feriePickerDate=null;
@@ -1020,6 +1029,16 @@ async function pickFerieTipo(tipo){
   const dateStr=_feriePickerDate;closeFeriePicker();if(!dateStr)return;
   const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
   showSpinner();try{await call('saveFerie',{risorsaId:r.id,start:dateStr,end:dateStr,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
+}
+async function pickFerieTipoRange(tipo){
+  const start=document.getElementById('feriePickerStart')?.value||_feriePickerDate;
+  const end=document.getElementById('feriePickerEnd')?.value||_feriePickerDate;
+  closeFeriePicker();
+  if(!start||!end){showMsg('ferieMsg','Seleziona le date.','err');return;}
+  if(end<start){showMsg('ferieMsg','Data fine deve essere >= inizio.','err');return;}
+  const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
+  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
   hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
 }
 let _presWeekOffset=0;

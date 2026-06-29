@@ -191,7 +191,10 @@
             <div class="card-title" style="margin-bottom:0"><i class="fa-regular fa-calendar-days"></i> Calendario del team</div>
             <button class="btn btn-ghost2 btn-sm" onclick="exportICS()"><i class="fa-regular fa-calendar"></i> Esporta .ics</button>
           </div>
-          <div id="ferieMsg" class="msg" style="margin-bottom:8px"></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div id="ferieMsg" class="msg" style="flex:1"></div>
+            <button class="btn btn-amber btn-sm" onclick="showFeriePicker(new Date().toISOString().slice(0,10))"><i class="fa-solid fa-plus"></i> Aggiungi assenza</button>
+          </div>
           <div class="field-row" style="margin-bottom:12px">
             <div class="field" style="max-width:170px"><label>Mese</label><select id="ferieCalMonth" onchange="renderFerieCalendar()"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="ferieCalYear" onchange="renderFerieCalendar()"></select></div>
@@ -425,11 +428,14 @@
 <div class="ferie-picker-overlay" id="feriePickerOverlay" onclick="closeFeriePicker()"></div>
 <div class="ferie-picker-box" id="feriePickerBox">
   <div class="ferie-picker-title">Aggiungi assenza</div>
-  <div id="feriePickerDate" class="ferie-picker-date"></div>
+  <div style="display:flex;gap:8px;margin:10px 0 14px;flex-wrap:wrap">
+    <div style="flex:1;min-width:120px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Dal</label><input type="date" id="feriePickerStart" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
+    <div style="flex:1;min-width:120px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Al</label><input type="date" id="feriePickerEnd" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
+  </div>
   <div class="ferie-picker-btns">
-    <button class="ferie-type-btn" onclick="pickFerieTipo('Ferie')"><span class="ftb-dot" style="background:#A100FF"></span> Ferie</button>
-    <button class="ferie-type-btn" onclick="pickFerieTipo('Malattia')"><span class="ftb-dot" style="background:var(--danger)"></span> Malattia</button>
-    <button class="ferie-type-btn" onclick="pickFerieTipo('Permesso/ROL')"><span class="ftb-dot" style="background:var(--ok)"></span> Permesso / ROL</button>
+    <button class="ferie-type-btn" onclick="pickFerieTipoRange('Ferie')"><span class="ftb-dot" style="background:#A100FF"></span> Ferie</button>
+    <button class="ferie-type-btn" onclick="pickFerieTipoRange('Malattia')"><span class="ftb-dot" style="background:var(--danger)"></span> Malattia</button>
+    <button class="ferie-type-btn" onclick="pickFerieTipoRange('Permesso/ROL')"><span class="ftb-dot" style="background:var(--ok)"></span> Permesso / ROL</button>
   </div>
   <button class="btn btn-ghost2 btn-sm" onclick="closeFeriePicker()">Annulla</button>
 </div>

@@ -45,6 +45,7 @@ async function saveOre(p){
                   ore_q2=EXCLUDED.ore_q2, note_q2=EXCLUDED.note_q2
   `;
 }
+async function deleteOre(p){ await sql`DELETE FROM ore_mensili WHERE id=${p.id}`; }
 
 // ── ferie ──
 async function saveFerie(p){
@@ -192,7 +193,7 @@ async function setAdminPwd(p){
 
 // ── routing: whitelist esplicita delle action consentite ──
 const ACTIONS = {
-  bootstrap, saveOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
+  bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
