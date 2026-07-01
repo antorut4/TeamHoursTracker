@@ -136,6 +136,11 @@ tbody tr:hover td{background:var(--stone)}
 .rep-day.festivo{background:var(--amber-bg);border-color:var(--amber-rim)}
 .rep-day.festivo.on{background:var(--amber);border-color:var(--amber)}
 .rep-day-blocked{width:18px;height:18px;border-radius:4px;background:var(--amber);color:var(--white);font-size:.62rem;font-weight:700;line-height:18px;text-align:center;margin:0 auto;cursor:not-allowed}
+.rep-day.ferie-ov{background:rgba(201,0,60,.1);border-color:rgba(201,0,60,.35);position:relative}
+.rep-day.ferie-ov:hover{border-color:var(--danger)}
+.rep-day.ferie-ov.on{background:var(--danger);border-color:var(--danger)}
+.rep-ferie-badge{position:absolute;top:-1px;right:0;font-size:.45rem;font-weight:800;color:var(--danger);pointer-events:none;line-height:1}
+.rep-day.ferie-ov.on .rep-ferie-badge{color:rgba(255,255,255,.85)}
 .rep-earn{font-size:.75rem;font-weight:700;color:var(--ok);white-space:nowrap}
 .rep-earn-gg{font-size:.75rem;font-weight:700;color:var(--ink);text-align:center}
 .rep-entry{display:flex;align-items:flex-start;justify-content:space-between;padding:13px 15px;background:var(--stone);border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;gap:8px;transition:background .12s}
