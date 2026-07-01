@@ -702,7 +702,7 @@ async function importBackup(event){if(event&&event.target)event.target.value='';
 // REPERIBILITA
 async function getRepStore(){return(_read(K_REP,[])||[]).map(rp=>{const r=RESOURCES.find(x=>x.id===rp.risorsaId);return r?{id:rp.id,fullName:r.fullName,progetto:rp.progetto,etichetta:rp.etichetta||'',teamLead:rp.teamLead||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[]}:null;}).filter(Boolean);}
 async function repForUser(fullName){const all=await getRepStore();return all.filter(r=>r.fullName===fullName);}
-let _repGridData={};let _repExtraResources=[];let _repExtraProject='';
+let _repGridData={};let _repExtraResources=[];let _repExtraProject='';let _repHiddenResources=new Set();
 function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return days.reduce((tot,d)=>{const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt);return tot+(wd===0||wd===6||hol.has(ds)?40:25);},0);}
 function calcRepEarnings(resourceName,year,month,etichetta){const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
@@ -725,10 +725,10 @@ async function buildRepGriglia(){
   const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
   const wrap=document.getElementById('repGrigliaWrap');
   if(!progetto){wrap.style.display='none';_repGridData={};return;}
-  if(progetto!==_repExtraProject){_repExtraResources=[];_repExtraProject=progetto;}
+  if(progetto!==_repExtraProject){_repExtraResources=[];_repExtraProject=progetto;_repHiddenResources=new Set();}
   wrap.style.display='block';
   const allRes=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(progetto));
-  const staffed=isAdmin?allRes:(_prjTLByName[progetto]===currentUser?allRes:allRes.filter(r=>r.fullName===currentUser));
+  const staffed=(isAdmin?allRes:(_prjTLByName[progetto]===currentUser?allRes:allRes.filter(r=>r.fullName===currentUser))).filter(r=>!_repHiddenResources.has(r.fullName));
   const extraRes=_repExtraResources.map(n=>RESOURCES.find(x=>x.fullName===n)).filter(Boolean).filter(r=>!staffed.find(x=>x.id===r.id));
   const resources=[...staffed,...extraRes];
   if(!resources.length){document.getElementById('repGriglia').innerHTML='<p style="color:var(--ink-3);font-size:.84rem;padding:12px">Nessuna risorsa del tuo team su questo progetto.</p>';_repGridData={};return;}
@@ -760,7 +760,7 @@ async function buildRepGriglia(){
       const gd=_repGridData[etichetta][r.fullName];
       const etiEsc=etichetta.replace(/'/g,"\\'");
       h+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-      h+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
+      h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="display:flex;align-items:center;gap:6px">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span><button onclick="removeRepResource('${r.fullName.replace(/'/g,"\\'")}',event)" title="Rimuovi dalla griglia" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--ink-3);font-size:.75rem;line-height:1;padding:2px 3px;border-radius:3px;flex-shrink:0" onmouseover="this.style.color='var(--danger)'" onmouseout="this.style.color='var(--ink-3)'">✕</button></div></td>`;
       for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,isFerie=gd.ferieSet.has(d),isSel=gd.selectedDays.has(d);
         if(isFerie){h+=`<td style="background:var(--danger-bg);border:1px solid rgba(201,0,60,.2);padding:3px 1px;text-align:center" title="${isSel?'In ferie · Reperibilità assegnata':'In ferie – clicca per assegnare comunque'}"><div class="rep-day ferie-ov${isSel?' on':''}" id="rd_${r.id}_${d}_${etiKey}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d},'${etiEsc}')"><span class="rep-ferie-badge">F</span></div></td>`;}
         else{h+=`<td style="border:1px solid var(--line);padding:3px 1px;text-align:center;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div class="rep-day${ih?' festivo':iw?' weekend':''}${isSel?' on':''}" id="rd_${r.id}_${d}_${etiKey}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d},'${etiEsc}')"></div></td>`;}
@@ -794,10 +794,11 @@ async function buildRepGriglia(){
   h+=`<div style="margin-top:10px;padding:10px 16px;background:var(--ink);color:var(--white);border-radius:var(--r);display:flex;align-items:center;gap:12px;font-size:.83rem;flex-wrap:wrap"><i class="fa-solid fa-sigma" style="color:var(--amber)"></i><span style="opacity:.75">Totale assegnato:</span><span id="repGrandTotalGg" style="font-weight:700">${grandGg}</span><span style="opacity:.5">giorni ·</span><span id="repGrandTotalEur" style="color:var(--amber);font-weight:700">€${grandEur}</span></div>`;
   const _inGrid=new Set(resources.map(r=>r.fullName));
   const _avail=RESOURCES.filter(r=>!_inGrid.has(r.fullName));
-  if(_avail.length){h+=`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select id="repAddExtraSelect" style="font-size:.8rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink);min-width:180px"><option value="">— Aggiungi risorsa extra —</option>${_avail.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('')}</select><button class="btn btn-ghost2 btn-sm" onclick="addExtraRepResource()"><i class="fa-solid fa-user-plus"></i> Aggiungi</button></div>`;}
+  if(_avail.length){h+=`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select id="repAddExtraSelect" style="font-size:.8rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink);min-width:180px"><option value="">— Aggiungi risorsa —</option>${_avail.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}${_repHiddenResources.has(r.fullName)?' (nascosta)':''}</option>`).join('')}</select><button class="btn btn-ghost2 btn-sm" onclick="addExtraRepResource()"><i class="fa-solid fa-user-plus"></i> Aggiungi</button></div>`;}
   document.getElementById('repGriglia').innerHTML=h;
 }
-function addExtraRepResource(){const sel=document.getElementById('repAddExtraSelect');if(!sel||!sel.value)return;const name=sel.value;if(!_repExtraResources.includes(name))_repExtraResources.push(name);buildRepGriglia();}
+function addExtraRepResource(){const sel=document.getElementById('repAddExtraSelect');if(!sel||!sel.value)return;const name=sel.value;_repHiddenResources.delete(name);if(!_repExtraResources.includes(name))_repExtraResources.push(name);buildRepGriglia();}
+function removeRepResource(name,e){if(e)e.stopPropagation();const ei=_repExtraResources.indexOf(name);if(ei!==-1)_repExtraResources.splice(ei,1);else _repHiddenResources.add(name);buildRepGriglia();}
 function toggleRepDayGrid(resourceName,d,etichetta){
   etichetta=etichetta||'';
   const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return;
