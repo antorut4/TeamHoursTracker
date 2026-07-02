@@ -100,6 +100,7 @@
         <div class="nav-item" id="navRep" onclick="showTab('reperibilita')" style="display:none"><i class="fa-solid fa-tower-broadcast"></i> Reperibilità</div>
         <div class="nav-item" id="navPresenze" onclick="showTab('presenze')" style="display:none"><i class="fa-solid fa-building-user"></i> Presenze</div>
         <div class="nav-section" id="navSectionTeam" style="display:none">Team</div>
+        <div class="nav-item" id="navDashboard" onclick="showTab('dashboard')" style="display:none"><i class="fa-solid fa-gauge-high"></i> Dashboard</div>
         <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Riepilogo ore</div>
         <div class="nav-item" id="navTrend" onclick="showTab('trend')" style="display:none"><i class="fa-solid fa-chart-line"></i> Trend</div>
         <div class="nav-item" id="navOverview" onclick="showTab('overview')" style="display:none"><i class="fa-regular fa-calendar-days"></i> Overview ferie</div>
@@ -149,6 +150,23 @@
         <div class="card">
           <div class="card-title"><i class="fa-solid fa-list-check"></i> Storico inserimenti</div>
           <div id="myOreList"><p style="color:var(--ink-3);font-size:.83rem">Nessuna ora inserita.</p></div>
+        </div>
+      </div>
+      <!-- DASHBOARD -->
+      <div class="panel" id="panel-dashboard">
+        <div class="page-header"><h1>Dashboard risorse</h1><p>Panoramica del team: allocazione sui progetti e stato ore del mese corrente</p></div>
+        <div id="dashKpi" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px"></div>
+        <div id="dashFilterRow" style="display:none;margin-bottom:16px">
+          <div class="field" style="max-width:200px"><label>Team Lead</label><select id="dashboardLead" onchange="renderDashboard()"><option value="">Tutti</option></select></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-chart-column"></i> Distribuzione progetti per risorsa</div>
+          <canvas id="dashCanvas" height="200" style="width:100%;display:block;max-height:200px"></canvas>
+          <p style="font-size:.73rem;color:var(--ink-3);margin-top:8px;text-align:center">Numero di progetti assegnati per ogni risorsa</p>
+        </div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-id-card"></i> Schede risorse</div>
+          <div id="dashGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px"></div>
         </div>
       </div>
       <!-- RIEPILOGO -->
@@ -386,7 +404,7 @@
           <div class="acc-body">
             <div class="field-row" style="align-items:flex-end;margin-top:14px">
               <div class="field"><label>Nome progetto *</label><input type="text" id="newPrjName" placeholder="es. NUOVO AMS" onkeydown="if(event.key==='Enter')addProject()"/></div>
-              <div class="field"><label>Team Lead</label><select id="newPrjTLSel"><option value="">— Nessuno —</option></select></div>
+              <div class="field" style="min-width:220px"><label>Team Lead (multipli)</label><div style="display:flex;flex-direction:column;gap:5px"><div id="newPrjTLTags" style="display:flex;flex-wrap:wrap;gap:4px;min-height:0"></div><select id="newPrjTLSel" onchange="addNewPrjTL()"><option value="">+ Aggiungi Team Lead</option></select></div></div>
               <div class="field" style="max-width:160px"><label>WBS</label><input type="text" id="newPrjWbs" placeholder="Codice WBS (opz.)"/></div>
               <div><button class="btn btn-amber" onclick="addProject()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
             </div>

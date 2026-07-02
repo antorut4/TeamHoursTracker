@@ -10,15 +10,15 @@ async function call(action,payload){
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
 let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{}};
-let _prjIdByName={},_prjNameById={},_prjTLByName={},_prjWbsByName={};
+let _prjIdByName={},_prjNameById={},_prjTLsByName={},_prjWbsByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
 async function reloadAll(){
   const d=await call('bootstrap');
   _cache.prj=(d.progetti||[]).map(r=>r.nome);
-  _prjIdByName={};_prjNameById={};_prjTLByName={};
+  _prjIdByName={};_prjNameById={};_prjTLsByName={};
   const nameById={};(d.risorse||[]).forEach(r=>{nameById[r.id]=r.full_name;});
-  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;_prjTLByName[r.nome]=r.team_lead_id?nameById[r.team_lead_id]||'':'';_prjWbsByName[r.nome]=r.wbs||'';});
+  (d.progetti||[]).forEach(r=>{_prjIdByName[r.nome]=r.id;_prjNameById[r.id]=r.nome;_prjTLsByName[r.nome]=Array.isArray(r.team_lead_names)?r.team_lead_names:[];_prjWbsByName[r.nome]=r.wbs||'';});
   const byRes={};
   (d.allocazioni||[]).forEach(a=>{
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
@@ -28,7 +28,7 @@ async function reloadAll(){
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
-  _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:_prjTLByName[_prjNameById[rp.progetto_id]]||'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[],etichetta:rp.etichetta||''}));
+  _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:rp.team_lead_id?nameById[rp.team_lead_id]||'':'',anno:rp.anno,mese:rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni:[],etichetta:rp.etichetta||''}));
   _cache.wbs=d.wbs||{};
   _cache.repTipi=d.repTipi||{};
 }
@@ -106,7 +106,7 @@ async function launchApp(){
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&(RESOURCES.find(r=>r.fullName===currentUser)?.isManager||false);
-  isProjectTL=!isAdmin&&Object.values(_prjTLByName).includes(currentUser);
+  isProjectTL=!isAdmin&&Object.values(_prjTLsByName).some(tls=>tls.includes(currentUser));
   document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':(isProjectTL?'Team Leader':'Collaboratore'));
   const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
@@ -114,6 +114,7 @@ async function launchApp(){
   navVis('navRep',!isAdmin);
   navVis('navPresenze',true);
   navVis('navSectionTeam',isAdmin||isTeamLead);
+  navVis('navDashboard',isAdmin||isTeamLead);
   navVis('navRiepilogo',isAdmin||isTeamLead);
   navVis('navTrend',false);
   navVis('navOverview',isAdmin||isTeamLead);
@@ -121,7 +122,7 @@ async function launchApp(){
   navVis('navSectionAdmin',isAdmin||isTeamLead);
   navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
-  if(isAdmin||isTeamLead)showTab('admin');else showTab('ore');
+  if(isAdmin||isTeamLead)showTab('dashboard');else showTab('ore');
 }
 // INIT
 async function initApp(){
@@ -153,7 +154,7 @@ async function initApp(){
 }
 function refreshDropdowns(){
   const leads=getLeads(),lOpts=[{v:'',l:'Tutti'},...leads.map(l=>({v:l,l:l}))];
-  ['riepilogoLead','trendLead','ovLead','adminFerLead','filterResLead'].forEach(id=>popSel(id,lOpts,''));
+  ['riepilogoLead','trendLead','ovLead','adminFerLead','filterResLead','dashboardLead'].forEach(id=>popSel(id,lOpts,''));
   popSel('filterMembro',[{v:'',l:'Tutti i membri'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))],'');
   const tlOpts=[{v:'',l:'— Nessuno —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
   popSel('newPrjTLSel',tlOpts,'');
@@ -172,8 +173,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze'];
-const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard'];
+const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -182,6 +183,7 @@ async function showTab(t){
   const an=document.getElementById(NAV_MAP[t]);if(an)an.classList.add('active');
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-'+t).classList.add('active');
+  if(t==='dashboard')renderDashboard();
   if(t==='trend')renderTrend().catch(console.error);
   if(t==='overview')renderOverview();
   if(t==='admin')renderAdminFerieCalendar();
@@ -332,6 +334,70 @@ async function saveWbsForMember(risorsaId,month,year){
   hideSpinner();showMsg(msgId,'WBS salvata','ok');
 }
 // TREND
+// DASHBOARD
+function renderDashboard(){
+  const lf=(isTeamLead&&!isAdmin)?currentUser:(document.getElementById('dashboardLead')?.value||'');
+  const members=getMembers(lf);
+  const now=new Date(),month=now.getMonth(),year=now.getFullYear();
+  const hrsMap={};
+  (_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)hrsMap[res.fullName]={ore1:o.ore_q1,ore2:o.ore_q2};});
+  const resources=members.map(m=>RESOURCES.find(r=>r.fullName===m)).filter(Boolean);
+  const totalProjects=new Set(resources.flatMap(r=>r.progetti||[])).size;
+  const avgProjects=resources.length?(resources.reduce((s,r)=>s+(r.progetti||[]).length,0)/resources.length).toFixed(1):'0';
+  const inserted=resources.filter(r=>hrsMap[r.fullName]).length;
+  const filterRow=document.getElementById('dashFilterRow');
+  if(filterRow)filterRow.style.display=isAdmin?'':'none';
+  document.getElementById('dashKpi').innerHTML=[
+    {icon:'fa-users',val:resources.length,lbl:'Risorse',color:'var(--amber)',bg:'var(--amber-bg)'},
+    {icon:'fa-folder-open',val:totalProjects,lbl:'Progetti attivi',color:'var(--info)',bg:'var(--info-bg)'},
+    {icon:'fa-layer-group',val:avgProjects,lbl:'Proj. medi / risorsa',color:'var(--ok)',bg:'var(--ok-bg)'},
+    {icon:'fa-clock',val:inserted+'/'+resources.length,lbl:'Ore inserite '+MONTHS[month],color:inserted===resources.length?'var(--ok)':'var(--warn)',bg:inserted===resources.length?'var(--ok-bg)':'var(--warn-bg)'}
+  ].map(k=>`<div class="card" style="margin:0;padding:16px 18px;display:flex;align-items:center;gap:13px"><div style="width:40px;height:40px;border-radius:10px;background:${k.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fa-solid ${k.icon}" style="color:${k.color};font-size:.95rem"></i></div><div><div style="font-size:1.6rem;font-weight:700;font-family:var(--f-display);color:var(--ink);line-height:1">${k.val}</div><div style="font-size:.74rem;color:var(--ink-3);margin-top:3px">${k.lbl}</div></div></div>`).join('');
+  requestAnimationFrame(()=>{
+    const cv=document.getElementById('dashCanvas');if(!cv)return;
+    const ctx=cv.getContext('2d');
+    const W=cv.offsetWidth||700,H=200;cv.width=W;cv.height=H;ctx.clearRect(0,0,W,H);
+    if(!resources.length)return;
+    const maxP=Math.max(...resources.map(r=>(r.progetti||[]).length),1);
+    const Pad={t:28,r:16,b:36,l:16},pw=W-Pad.l-Pad.r,ph=H-Pad.t-Pad.b;
+    const n=resources.length,slotW=pw/n,barW=Math.max(14,Math.min(52,slotW*0.55));
+    for(let i=0;i<=maxP;i++){const y=Pad.t+ph*(1-i/maxP);ctx.strokeStyle='rgba(0,0,0,.05)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(Pad.l,y);ctx.lineTo(Pad.l+pw,y);ctx.stroke();}
+    resources.forEach((r,i)=>{
+      const count=(r.progetti||[]).length,color=colorFor(r.fullName);
+      const cx=Pad.l+slotW*i+slotW/2,bh=count>0?ph*count/maxP:3,y=Pad.t+ph-bh,x=cx-barW/2,rad=5;
+      ctx.fillStyle=color+'1A';ctx.beginPath();
+      if(ctx.roundRect){ctx.roundRect(x,Pad.t,barW,ph,rad);}else{ctx.rect(x,Pad.t,barW,ph);}
+      ctx.fill();
+      ctx.fillStyle=color;ctx.globalAlpha=0.88;ctx.beginPath();
+      if(ctx.roundRect){ctx.roundRect(x,y,barW,bh,bh<rad*2?bh/2:rad);}else{ctx.rect(x,y,barW,bh);}
+      ctx.fill();ctx.globalAlpha=1;
+      if(count>0){ctx.fillStyle=color;ctx.font='bold 12px DM Sans,sans-serif';ctx.textAlign='center';ctx.fillText(count,cx,y-7);}
+      ctx.fillStyle='#8A8275';ctx.font='10px DM Sans,sans-serif';ctx.textAlign='center';
+      ctx.fillText((r.nome||r.fullName.split(' ')[0]).slice(0,9),cx,H-7);
+    });
+  });
+  document.getElementById('dashGrid').innerHTML=resources.map(r=>{
+    const hrs=hrsMap[r.fullName],color=colorFor(r.fullName);
+    const initials=((r.nome||r.fullName.split(' ')[0])[0]+(r.cognome||r.fullName.split(' ')[1]||'?')[0]).toUpperCase();
+    const nProj=(r.progetti||[]).length;
+    let hrsStatus;
+    if(hrs){const tot=(+hrs.ore1||0)+(+hrs.ore2||0),av=wHours(year,month,1)+wHours(year,month,2);
+      if(tot>av)hrsStatus=`<span class="badge badge-warn" style="gap:5px"><i class="fa-solid fa-bolt" style="font-size:.62rem"></i>+${tot-av}h extra</span>`;
+      else hrsStatus=`<span class="badge badge-ok" style="gap:5px"><i class="fa-solid fa-check" style="font-size:.62rem"></i>${tot}h</span>`;}
+    else hrsStatus=`<span class="badge badge-danger" style="gap:5px"><i class="fa-solid fa-xmark" style="font-size:.62rem"></i>Mancanti</span>`;
+    const projChips=(r.progetti||[]).map(p=>`<span style="background:var(--stone-2);border-radius:4px;padding:2px 8px;font-size:.71rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${p}</span>`).join('');
+    return `<div class="card" style="margin:0;padding:18px 20px;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="width:40px;height:40px;border-radius:50%;background:${color}22;border:2px solid ${color}55;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:${color};flex-shrink:0">${initials}</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.9rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.fullName}</div><div style="font-size:.73rem;color:var(--ink-3);margin-top:1px">${r.managerName||'—'}</div></div>
+        <div style="font-size:.72rem;font-weight:700;background:${color}18;color:${color};border-radius:20px;padding:3px 9px;white-space:nowrap;flex-shrink:0">${nProj} ${nProj===1?'progetto':'progetti'}</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;min-height:22px;margin-bottom:12px;flex:1">${projChips||'<span style="font-size:.74rem;color:var(--ink-3)">Nessun progetto</span>'}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:10px">\
+        <span style="font-size:.74rem;color:var(--ink-3)">${MONTHS[month]} ${year}</span>${hrsStatus}</div>
+    </div>`;
+  }).join('')||'<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa trovata.</p>';
+}
 async function renderTrend(){
   const n=+document.getElementById('trendMonths').value,lf=document.getElementById('trendLead').value;
   const members=getMembers(lf),now=new Date(),labels=[],periods=[];
@@ -509,8 +575,8 @@ function _addTag(prefix,value){
   const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return;
   if([...tagsDiv.querySelectorAll('.prj-tag')].some(t=>t.dataset.value===value))return;
   const tag=document.createElement('span');tag.className='prj-tag';tag.dataset.value=value;
-  const tl=_prjTLByName[value];
-  const tlHtml=tl?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${tl.split(' ')[0]}</span>`:'';
+  const tls=_prjTLsByName[value]||[];
+  const tlHtml=tls.length?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${tls.map(t=>t.split(' ')[0]).join(', ')}</span>`:'';
   tag.innerHTML=`<i class="fa-solid fa-folder" style="font-size:.7rem"></i> ${value}${tlHtml}<button type="button" onclick="removeProgettoTag(this,'${prefix}')" title="Rimuovi">✕</button>`;
   tagsDiv.appendChild(tag);
 }
@@ -521,17 +587,34 @@ function addProgettoTag(prefix){
 function removeProgettoTag(btn,prefix){btn.parentElement.remove();}
 function getProgettoSelected(prefix){const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return[];return[...tagsDiv.querySelectorAll('.prj-tag')].map(t=>t.dataset.value);}
 function getProgettoLeads(prefix){const tagsDiv=document.getElementById(prefix+'ProgettoTags');if(!tagsDiv)return{};const m={};tagsDiv.querySelectorAll('.prj-tag').forEach(t=>{if(t.dataset.lead)m[t.dataset.value]=t.dataset.lead;});return m;}
+function addNewPrjTL(){
+  const sel=document.getElementById('newPrjTLSel');if(!sel||!sel.value)return;
+  const name=sel.value,tags=document.getElementById('newPrjTLTags');
+  if(!tags)return;
+  if([...tags.querySelectorAll('[data-tl]')].some(t=>t.dataset.tl===name)){sel.value='';return;}
+  const chip=document.createElement('span');
+  chip.dataset.tl=name;chip.style.cssText='display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:2px 8px;font-size:.75rem;font-weight:600';
+  chip.innerHTML=`<i class="fa-solid fa-user-tie" style="font-size:.65rem"></i>${name}<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.85rem;margin-left:2px">×</button>`;
+  tags.appendChild(chip);sel.value='';
+}
+function getNewPrjTLNames(){return[...document.querySelectorAll('#newPrjTLTags [data-tl]')].map(t=>t.dataset.tl);}
 async function addProject(){
   const name=document.getElementById('newPrjName').value.trim();if(!name){showMsg('addPrjMsg','Inserisci il nome del progetto.','err');return;}
   const prjs=await getProjects();if(prjs.map(p=>p.toLowerCase()).includes(name.toLowerCase())){showMsg('addPrjMsg','Progetto già esistente.','err');return;}
-  const tlName=document.getElementById('newPrjTLSel')?.value||'';
+  const teamLeadNames=getNewPrjTLNames();
   const wbs=(document.getElementById('newPrjWbs')?.value||'').trim();
-  showSpinner();try{await call('addProject',{nome:name,teamLeadName:tlName||null,wbs:wbs||null});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('newPrjName').value='';const ts=document.getElementById('newPrjTLSel');if(ts)ts.value='';const ws=document.getElementById('newPrjWbs');if(ws)ws.value='';
+  showSpinner();try{await call('addProject',{nome:name,teamLeadNames,wbs:wbs||null});await reloadAll();}catch(e){hideSpinner();showMsg('addPrjMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  document.getElementById('newPrjName').value='';const tags=document.getElementById('newPrjTLTags');if(tags)tags.innerHTML='';const ts=document.getElementById('newPrjTLSel');if(ts)ts.value='';const ws=document.getElementById('newPrjWbs');if(ws)ws.value='';
   await renderProjectList();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));populateSearchByProject();refreshDropdowns();showMsg('addPrjMsg','"'+name+'" aggiunto','ok');
 }
-async function saveProjectLead(id,tlName){
-  showSpinner();try{await call('saveProjectLead',{id,teamLeadName:tlName||null});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
+async function saveProjectLead(id,tlName){/* deprecata — usa addProjectTL/removeProjectTL */}
+async function addProjectTL(progettoId,tlName){
+  if(!tlName)return;
+  showSpinner();try{await call('addProjectTL',{progettoId,tlName});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
+  await renderProjectList();refreshDropdowns();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));
+}
+async function removeProjectTL(progettoId,tlName){
+  showSpinner();try{await call('removeProjectTL',{progettoId,tlName});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
   await renderProjectList();refreshDropdowns();populateProgettoSelect('res',getProgettoSelected('res'));populateProgettoSelect('edit',getProgettoSelected('edit'));
 }
 async function saveProjectWbs(id,wbs){
@@ -543,30 +626,36 @@ async function renderResourcesByProject(){
   if(!prj){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Seleziona un progetto.</p>';return;}
   const staffed=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(prj));
   if(!staffed.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa allocata.</p>';return;}
-  const tl=_prjTLByName[prj]||'—';
-  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj} · TL: ${tl}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${(r.progetti||[]).join(', ')||'—'}</div></div></div>`).join('');
+  const tls=_prjTLsByName[prj]||[];const tlLabel=tls.length?tls.join(', '):'—';
+  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj} · TL: ${tlLabel}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${(r.progetti||[]).join(', ')||'—'}</div></div></div>`).join('');
 }
 async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(isTeamLead&&!isAdmin)?_getManagerProjects():(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
 function _getManagerProjects(){const myResPrjs=new Set(RESOURCES.filter(r=>r.managerName===currentUser).flatMap(r=>r.progetti||[]));return(_cache.prj||[]).filter(p=>myResPrjs.has(p)).sort();}
 async function renderProjectList(){
   const prjsFull=(isTeamLead&&!isAdmin)?_getManagerProjects():(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
   if(!prjsFull.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
-  const tlOpts=RESOURCES.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('');
+  const tlOptsList=RESOURCES.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('');
   el.innerHTML=prjsFull.map(p=>{
-    const pid=_prjIdByName[p]||0,tl=_prjTLByName[p]||'';
+    const pid=_prjIdByName[p]||0,currentTLs=_prjTLsByName[p]||[];
     const pSafe=p.replace(/'/g,"\\'");
     const tipi=_cache.repTipi[String(pid)]||[];
     const tipiTags=tipi.length?tipi.map(t=>`<span style="background:var(--info-bg);color:var(--info);border-radius:4px;padding:1px 7px;font-size:.7rem;display:inline-flex;align-items:center;gap:3px">${t} <button onclick="removeRepTipoUI(${pid},'${t.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:var(--info);padding:0;line-height:1;font-size:.75rem">×</button></span>`).join(''):'<span style="font-size:.7rem;color:var(--ink-3);font-style:italic">predefinita</span>';
+    const tlChips=currentTLs.map(tl=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:2px 7px;font-size:.72rem;font-weight:600">${tl.split(' ')[0]} ${tl.split(' ').slice(1).join(' ')} <button onclick="removeProjectTL(${pid},'${tl.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.8rem;margin-left:2px">×</button></span>`).join('');
+    const addableTLs=tlOptsList.replace(currentTLs.map(tl=>`value="${tl.replace(/"/g,'&quot;')}"`).join('|'),'');
     return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)">
       <i class="fa-solid fa-folder" style="color:var(--amber);font-size:.8rem;flex-shrink:0"></i>
       <span style="font-size:.85rem;font-weight:500;flex:1;min-width:80px">${p}</span>
-      <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap">TL:</span>
-      <select style="font-size:.75rem;padding:2px 5px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:160px" onchange="saveProjectLead(${pid},this.value)">
-        <option value="">— Nessuno —</option>${tlOpts.replace(`value="${tl.replace(/"/g,'&quot;')}"`,`value="${tl.replace(/"/g,'&quot;')}" selected`)}
-      </select>
       <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap;flex-shrink:0">WBS:</span>
       <input type="text" placeholder="Codice WBS" value="${(_prjWbsByName[p]||'').replace(/"/g,'&quot;')}" style="font-size:.75rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:120px" onblur="saveProjectWbs(${pid},this.value)" onkeydown="if(event.key==='Enter')saveProjectWbs(${pid},this.value)"/>
       <button class="btn-icon danger" onclick="deleteProject('${pSafe}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
+      <div style="flex:1 1 100%;display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:5px;border-top:1px solid var(--line)">
+        <span style="font-size:.72rem;color:var(--ink-3);font-weight:600;white-space:nowrap;flex-shrink:0"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Team Lead:</span>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">${tlChips||'<span style="font-size:.72rem;color:var(--ink-3);font-style:italic">nessuno</span>'}
+          <select style="font-size:.72rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:160px;color:var(--ink-2)" onchange="if(this.value){addProjectTL(${pid},this.value);this.value=''}">
+            <option value="">+ Aggiungi TL</option>${tlOptsList}
+          </select>
+        </div>
+      </div>
       <div style="flex:1 1 100%;display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:5px;border-top:1px solid var(--line)">
         <span style="font-size:.72rem;color:var(--ink-3);font-weight:600;white-space:nowrap"><i class="fa-solid fa-tower-broadcast" style="margin-right:3px"></i>Reperibilità:</span>
         <div style="display:flex;gap:3px;flex-wrap:wrap">${tipiTags}</div>
@@ -619,7 +708,7 @@ async function renderResourceList(){
   if(!RESOURCES.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa ancora.</p>';return;}
   let filtered=RESOURCES.filter(r=>{
     if(isTeamLead&&!isAdmin&&r.managerName!==currentUser)return false;
-    if(lf&&!r.progetti.some(p=>_prjTLByName[p]===lf))return false;
+    if(lf&&!r.progetti.some(p=>(_prjTLsByName[p]||[]).includes(lf)))return false;
     if(search&&!r.fullName.toLowerCase().includes(search))return false;
     return true;
   });
@@ -711,11 +800,11 @@ async function initRepPanel(){
     document.getElementById('repUserView').style.display='none';document.getElementById('repLeadView').style.display='block';
     const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
     popSel('repMonth',mOpts,now.getMonth());popSel('repYear',yOpts,now.getFullYear());
-    const team=isAdmin?RESOURCES:RESOURCES.filter(r=>(r.progetti||[]).some(p=>_prjTLByName[p]===currentUser));
+    const team=isAdmin?RESOURCES:RESOURCES.filter(r=>(r.progetti||[]).some(p=>(_prjTLsByName[p]||[]).includes(currentUser)));
     const rFilt=document.getElementById('repFilterRisorsa');rFilt.innerHTML='<option value="">Tutte le risorse</option>';team.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;rFilt.appendChild(o);});
     const yFilt=document.getElementById('repFilterAnno');yFilt.innerHTML='<option value="">Tutti gli anni</option>';yOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;yFilt.appendChild(o);});
     const mFilt=document.getElementById('repFilterMese');mFilt.innerHTML='<option value="">Tutti i mesi</option>';mOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;mFilt.appendChild(o);});
-    const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLByName).filter(([,tl])=>tl===currentUser).map(([p])=>p).sort();
+    const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p).sort();
     const repPrjSel=document.getElementById('repProgetto');repPrjSel.innerHTML='<option value="">— Seleziona —</option>';myPrjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;repPrjSel.appendChild(o);});
     await buildRepGriglia();await renderRepTeam();
   }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';await renderRepMine();}
@@ -728,7 +817,7 @@ async function buildRepGriglia(){
   if(progetto!==_repExtraProject){_repExtraResources=[];_repExtraProject=progetto;_repHiddenResources=new Set();}
   wrap.style.display='block';
   const allRes=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(progetto));
-  const staffed=(isAdmin?allRes:(_prjTLByName[progetto]===currentUser?allRes:allRes.filter(r=>r.fullName===currentUser))).filter(r=>!_repHiddenResources.has(r.fullName));
+  const staffed=(isAdmin?allRes:((_prjTLsByName[progetto]||[]).includes(currentUser)?allRes:allRes.filter(r=>r.fullName===currentUser))).filter(r=>!_repHiddenResources.has(r.fullName));
   const extraRes=_repExtraResources.map(n=>RESOURCES.find(x=>x.fullName===n)).filter(Boolean).filter(r=>!staffed.find(x=>x.id===r.id));
   const resources=[...staffed,...extraRes];
   if(!resources.length){document.getElementById('repGriglia').innerHTML='<p style="color:var(--ink-3);font-size:.84rem;padding:12px">Nessuna risorsa del tuo team su questo progetto.</p>';_repGridData={};return;}
@@ -917,14 +1006,14 @@ async function saveReperibilita(){
 }
 async function renderRepTeam(){
   const fRis=document.getElementById('repFilterRisorsa')?.value||'',fAnno=document.getElementById('repFilterAnno')?.value||'',fMese=document.getElementById('repFilterMese')?.value;
-  const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):RESOURCES.filter(r=>(r.progetti||[]).some(p=>_prjTLByName[p]===currentUser)).map(r=>r.fullName);
+  const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):RESOURCES.filter(r=>(r.progetti||[]).some(p=>(_prjTLsByName[p]||[]).includes(currentUser))).map(r=>r.fullName);
   let filtered=(await getRepStore()).filter(r=>{if(!isAdmin&&!teamNames.includes(r.fullName))return false;if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
   const el=document.getElementById('repTeamList');
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata.</p>';return;}
   const ferieMap={};await Promise.all(filtered.map(async r=>{ferieMap[r.fullName+'|'+r.anno+'|'+r.mese]=await ferieGiorniSet(r.fullName,r.anno,r.mese);}));
   el.innerHTML=filtered.map(r=>{const ferie=ferieMap[r.fullName+'|'+r.anno+'|'+r.mese]||new Set();
     const daysStr=r.giorni.map(d=>{const iF=ferie.has(d);return `<span style="display:inline-block;background:${iF?'var(--warn-bg)':'var(--info-bg)'};color:${iF?'var(--warn)':'var(--info)'};border-radius:4px;padding:1px 6px;margin:1px 2px;font-size:.71rem">${iF?'⚠ ':''}${d} ${MONTHS[r.mese].slice(0,3)}</span>`;}).join('');
-    const canDel=isAdmin||(isProjectTL&&_prjTLByName[r.progetto]===currentUser);
+    const canDel=isAdmin||(isProjectTL&&(_prjTLsByName[r.progetto]||[]).includes(currentUser));
     const earn=calcRepEarningsFromDays(r.giorni,r.anno,r.mese);
     return `<div class="rep-entry"><div style="flex:1"><div class="re-proj">${r.progetto}${r.etichetta?` <span style="font-size:.72rem;font-weight:400;color:var(--ink-3)">(${r.etichetta})</span>`:''}</div><div class="re-meta"><b>${r.fullName}</b> · ${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span> · Lead: ${r.teamLead||'—'}</div><div class="re-days">${daysStr}</div></div>${canDel?`<button class="btn-icon danger" onclick="deleteRep(${r.id},'${r.fullName.replace(/'/g,"\\'")}','${r.progetto.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
   }).join('');
@@ -978,9 +1067,9 @@ async function renderRepOverview(){
   let html='';
   for(const [progetto,entries] of Object.entries(byProject).sort(([a],[b])=>a.localeCompare(b))){
     const resOnPrj=myResources.filter(r=>entries.some(e=>e.risorsaId===r.id));
-    const tl=_prjTLByName[progetto]||'—';
+    const tls=_prjTLsByName[progetto]||[];const tlLabel=tls.length?tls.join(', '):'—';
     html+=`<div class="card" style="margin-bottom:16px">`;
-    html+=`<div class="card-title"><i class="fa-solid fa-folder"></i> ${progetto} <span style="font-size:.72rem;color:var(--ink-3);font-weight:400;margin-left:6px">TL: ${tl}</span></div>`;
+    html+=`<div class="card-title"><i class="fa-solid fa-folder"></i> ${progetto} <span style="font-size:.72rem;color:var(--ink-3);font-weight:400;margin-left:6px">TL: ${tlLabel}</span></div>`;
     html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
     html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
     for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;

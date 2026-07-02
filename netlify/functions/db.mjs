@@ -12,8 +12,28 @@ const sql = neon(process.env.DATABASE_URL);
 
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
 async function bootstrap(){
+  // Crea la join table dei TL multipli se non esiste + migrazione one-time
+  await sql`CREATE TABLE IF NOT EXISTS progetto_team_leads (
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    risorsa_id  INTEGER NOT NULL REFERENCES risorse(id)  ON DELETE CASCADE,
+    PRIMARY KEY (progetto_id, risorsa_id)
+  )`;
+  await sql`INSERT INTO progetto_team_leads (progetto_id, risorsa_id)
+    SELECT id, team_lead_id FROM progetti WHERE team_lead_id IS NOT NULL
+    ON CONFLICT DO NOTHING`;
+
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
-    sql`SELECT id, nome, team_lead_id, wbs FROM progetti ORDER BY nome`,
+    sql`SELECT p.id, p.nome, p.wbs,
+          COALESCE(
+            ARRAY_AGG(r.full_name ORDER BY r.cognome, r.nome)
+            FILTER (WHERE r.id IS NOT NULL),
+            ARRAY[]::TEXT[]
+          ) AS team_lead_names
+        FROM progetti p
+        LEFT JOIN progetto_team_leads ptl ON p.id = ptl.progetto_id
+        LEFT JOIN risorse r ON ptl.risorsa_id = r.id
+        GROUP BY p.id, p.nome, p.wbs
+        ORDER BY p.nome`,
     sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
@@ -56,22 +76,24 @@ async function deleteFerie(p){ await sql`DELETE FROM ferie WHERE id=${p.id}`; }
 
 // ── progetti (la DELETE sfrutta ON DELETE CASCADE sulle allocazioni) ──
 async function addProject(p){
-  let tlId = null;
-  if(p.teamLeadName){
-    const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLeadName}`;
-    tlId = tl ? tl.id : null;
-  }
   const wbs = p.wbs || null;
-  await sql`INSERT INTO progetti (nome, team_lead_id, wbs) VALUES (${p.nome}, ${tlId}, ${wbs})`;
-}
-async function saveProjectLead(p){
-  let tlId = null;
-  if(p.teamLeadName){
-    const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLeadName}`;
-    tlId = tl ? tl.id : null;
+  const [proj] = await sql`INSERT INTO progetti (nome, wbs) VALUES (${p.nome}, ${wbs}) RETURNING id`;
+  for(const name of (p.teamLeadNames || [])){
+    const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${name}`;
+    if(tl) await sql`INSERT INTO progetto_team_leads (progetto_id, risorsa_id) VALUES (${proj.id}, ${tl.id}) ON CONFLICT DO NOTHING`;
   }
-  await sql`UPDATE progetti SET team_lead_id=${tlId} WHERE id=${p.id}`;
 }
+async function addProjectTL(p){
+  const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.tlName}`;
+  if(!tl) throw new Error('Risorsa non trovata: ' + p.tlName);
+  await sql`INSERT INTO progetto_team_leads (progetto_id, risorsa_id) VALUES (${p.progettoId}, ${tl.id}) ON CONFLICT DO NOTHING`;
+}
+async function removeProjectTL(p){
+  const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.tlName}`;
+  if(!tl) return;
+  await sql`DELETE FROM progetto_team_leads WHERE progetto_id=${p.progettoId} AND risorsa_id=${tl.id}`;
+}
+async function saveProjectLead(p){ /* mantenuto per compatibilità — usa addProjectTL/removeProjectTL */ }
 async function saveProjectWbs(p){
   await sql`UPDATE progetti SET wbs=${p.wbs||null} WHERE id=${p.id}`;
 }
@@ -194,6 +216,7 @@ async function setAdminPwd(p){
 // ── routing: whitelist esplicita delle action consentite ──
 const ACTIONS = {
   bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
+  addProjectTL, removeProjectTL,
   addResource, saveEdit, deleteResource, saveRep, deleteRep,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
