@@ -829,6 +829,7 @@ async function buildRepGriglia(){
   const DN=['D','L','M','M','G','V','S'];
   _repGridData={};
   const freshRep=await call('getRepForProject',{progetto,anno:year,mese:month});
+  console.log('[REP] getRepForProject →',{progetto,anno:year,mese:month},'risultato:',freshRep);
   const repByResId={};freshRep.forEach(rp=>{repByResId[rp.risorsaId]=new Set(rp.giorni);});
   for(const etichetta of tipi){
     _repGridData[etichetta]={};
@@ -910,13 +911,14 @@ async function toggleRepDayGrid(resourceName,d,etichetta){
   const tlName=(currentUser&&currentUser!=='ADMIN')?currentUser:null;
   const giorni=[...gd.selectedDays].sort((a,b)=>a-b);
   try{
-    await call('saveRep',{risorsaId:r.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
+    const saved=await call('saveRep',{risorsaId:r.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
+    console.log('[REP] saveRep ok →',saved);
     gd.savedDays=new Set(gd.selectedDays);
   }catch(e){
     if(wasOn){gd.selectedDays.add(d);el.classList.add('on');}else{gd.selectedDays.delete(d);el.classList.remove('on');}
     if(ggEl)ggEl.textContent=gd.selectedDays.size;
     updateRepTotals();
-    showMsg('repMsg','Errore salvataggio: '+e.message,'err');
+    alert('ERRORE salvataggio reperibilità:\n'+e.message);
   }
 }
 async function applyRepRange(){

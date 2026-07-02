@@ -144,8 +144,10 @@ async function saveRep(p){
   }
   await sql`DELETE FROM reperibilita WHERE risorsa_id=${p.risorsaId} AND progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
   if(p.giorni && p.giorni.length > 0){
-    await sql`INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni) VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni)}::jsonb)`;
+    const [row] = await sql`INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni) VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni)}::jsonb) RETURNING id, giorni`;
+    return {id: row.id, giorni: row.giorni};
   }
+  return {giorni: []};
 }
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
 async function getRepForProject(p){
