@@ -148,6 +148,12 @@ async function saveRep(p){
   }
 }
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
+async function getRepForProject(p){
+  const [proj] = await sql`SELECT id FROM progetti WHERE nome=${p.progetto}`;
+  if(!proj) return [];
+  const rows = await sql`SELECT id, risorsa_id, anno, mese, giorni FROM reperibilita WHERE progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
+  return rows.map(r=>({id:r.id, risorsaId:+r.risorsa_id, anno:+r.anno, mese:+r.mese, giorni:Array.isArray(r.giorni)?r.giorni.map(Number):[]}));
+}
 
 // ── presenze in ufficio ──
 async function getPresenze(p){
@@ -204,7 +210,7 @@ async function setAdminPwd(p){
 const ACTIONS = {
   bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
   addProjectTL, removeProjectTL,
-  addResource, saveEdit, deleteResource, saveRep, deleteRep,
+  addResource, saveEdit, deleteResource, saveRep, deleteRep, getRepForProject,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi

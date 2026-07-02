@@ -798,7 +798,6 @@ let _repGridData={};let _repExtraResources=[];let _repExtraProject='';let _repHi
 function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return days.reduce((tot,d)=>{const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt);return tot+(wd===0||wd===6||hol.has(ds)?40:25);},0);}
 function calcRepEarnings(resourceName,year,month,etichetta){const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
-  await reloadAll();
   const now=new Date();
   if(isProjectTL||isAdmin){
     document.getElementById('repUserView').style.display='none';document.getElementById('repLeadView').style.display='block';
@@ -829,14 +828,14 @@ async function buildRepGriglia(){
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
   const DN=['D','L','M','M','G','V','S'];
   _repGridData={};
-  const existingRep=(_cache.rep||[]);
+  const freshRep=await call('getRepForProject',{progetto,anno:year,mese:month});
+  const repByResId={};freshRep.forEach(rp=>{repByResId[rp.risorsaId]=new Set(rp.giorni);});
   for(const etichetta of tipi){
     _repGridData[etichetta]={};
     for(const r of resources){
       const ferieSet=await ferieGiorniSet(r.fullName,year,month);
-      const existing=existingRep.filter(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto&&(rp.etichetta||'')===(etichetta||''));
-      const existingDays=new Set(existing.flatMap(rp=>rp.giorni));
-      _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:existingDays,savedDays:new Set(existingDays),rid:r.id};
+      const existingDays=repByResId[r.id]||new Set();
+      _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:new Set(existingDays),savedDays:new Set(existingDays),rid:r.id};
     }
   }
   let h='';
@@ -913,9 +912,6 @@ async function toggleRepDayGrid(resourceName,d,etichetta){
   try{
     await call('saveRep',{risorsaId:r.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
     gd.savedDays=new Set(gd.selectedDays);
-    // Aggiorna _cache.rep in memoria così il cambio progetto non perde i dati
-    const cached=_cache.rep.find(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto);
-    if(cached){cached.giorni=giorni;}else{_cache.rep.push({id:null,risorsaId:r.id,progetto,teamLead:tlName||'',anno:year,mese:month,giorni,etichetta:etichetta||''});}
   }catch(e){
     if(wasOn){gd.selectedDays.add(d);el.classList.add('on');}else{gd.selectedDays.delete(d);el.classList.remove('on');}
     if(ggEl)ggEl.textContent=gd.selectedDays.size;
