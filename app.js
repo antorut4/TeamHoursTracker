@@ -835,7 +835,7 @@ async function buildRepGriglia(){
       const ferieSet=await ferieGiorniSet(r.fullName,year,month);
       const existing=existingRep.filter(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto&&(rp.etichetta||'')===(etichetta||''));
       const existingDays=new Set(existing.flatMap(rp=>rp.giorni));
-      _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:existingDays,rid:r.id};
+      _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:existingDays,savedDays:new Set(existingDays),rid:r.id};
     }
   }
   let h='';
@@ -897,8 +897,10 @@ function toggleRepDayGrid(resourceName,d,etichetta){
   const r=RESOURCES.find(x=>x.fullName===resourceName);if(!r)return;
   const etiKey=etichetta||'main';
   const el=document.getElementById(`rd_${r.id}_${d}_${etiKey}`);if(!el)return;
-  if(gd.selectedDays.has(d)){gd.selectedDays.delete(d);el.classList.remove('on');}
-  else{gd.selectedDays.add(d);el.classList.add('on');}
+  if(gd.selectedDays.has(d)){
+    if(gd.savedDays?.has(d))return;
+    gd.selectedDays.delete(d);el.classList.remove('on');
+  }else{gd.selectedDays.add(d);el.classList.add('on');}
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
   const earn=calcRepEarnings(resourceName,year,month,etichetta);
   const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);

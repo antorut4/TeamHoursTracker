@@ -38,7 +38,7 @@ async function bootstrap(){
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
-    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
+    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni, etichetta FROM reperibilita`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`
   ]);
