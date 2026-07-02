@@ -912,6 +912,9 @@ async function toggleRepDayGrid(resourceName,d,etichetta){
   try{
     await call('saveRep',{risorsaId:r.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
     gd.savedDays=new Set(gd.selectedDays);
+    // Aggiorna _cache.rep in memoria così il cambio progetto non perde i dati
+    const cached=_cache.rep.find(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto);
+    if(cached){cached.giorni=giorni;}else{_cache.rep.push({id:null,risorsaId:r.id,progetto,teamLead:tlName||'',anno:year,mese:month,giorni,etichetta:etichetta||''});}
   }catch(e){
     if(wasOn){gd.selectedDays.add(d);el.classList.add('on');}else{gd.selectedDays.delete(d);el.classList.remove('on');}
     if(ggEl)ggEl.textContent=gd.selectedDays.size;
