@@ -1078,7 +1078,8 @@ async function renderRepOverview(){
     for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
       html+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih||iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
     html+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
-    html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th></tr></thead><tbody>`;
+    if(isAdmin)html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th>`;
+    html+=`</tr></thead><tbody>`;
     resOnPrj.forEach((r,ri)=>{
       const entry=entries.find(e=>e.risorsaId===r.id);
       const days=entry?new Set(entry.giorni):new Set();
@@ -1086,14 +1087,16 @@ async function renderRepOverview(){
       html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
       for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d);
         html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?'rgba(0,123,255,.12)':ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?'var(--info)':'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white">${on?'✓':''}</div></td>`;}
-      const earn=entry?calcRepEarningsFromDays(entry.giorni,year,month):0;
       html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem">${days.size}</td>`;
-      html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;color:var(--ok);font-size:.72rem;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
+      if(isAdmin){const earn=entry?calcRepEarningsFromDays(entry.giorni,year,month):0;html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;color:var(--ok);font-size:.72rem;border-left:1px solid var(--stone-3)">€${earn}</td>`;}
+      html+=`</tr>`;
     });
     html+=`</tbody></table></div>`;
-    const totGg=entries.reduce((s,e)=>s+e.giorni.length,0),totEur=entries.reduce((s,e)=>s+calcRepEarningsFromDays(e.giorni,year,month),0);
+    const totGg=entries.reduce((s,e)=>s+e.giorni.length,0);
     html+=`<div style="margin-top:10px;padding:8px 12px;background:var(--stone);border-radius:var(--r);display:flex;gap:16px;flex-wrap:wrap;font-size:.78rem">`;
-    html+=`<span><b>${resOnPrj.length}</b> risorsa/e</span><span><b>${totGg}</b> giorni totali</span><span style="color:var(--ok);font-weight:700">€${totEur} totale</span></div></div>`;
+    html+=`<span><b>${resOnPrj.length}</b> risorsa/e</span><span><b>${totGg}</b> giorni totali</span>`;
+    if(isAdmin){const totEur=entries.reduce((s,e)=>s+calcRepEarningsFromDays(e.giorni,year,month),0);html+=`<span style="color:var(--ok);font-weight:700">€${totEur} totale</span>`;}
+    html+=`</div></div>`;
   }
   el.innerHTML=html;
 }
