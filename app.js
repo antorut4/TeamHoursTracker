@@ -891,22 +891,33 @@ async function buildRepGriglia(){
 }
 function addExtraRepResource(){const sel=document.getElementById('repAddExtraSelect');if(!sel||!sel.value)return;const name=sel.value;_repHiddenResources.delete(name);if(!_repExtraResources.includes(name))_repExtraResources.push(name);buildRepGriglia();}
 function removeRepResource(name,e){if(e)e.stopPropagation();const ei=_repExtraResources.indexOf(name);if(ei!==-1)_repExtraResources.splice(ei,1);else _repHiddenResources.add(name);buildRepGriglia();}
-function toggleRepDayGrid(resourceName,d,etichetta){
+async function toggleRepDayGrid(resourceName,d,etichetta){
   etichetta=etichetta||'';
   const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return;
   const r=RESOURCES.find(x=>x.fullName===resourceName);if(!r)return;
   const etiKey=etichetta||'main';
   const el=document.getElementById(`rd_${r.id}_${d}_${etiKey}`);if(!el)return;
-  if(gd.selectedDays.has(d)){
-    if(gd.savedDays?.has(d))return;
-    gd.selectedDays.delete(d);el.classList.remove('on');
-  }else{gd.selectedDays.add(d);el.classList.add('on');}
+  const wasOn=gd.selectedDays.has(d);
+  if(wasOn){gd.selectedDays.delete(d);el.classList.remove('on');}
+  else{gd.selectedDays.add(d);el.classList.add('on');}
   const month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
   const earn=calcRepEarnings(resourceName,year,month,etichetta);
   const ggEl=document.getElementById(`repgg_${r.id}_${etiKey}`),eurEl=document.getElementById(`repeur_${r.id}_${etiKey}`);
   if(ggEl)ggEl.textContent=gd.selectedDays.size;
   if(eurEl)eurEl.textContent=`€${earn}`;
   updateRepTotals();
+  const progetto=document.getElementById('repProgetto').value;
+  const tlName=(currentUser&&currentUser!=='ADMIN')?currentUser:null;
+  const giorni=[...gd.selectedDays].sort((a,b)=>a-b);
+  try{
+    await call('saveRep',{risorsaId:r.id,progetto,etichetta,teamLead:tlName,anno:year,mese:month,giorni});
+    gd.savedDays=new Set(gd.selectedDays);
+  }catch(e){
+    if(wasOn){gd.selectedDays.add(d);el.classList.add('on');}else{gd.selectedDays.delete(d);el.classList.remove('on');}
+    if(ggEl)ggEl.textContent=gd.selectedDays.size;
+    updateRepTotals();
+    showMsg('repMsg','Errore salvataggio: '+e.message,'err');
+  }
 }
 async function applyRepRange(){
   const start=document.getElementById('repRangeStart').value,end=document.getElementById('repRangeEnd').value;
