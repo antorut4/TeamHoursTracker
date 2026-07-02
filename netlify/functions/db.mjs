@@ -142,12 +142,10 @@ async function saveRep(p){
     const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLead}`;
     tlId = tl ? tl.id : null;
   }
-  await sql`
-    INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni)
-    VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni || [])}::jsonb)
-    ON CONFLICT (risorsa_id, progetto_id, anno, mese)
-    DO UPDATE SET team_lead_id=EXCLUDED.team_lead_id, giorni=EXCLUDED.giorni
-  `;
+  await sql`DELETE FROM reperibilita WHERE risorsa_id=${p.risorsaId} AND progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
+  if(p.giorni && p.giorni.length > 0){
+    await sql`INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni) VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni)}::jsonb)`;
+  }
 }
 async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}`; }
 

@@ -798,6 +798,7 @@ let _repGridData={};let _repExtraResources=[];let _repExtraProject='';let _repHi
 function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return days.reduce((tot,d)=>{const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt);return tot+(wd===0||wd===6||hol.has(ds)?40:25);},0);}
 function calcRepEarnings(resourceName,year,month,etichetta){const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
+  await reloadAll();
   const now=new Date();
   if(isProjectTL||isAdmin){
     document.getElementById('repUserView').style.display='none';document.getElementById('repLeadView').style.display='block';
