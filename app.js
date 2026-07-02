@@ -1007,7 +1007,16 @@ async function saveReperibilita(){
   }catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
   showMsg('repMsg','Reperibilità salvata per '+[...savedNames].join(', '),'ok');
-  await buildRepGriglia();await renderRepTeam();
+  // Aggiorna solo savedDays senza ricostruire la griglia (i checkbox restano visibili)
+  const existingRep=_cache.rep||[];
+  for(const[etichetta,gridByName]of Object.entries(_repGridData)){
+    for(const[name,gd]of Object.entries(gridByName)){
+      const r=RESOURCES.find(x=>x.fullName===name);if(!r)continue;
+      const existing=existingRep.filter(rp=>rp.risorsaId===r.id&&rp.anno===year&&rp.mese===month&&rp.progetto===progetto&&(rp.etichetta||'')===(etichetta||''));
+      gd.savedDays=new Set(existing.flatMap(rp=>rp.giorni));
+    }
+  }
+  await renderRepTeam();
 }
 async function renderRepTeam(){
   const fRis=document.getElementById('repFilterRisorsa')?.value||'',fAnno=document.getElementById('repFilterAnno')?.value||'',fMese=document.getElementById('repFilterMese')?.value;
