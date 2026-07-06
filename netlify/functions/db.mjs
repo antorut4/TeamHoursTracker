@@ -23,6 +23,8 @@ async function bootstrap(){
     ON CONFLICT DO NOTHING`;
   await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_inizio TEXT`;
   await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_fine TEXT`;
+  await sql`ALTER TABLE ferie DROP CONSTRAINT IF EXISTS ferie_tipo_check`;
+  await sql`ALTER TABLE ferie ADD CONSTRAINT ferie_tipo_check CHECK (tipo IN ('Ferie', 'Malattia', 'Permesso/ROL'))`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
