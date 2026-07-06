@@ -450,10 +450,15 @@
     <div style="flex:1;min-width:120px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Dal</label><input type="date" id="feriePickerStart" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
     <div style="flex:1;min-width:120px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Al</label><input type="date" id="feriePickerEnd" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
   </div>
+  <div id="feriePermessoTimeRow" style="display:none;flex-wrap:wrap;gap:8px;margin:0 0 14px;align-items:flex-end">
+    <div style="flex:1;min-width:110px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Dalle ore</label><input type="time" id="feriePermessoFrom" min="09:00" max="18:00" step="900" value="09:00" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
+    <div style="flex:1;min-width:110px"><label style="font-size:.72rem;font-weight:600;color:var(--ink-3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Alle ore</label><input type="time" id="feriePermessoTo" min="09:00" max="18:00" step="900" value="18:00" style="width:100%;font-size:.82rem;padding:5px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--white)"/></div>
+    <button class="btn btn-sm" style="background:var(--ok);color:#fff;padding:6px 14px;border:none;border-radius:var(--r);cursor:pointer;font-weight:600" onclick="pickFerieTipoRange('Permesso/ROL')"><i class="fa-solid fa-check"></i> Conferma</button>
+  </div>
   <div class="ferie-picker-btns">
     <button class="ferie-type-btn" onclick="pickFerieTipoRange('Ferie')"><span class="ftb-dot" style="background:#A100FF"></span> Ferie</button>
     <button class="ferie-type-btn" onclick="pickFerieTipoRange('Malattia')"><span class="ftb-dot" style="background:var(--danger)"></span> Malattia</button>
-    <button class="ferie-type-btn" onclick="pickFerieTipoRange('Permesso/ROL')"><span class="ftb-dot" style="background:var(--ok)"></span> Permesso / ROL</button>
+    <button class="ferie-type-btn" onclick="showPermessoTime()"><span class="ftb-dot" style="background:var(--ok)"></span> Permesso / ROL</button>
   </div>
   <button class="btn btn-ghost2 btn-sm" onclick="closeFeriePicker()">Annulla</button>
 </div>

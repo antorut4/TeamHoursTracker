@@ -21,6 +21,8 @@ async function bootstrap(){
   await sql`INSERT INTO progetto_team_leads (progetto_id, risorsa_id)
     SELECT id, team_lead_id FROM progetti WHERE team_lead_id IS NOT NULL
     ON CONFLICT DO NOTHING`;
+  await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_inizio TEXT`;
+  await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_fine TEXT`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
@@ -37,7 +39,7 @@ async function bootstrap(){
     sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
-    sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note FROM ferie`,
+    sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
     sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`
@@ -69,8 +71,10 @@ async function deleteOre(p){ await sql`DELETE FROM ore_mensili WHERE id=${p.id}`
 
 // ── ferie ──
 async function saveFerie(p){
-  await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note)
-            VALUES (${p.risorsaId}, ${p.start}, ${p.end}, ${p.tipo}, ${p.note})`;
+  const oraInizio = (p.tipo === 'Permesso/ROL' && p.oraInizio) ? p.oraInizio : null;
+  const oraFine   = (p.tipo === 'Permesso/ROL' && p.oraFine)   ? p.oraFine   : null;
+  await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine)
+            VALUES (${p.risorsaId}, ${p.start}, ${p.end}, ${p.tipo}, ${p.note}, ${oraInizio}, ${oraFine})`;
 }
 async function deleteFerie(p){ await sql`DELETE FROM ferie WHERE id=${p.id}`; }
 

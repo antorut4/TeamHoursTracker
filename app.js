@@ -27,7 +27,7 @@ async function reloadAll(){
   RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
-  _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note}));
+  _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note,oraInizio:f.ora_inizio||null,oraFine:f.ora_fine||null}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:+rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:rp.team_lead_id?nameById[rp.team_lead_id]||'':'',anno:+rp.anno,mese:+rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni.map(Number):[],etichetta:rp.etichetta||''}));
   _cache.wbs=d.wbs||{};
   _cache.repTipi=d.repTipi||{};
@@ -476,11 +476,12 @@ async function renderFerieList(){
   const search=(document.getElementById('searchFerie')?.value||'').toLowerCase();
   const fm=document.getElementById('filterMembro')?.value||'',fa=document.getElementById('filterAnno')?.value||'';
   const visibili=isAdmin?null:getFerieRisorseMonitorate();
-  let rows=(_read(K_FER,[])||[]).map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return{id:f.id,user:res?res.fullName:'?',start:f.start,end:f.end,tipo:f.tipo,note:f.note};}).sort((a,b)=>a.start<b.start?1:a.start>b.start?-1:0);
+  let rows=(_read(K_FER,[])||[]).map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return{id:f.id,user:res?res.fullName:'?',start:f.start,end:f.end,tipo:f.tipo,note:f.note,oraInizio:f.oraInizio||null,oraFine:f.oraFine||null};}).sort((a,b)=>a.start<b.start?1:a.start>b.start?-1:0);
   let filtered=rows.filter(e=>{if(fm&&e.user!==fm)return false;if(fa&&!String(e.start).startsWith(fa))return false;if(visibili&&!visibili.includes(e.user))return false;if(search&&!e.user?.toLowerCase().includes(search)&&!(e.note||'').toLowerCase().includes(search))return false;return true;});
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna voce trovata.</p>';return;}
   el.innerHTML=filtered.map(e=>{const days=wDays(e.start,e.end),color=TIPO_C(e.tipo),canDel=isAdmin||(e.user===currentUser),desc=e.tipo+' '+fmt(e.start)+'–'+fmt(e.end);
-    return `<div class="ferie-item"><div style="display:flex;align-items:flex-start;gap:10px"><span class="ferie-dot" style="background:${color}"></span><div><b>${e.user||'—'}</b> — <span style="color:${color};font-weight:600">${e.tipo}</span><div class="ferie-meta">${fmt(e.start)} → ${fmt(e.end)} · ${days} gg lav.${e.note?' · '+e.note:''}</div></div></div>${canDel?`<button class="btn-icon danger" onclick="deleteFerie(${e.id},'${desc.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
+    const orario=(e.tipo==='Permesso/ROL'&&e.oraInizio&&e.oraFine)?` · ${e.oraInizio}–${e.oraFine}`:'';
+    return `<div class="ferie-item"><div style="display:flex;align-items:flex-start;gap:10px"><span class="ferie-dot" style="background:${color}"></span><div><b>${e.user||'—'}</b> — <span style="color:${color};font-weight:600">${e.tipo}</span><div class="ferie-meta">${fmt(e.start)} → ${fmt(e.end)} · ${days} gg lav.${orario}${e.note?' · '+e.note:''}</div></div></div>${canDel?`<button class="btn-icon danger" onclick="deleteFerie(${e.id},'${desc.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
   }).join('');
 }
 // OVERVIEW
@@ -1151,6 +1152,11 @@ function closeFeriePicker(){
   _feriePickerDate=null;
   document.getElementById('feriePickerOverlay').classList.remove('open');
   document.getElementById('feriePickerBox').classList.remove('open');
+  const tr=document.getElementById('feriePermessoTimeRow');if(tr)tr.style.display='none';
+}
+function showPermessoTime(){
+  const tr=document.getElementById('feriePermessoTimeRow');
+  if(tr){tr.style.display='flex';const fi=document.getElementById('feriePermessoFrom');if(fi)fi.focus();}
 }
 async function pickFerieTipo(tipo){
   const dateStr=_feriePickerDate;closeFeriePicker();if(!dateStr)return;
@@ -1161,11 +1167,18 @@ async function pickFerieTipo(tipo){
 async function pickFerieTipoRange(tipo){
   const start=document.getElementById('feriePickerStart')?.value||_feriePickerDate;
   const end=document.getElementById('feriePickerEnd')?.value||_feriePickerDate;
+  let oraInizio=null,oraFine=null;
+  if(tipo==='Permesso/ROL'){
+    oraInizio=document.getElementById('feriePermessoFrom')?.value||null;
+    oraFine=document.getElementById('feriePermessoTo')?.value||null;
+    if(!oraInizio||!oraFine){showMsg('ferieMsg','Inserisci orario di inizio e fine.','err');return;}
+    if(oraFine<=oraInizio){showMsg('ferieMsg','Orario fine deve essere successivo all\'inizio.','err');return;}
+  }
   closeFeriePicker();
   if(!start||!end){showMsg('ferieMsg','Seleziona le date.','err');return;}
   if(end<start){showMsg('ferieMsg','Data fine deve essere >= inizio.','err');return;}
   const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
-  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:null,oraInizio,oraFine});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
   hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
 }
 let _presWeekOffset=0;
