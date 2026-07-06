@@ -781,7 +781,9 @@ async function changeAdminPwd(){const p1=document.getElementById('newPwd1').valu
 // EXPORT
 async function exportExcel(){
   if(typeof XLSX==='undefined'){alert('Libreria Excel non caricata. Controlla la connessione e ricarica la pagina.');return;}
+  showSpinner();
   try{
+    await reloadAll();
     const month=+document.getElementById('riepilogoMonth').value,year=+document.getElementById('riepilogoYear').value;
     const lf=(isTeamLead&&!isAdmin)?currentUser:(document.getElementById('riepilogoLead')?.value||''),members=getMembers(lf);
     let all={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)all[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
@@ -791,8 +793,18 @@ async function exportExcel(){
     members.forEach(m=>{const lead=getLeadForMember(m),e=all[m];if(e){const tot=(+e.ore1||0)+(+e.ore2||0);sd.push([m,lead,e.ore1||0,e.ore2||0,tot,av,tot>av?'Extra':'OK']);}else sd.push([m,lead,'—','—','—',av,'Mancante']);});
     const fd=[['Risorsa','Team Lead','Tipo','Data Inizio','Data Fine','Giorni Lav.','Orario','Note']];
     allFerRows.forEach(e=>{const orario=(e.tipo==='Permesso/ROL'&&e.oraInizio&&e.oraFine)?e.oraInizio+'–'+e.oraFine:'';fd.push([e.user,getLeadForMember(e.user),e.tipo,fmt(e.start),fmt(e.end),wDays(e.start,e.end),orario,e.note||'']);});
-    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sd),'Riepilogo Ore');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fd),'Ferie');XLSX.writeFile(wb,`TeamHours_${MONTHS[month]}_${year}.xlsx`);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sd),'Riepilogo Ore');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fd),'Ferie');
+    const buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+    const blob=new Blob([buf],{type:'application/octet-stream'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`TeamHours_${MONTHS[month]}_${year}.xlsx`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   }catch(err){alert('Errore durante l\'esportazione: '+err.message);}
+  finally{hideSpinner();}
 }
 async function exportICS(){
   const _me=RESOURCES.find(x=>x.fullName===currentUser);
