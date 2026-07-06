@@ -538,7 +538,7 @@ function renderFerieCalendar(){
   const month=+document.getElementById('ferieCalMonth').value,year=+document.getElementById('ferieCalYear').value;
   const members=getMyTeamMembers();
   const dim=new Date(year,month+1,0).getDate(),hol=getHol(year);
-  let allFer=(_read(K_FER,[])||[]).map(f=>{const r=RESOURCES.find(x=>x.id===f.risorsaId);return r?{user:r.fullName,start:f.start,end:f.end,tipo:f.tipo}:null;}).filter(Boolean);
+  let allFer=(_read(K_FER,[])||[]).map(f=>{const r=RESOURCES.find(x=>x.id===f.risorsaId);return r?{user:r.fullName,start:f.start,end:f.end,tipo:f.tipo,oraInizio:f.oraInizio||null,oraFine:f.oraFine||null}:null;}).filter(Boolean);
   const DN=['D','L','M','M','G','V','S'];
   const md={};members.forEach(m=>{md[m]={};});
   allFer.forEach(e=>{if(!md[e.user])return;let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){const ds=localDate(c);if(ds.startsWith(`${year}-${String(month+1).padStart(2,'0')}`))md[e.user][ds]=e.tipo;c.setDate(c.getDate()+1);}});
@@ -556,11 +556,25 @@ function renderFerieCalendar(){
     sumData.push({name:m,days:tot,bt});
   });
   el.innerHTML=h+'</tbody></table>';
-  document.getElementById('ferieCalCards').innerHTML=`<div style="border:1px solid var(--line);border-radius:var(--r);overflow:hidden">`+sumData.map((s,i)=>{const det=Object.entries(s.bt).map(([t,n])=>`<span style="background:${TIPO_C(t)}18;color:${TIPO_C(t)};border-radius:3px;padding:1px 6px;font-size:.69rem;font-weight:600">${t} ${n}gg</span>`).join(' ')||'<span style="color:var(--ink-3);font-size:.75rem">Nessuna assenza</span>';const color=colorFor(s.name);return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;background:${i%2?'var(--stone)':'var(--white)'};${i>0?'border-top:1px solid var(--line)':''}"><span style="font-weight:600;color:${color};flex:1;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</span><span style="font-weight:700;font-size:.92rem;color:var(--ink);min-width:28px;text-align:right">${s.days}</span><span style="font-size:.7rem;color:var(--ink-3);min-width:18px">gg</span><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${det}</div></div>`;}).join('')+`</div>`;
-  const ovs=[];for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt);if(wd===0||wd===6||hol.has(ds))continue;const ab=members.filter(m=>md[m][ds]);if(ab.length>1)ovs.push({ds,names:ab,tipi:ab.map(m=>md[m][ds])});}
-  document.getElementById('ferieCalOverlaps').innerHTML=ovs.length
-    ?`<div style="background:var(--warn-bg);border:1px solid rgba(125,78,0,.2);border-radius:var(--r);padding:12px 14px"><div style="font-weight:600;color:var(--warn);margin-bottom:7px;font-size:.83rem"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px"></i>Sovrapposizioni (${ovs.length} giorni)</div>${ovs.map(o=>`<div style="font-size:.79rem;color:var(--warn);margin-bottom:3px">${fmt(o.ds)} — ${o.names.map((n,i)=>`${n.split(' ')[0]} (${o.tipi[i]})`).join(', ')}</div>`).join('')}</div>`
-    :`<div style="background:var(--ok-bg);border-radius:var(--r);padding:9px 13px;font-size:.82rem;color:var(--ok)"><i class="fa-solid fa-check" style="margin-right:7px"></i>Nessuna sovrapposizione questo mese</div>`;
+  const _monthStr=`${year}-${String(month+1).padStart(2,'0')}`;
+  const _tipiDef=[{tp:'Ferie',color:'#A100FF',bg:'rgba(161,0,255,.08)'},{tp:'Permesso/ROL',color:'var(--ok)',bg:'var(--ok-bg)'},{tp:'Malattia',color:'var(--danger)',bg:'var(--danger-bg)'}];
+  let _cardsHtml='';
+  _tipiDef.forEach(({tp,color,bg})=>{
+    const entries=allFer.filter(e=>e.tipo===tp&&members.includes(e.user)&&e.end>=_monthStr+'-01'&&e.start<=_monthStr+'-'+String(dim).padStart(2,'0'));
+    const dayMap={};
+    entries.forEach(e=>{let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){const ds=localDate(c);if(ds.startsWith(_monthStr)){const wd=c.getDay();if(!hol.has(ds)&&wd!==0&&wd!==6){if(!dayMap[ds])dayMap[ds]=[];if(!dayMap[ds].includes(e.user))dayMap[ds].push(e.user);}}c.setDate(c.getDate()+1);}});
+    const ovDays=Object.entries(dayMap).filter(([,u])=>u.length>1).sort((a,b)=>a[0]<b[0]?-1:1);
+    const byUser={};entries.forEach(e=>{if(!byUser[e.user])byUser[e.user]=[];byUser[e.user].push(e);});
+    const userKeys=Object.keys(byUser).sort();
+    _cardsHtml+=`<div style="margin-bottom:12px;border:1px solid ${color}38;border-radius:var(--r);overflow:hidden">`;
+    _cardsHtml+=`<div style="padding:8px 12px;background:${bg};border-bottom:1px solid ${color}30;display:flex;align-items:center;justify-content:space-between"><span style="font-weight:700;color:${color};font-size:.83rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${color};margin-right:7px;vertical-align:middle"></span>${tp}</span>${entries.length?`<span style="font-size:.73rem;color:${color};font-weight:600">${entries.length} entr${entries.length===1?'ata':'ate'}</span>`:'<span style="font-size:.72rem;color:var(--ink-3)">Nessuna assenza questo mese</span>'}</div>`;
+    if(userKeys.length){userKeys.forEach((u,i)=>{const ue=byUser[u],col=colorFor(u);const dateList=ue.map(e=>{const orario=(tp==='Permesso/ROL'&&e.oraInizio&&e.oraFine)?` <span style="background:${color}22;color:${color};border-radius:3px;padding:1px 5px;font-size:.67rem;font-weight:700">${e.oraInizio}–${e.oraFine}</span>`:'';return `${fmt(e.start)}${e.start!==e.end?' → '+fmt(e.end):''}${orario}`;}).join(' &nbsp;·&nbsp; ');_cardsHtml+=`<div style="display:flex;align-items:baseline;gap:10px;padding:7px 12px;${i>0?'border-top:1px solid var(--line)':''}"><span style="font-weight:600;color:${col};font-size:.8rem;white-space:nowrap;min-width:100px">${u.split(' ').slice(0,2).join(' ')}</span><span style="font-size:.78rem;color:var(--ink-2);flex:1">${dateList}</span></div>`;});}
+    if(ovDays.length){_cardsHtml+=`<div style="padding:8px 12px;background:var(--warn-bg);border-top:1px solid rgba(125,78,0,.15)"><div style="font-weight:600;color:var(--warn);font-size:.76rem;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Sovrapposizioni (${ovDays.length} giorni)</div>${ovDays.map(([ds,us])=>`<div style="font-size:.74rem;color:var(--warn);margin-bottom:2px">${fmt(ds)}: ${us.map(n=>n.split(' ').slice(0,2).join(' ')).join(', ')}</div>`).join('')}</div>`;}
+    else if(entries.length){_cardsHtml+=`<div style="padding:6px 12px;background:var(--ok-bg);border-top:1px solid rgba(0,122,76,.12);font-size:.74rem;color:var(--ok)"><i class="fa-solid fa-check" style="margin-right:5px"></i>Nessuna sovrapposizione</div>`;}
+    _cardsHtml+=`</div>`;
+  });
+  document.getElementById('ferieCalCards').innerHTML=_cardsHtml;
+  document.getElementById('ferieCalOverlaps').innerHTML='';
 }
 // ACCORDION
 function toggleAcc(btn){const body=btn.closest('.card').querySelector('.acc-body');const isOpen=body.classList.contains('open');body.classList.toggle('open');btn.innerHTML=isOpen?'<i class="fa-solid fa-chevron-down"></i>':'<i class="fa-solid fa-chevron-up"></i>';}
