@@ -25,6 +25,7 @@ async function bootstrap(){
   await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_fine TEXT`;
   await sql`ALTER TABLE ferie DROP CONSTRAINT IF EXISTS ferie_tipo_check`;
   await sql`ALTER TABLE ferie ADD CONSTRAINT ferie_tipo_check CHECK (tipo IN ('Ferie', 'Malattia', 'Permesso/ROL'))`;
+  await sql`ALTER TABLE reperibilita ADD COLUMN IF NOT EXISTS etichetta TEXT DEFAULT ''`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
@@ -42,7 +43,7 @@ async function bootstrap(){
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
-    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni FROM reperibilita`,
+    sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni, etichetta FROM reperibilita`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`
   ]);
@@ -148,9 +149,10 @@ async function saveRep(p){
     const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${p.teamLead}`;
     tlId = tl ? tl.id : null;
   }
-  await sql`DELETE FROM reperibilita WHERE risorsa_id=${p.risorsaId} AND progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
+  const etichetta = p.etichetta || '';
+  await sql`DELETE FROM reperibilita WHERE risorsa_id=${p.risorsaId} AND progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese} AND COALESCE(etichetta,'')=${etichetta}`;
   if(p.giorni && p.giorni.length > 0){
-    const [row] = await sql`INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni) VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni)}::jsonb) RETURNING id, giorni`;
+    const [row] = await sql`INSERT INTO reperibilita (risorsa_id, progetto_id, team_lead_id, anno, mese, giorni, etichetta) VALUES (${p.risorsaId}, ${proj.id}, ${tlId}, ${p.anno}, ${p.mese}, ${JSON.stringify(p.giorni)}::jsonb, ${etichetta}) RETURNING id, giorni`;
     return {id: row.id, giorni: row.giorni};
   }
   return {giorni: []};
@@ -159,8 +161,8 @@ async function deleteRep(p){ await sql`DELETE FROM reperibilita WHERE id=${p.id}
 async function getRepForProject(p){
   const [proj] = await sql`SELECT id FROM progetti WHERE nome=${p.progetto}`;
   if(!proj) return [];
-  const rows = await sql`SELECT id, risorsa_id, anno, mese, giorni FROM reperibilita WHERE progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
-  return rows.map(r=>({id:r.id, risorsaId:+r.risorsa_id, anno:+r.anno, mese:+r.mese, giorni:Array.isArray(r.giorni)?r.giorni.map(Number):[]}));
+  const rows = await sql`SELECT id, risorsa_id, anno, mese, giorni, etichetta FROM reperibilita WHERE progetto_id=${proj.id} AND anno=${p.anno} AND mese=${p.mese}`;
+  return rows.map(r=>({id:r.id, risorsaId:+r.risorsa_id, anno:+r.anno, mese:+r.mese, giorni:Array.isArray(r.giorni)?r.giorni.map(Number):[], etichetta:r.etichetta||''}));
 }
 
 // ── presenze in ufficio ──

@@ -865,12 +865,13 @@ async function buildRepGriglia(){
   _repGridData={};
   const freshRep=await call('getRepForProject',{progetto,anno:year,mese:month});
   console.log('[REP] getRepForProject →',{progetto,anno:year,mese:month},'risultato:',freshRep);
-  const repByResId={};freshRep.forEach(rp=>{repByResId[rp.risorsaId]=new Set(rp.giorni);});
+  // Chiave composta risorsaId|etichetta per supportare multi-turno
+  const repByResEti={};freshRep.forEach(rp=>{repByResEti[`${rp.risorsaId}|${rp.etichetta||''}`]=new Set(rp.giorni);});
   for(const etichetta of tipi){
     _repGridData[etichetta]={};
     for(const r of resources){
       const ferieSet=await ferieGiorniSet(r.fullName,year,month);
-      const existingDays=repByResId[r.id]||new Set();
+      const existingDays=repByResEti[`${r.id}|${etichetta}`]||new Set();
       _repGridData[etichetta][r.fullName]={ferieSet,selectedDays:new Set(existingDays),savedDays:new Set(existingDays),rid:r.id};
     }
   }
@@ -1116,32 +1117,39 @@ async function renderRepMine(){
     const resInProj=RESOURCES.filter(r=>projEntries.some(e=>e.risorsaId===r.id));
     const sorted=[myRes,...resInProj.filter(r=>r.id!==myRes.id)];
     const tls=_prjTLsByName[progetto]||[];
+    // Etichette distinte per questo progetto (ordinate; '' viene mostrata senza etichetta)
+    const etichette=[...new Set(projEntries.map(e=>e.etichetta||''))].sort();
     html+=`<div style="margin-bottom:18px">`;
     html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${progetto}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${tls.join(', ')}</span>`:''}</div>`;
-    html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
-    html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
-    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
-      html+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih||iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
-    html+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
-    html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th>`;
-    html+=`</tr></thead><tbody>`;
-    sorted.forEach((r,ri)=>{
-      const entry=projEntries.find(e=>e.risorsaId===r.id);
-      const days=entry?new Set(entry.giorni):new Set();
-      const isMe=r.id===myRes.id;
-      html+=`<tr style="background:${isMe?'rgba(0,123,255,.06)':ri%2?'var(--stone)':'var(--white)'}">`;
-      html+=`<td style="padding:5px 10px;font-weight:${isMe?700:600};font-size:.74rem;color:${isMe?'var(--info)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span>${isMe?` <span style="font-size:.58rem;background:var(--info);color:white;border-radius:3px;padding:1px 4px;vertical-align:middle">tu</span>`:''}</td>`;
-      for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d),isFerieConflict=isMe&&ferieSet.has(d)&&on;
-        html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?(isFerieConflict?'rgba(201,0,60,.12)':'rgba(0,123,255,.12)'):ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}">`;
-        html+=`<div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?(isFerieConflict?'var(--danger)':'var(--info)'):'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white" title="${on?(isFerieConflict?'Reperibilità + ferie!':'assegnato'):''}">`;
-        html+=on?(isFerieConflict?'!':'✓'):'';
-        html+=`</div></td>`;}
-      const earn=isMe&&entry?calcRepEarningsFromDays(entry.giorni,year,month):null;
-      html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem;color:${isMe?'var(--info)':'var(--ink)'}">${days.size}</td>`;
-      html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;font-size:.72rem;border-left:1px solid var(--stone-3);color:${isMe?'var(--ok)':'var(--ink-3)'}">${earn!==null?`€${earn}`:'—'}</td>`;
-      html+=`</tr>`;
-    });
-    html+=`</tbody></table></div></div>`;
+    for(const eti of etichette){
+      const etiEntries=projEntries.filter(e=>(e.etichetta||'')===eti);
+      if(etichette.length>1||eti){html+=`<div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin:10px 0 4px;padding-left:2px">${eti||'Reperibilità'}</div>`;}
+      html+=`<div style="overflow-x:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
+      html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
+      for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
+        html+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih||iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
+      html+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
+      html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th>`;
+      html+=`</tr></thead><tbody>`;
+      sorted.forEach((r,ri)=>{
+        const entry=etiEntries.find(e=>e.risorsaId===r.id);
+        const days=entry?new Set(entry.giorni):new Set();
+        const isMe=r.id===myRes.id;
+        html+=`<tr style="background:${isMe?'rgba(0,123,255,.06)':ri%2?'var(--stone)':'var(--white)'}">`;
+        html+=`<td style="padding:5px 10px;font-weight:${isMe?700:600};font-size:.74rem;color:${isMe?'var(--info)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span>${isMe?` <span style="font-size:.58rem;background:var(--info);color:white;border-radius:3px;padding:1px 4px;vertical-align:middle">tu</span>`:''}</td>`;
+        for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d),isFerieConflict=isMe&&ferieSet.has(d)&&on;
+          html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?(isFerieConflict?'rgba(201,0,60,.12)':'rgba(0,123,255,.12)'):ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}">`;
+          html+=`<div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?(isFerieConflict?'var(--danger)':'var(--info)'):'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white" title="${on?(isFerieConflict?'Reperibilità + ferie!':'assegnato'):''}">`;
+          html+=on?(isFerieConflict?'!':'✓'):'';
+          html+=`</div></td>`;}
+        const earn=isMe&&entry?calcRepEarningsFromDays(entry.giorni,year,month):null;
+        html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem;color:${isMe?'var(--info)':'var(--ink)'}">${days.size}</td>`;
+        html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;font-size:.72rem;border-left:1px solid var(--stone-3);color:${isMe?'var(--ok)':'var(--ink-3)'}">${earn!==null?`€${earn}`:'—'}</td>`;
+        html+=`</tr>`;
+      });
+      html+=`</tbody></table></div>`;
+    }
+    html+=`</div>`;
   }
   el.innerHTML=html;
 }
