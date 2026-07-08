@@ -481,7 +481,8 @@ async function renderFerieList(){
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna voce trovata.</p>';return;}
   el.innerHTML=filtered.map(e=>{const days=wDays(e.start,e.end),color=TIPO_C(e.tipo),canDel=isAdmin||(e.user===currentUser),desc=e.tipo+' '+fmt(e.start)+'–'+fmt(e.end);
     const orario=(e.tipo==='Permesso/ROL'&&e.oraInizio&&e.oraFine)?` · ${e.oraInizio}–${e.oraFine}`:'';
-    return `<div class="ferie-item"><div style="display:flex;align-items:flex-start;gap:10px"><span class="ferie-dot" style="background:${color}"></span><div><b>${e.user||'—'}</b> — <span style="color:${color};font-weight:600">${e.tipo}</span><div class="ferie-meta">${fmt(e.start)} → ${fmt(e.end)} · ${days} gg lav.${orario}${e.note?' · '+e.note:''}</div></div></div>${canDel?`<button class="btn-icon danger" onclick="deleteFerie(${e.id},'${desc.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
+    const dateRange=e.start===e.end?fmt(e.start):fmt(e.start)+' → '+fmt(e.end);
+    return `<div class="ferie-item"><div style="display:flex;align-items:flex-start;gap:10px"><span class="ferie-dot" style="background:${color}"></span><div><b>${e.user||'—'}</b> — <span style="color:${color};font-weight:600">${e.tipo}</span><div class="ferie-meta">${dateRange} · ${days} gg lav.${orario}${e.note?' · '+e.note:''}</div></div></div>${canDel?`<button class="btn-icon danger" onclick="deleteFerie(${e.id},'${desc.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</div>`;
   }).join('');
 }
 // OVERVIEW
@@ -559,17 +560,21 @@ function renderFerieCalendar(){
   const _monthStr=`${year}-${String(month+1).padStart(2,'0')}`;
   const _tipiDef=[{tp:'Ferie',color:'#A100FF',bg:'rgba(161,0,255,.08)'},{tp:'Permesso/ROL',color:'var(--ok)',bg:'var(--ok-bg)'},{tp:'Malattia',color:'var(--danger)',bg:'var(--danger-bg)'}];
   let _cardsHtml='';
+  // Global dayMap across ALL tipos — so cross-type overlaps (es. Ferie + Malattia) vengono rilevate
+  const _allMonthEntries=allFer.filter(e=>members.includes(e.user)&&e.end>=_monthStr+'-01'&&e.start<=_monthStr+'-'+String(dim).padStart(2,'0'));
+  const _globalDayMap={};
+  _allMonthEntries.forEach(e=>{let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){const ds=localDate(c);if(ds.startsWith(_monthStr)){const wd=c.getDay();if(!hol.has(ds)&&wd!==0&&wd!==6){if(!_globalDayMap[ds])_globalDayMap[ds]=[];if(!_globalDayMap[ds].includes(e.user))_globalDayMap[ds].push(e.user);}}c.setDate(c.getDate()+1);}});
   _tipiDef.forEach(({tp,color,bg})=>{
     const entries=allFer.filter(e=>e.tipo===tp&&members.includes(e.user)&&e.end>=_monthStr+'-01'&&e.start<=_monthStr+'-'+String(dim).padStart(2,'0'));
-    const dayMap={};
-    entries.forEach(e=>{let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){const ds=localDate(c);if(ds.startsWith(_monthStr)){const wd=c.getDay();if(!hol.has(ds)&&wd!==0&&wd!==6){if(!dayMap[ds])dayMap[ds]=[];if(!dayMap[ds].includes(e.user))dayMap[ds].push(e.user);}}c.setDate(c.getDate()+1);}});
-    const ovDays=Object.entries(dayMap).filter(([,u])=>u.length>1).sort((a,b)=>a[0]<b[0]?-1:1);
+    const tipoUsers=new Set(entries.map(e=>e.user));
+    // Overlaps dove almeno un utente ha un'assenza di questo tipo (include cross-tipo)
+    const ovDays=Object.entries(_globalDayMap).filter(([,u])=>u.length>1&&u.some(n=>tipoUsers.has(n))).sort((a,b)=>a[0]<b[0]?-1:1);
     const byUser={};entries.forEach(e=>{if(!byUser[e.user])byUser[e.user]=[];byUser[e.user].push(e);});
     const userKeys=Object.keys(byUser).sort();
     _cardsHtml+=`<div style="margin-bottom:12px;border:1px solid ${color}38;border-radius:var(--r);overflow:hidden">`;
     _cardsHtml+=`<div style="padding:8px 12px;background:${bg};border-bottom:1px solid ${color}30;display:flex;align-items:center;justify-content:space-between"><span style="font-weight:700;color:${color};font-size:.83rem"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${color};margin-right:7px;vertical-align:middle"></span>${tp}</span>${entries.length?`<span style="font-size:.73rem;color:${color};font-weight:600">${entries.length} entr${entries.length===1?'ata':'ate'}</span>`:'<span style="font-size:.72rem;color:var(--ink-3)">Nessuna assenza questo mese</span>'}</div>`;
-    if(userKeys.length){userKeys.forEach((u,i)=>{const ue=byUser[u],col=colorFor(u);const dateList=ue.map(e=>{const orario=(tp==='Permesso/ROL'&&e.oraInizio&&e.oraFine)?` <span style="background:${color}22;color:${color};border-radius:3px;padding:1px 5px;font-size:.67rem;font-weight:700">${e.oraInizio}–${e.oraFine}</span>`:'';return `${fmt(e.start)}${e.start!==e.end?' → '+fmt(e.end):''}${orario}`;}).join(' &nbsp;·&nbsp; ');_cardsHtml+=`<div style="display:flex;align-items:baseline;gap:10px;padding:7px 12px;${i>0?'border-top:1px solid var(--line)':''}"><span style="font-weight:600;color:${col};font-size:.8rem;white-space:nowrap;min-width:100px">${u.split(' ').slice(0,2).join(' ')}</span><span style="font-size:.78rem;color:var(--ink-2);flex:1">${dateList}</span></div>`;});}
-    if(ovDays.length){_cardsHtml+=`<div style="padding:8px 12px;background:var(--warn-bg);border-top:1px solid rgba(125,78,0,.15)"><div style="font-weight:600;color:var(--warn);font-size:.76rem;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Sovrapposizioni (${ovDays.length} giorni)</div>${ovDays.map(([ds,us])=>`<div style="font-size:.74rem;color:var(--warn);margin-bottom:2px">${fmt(ds)}: ${us.map(n=>n.split(' ').slice(0,2).join(' ')).join(', ')}</div>`).join('')}</div>`;}
+    if(userKeys.length){userKeys.forEach((u,i)=>{const ue=byUser[u],col=colorFor(u);const dateList=(()=>{const pts=[];const noOr=ue.filter(e=>!(tp==='Permesso/ROL'&&e.oraInizio&&e.oraFine)),withOr=ue.filter(e=>tp==='Permesso/ROL'&&e.oraInizio&&e.oraFine);if(noOr.length){const ds=new Set();noOr.forEach(e=>{let c=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(c<=en){ds.add(localDate(c));c.setDate(c.getDate()+1);}});const sd=[...ds].sort();let rs=sd[0],re=sd[0];for(let i=1;i<sd.length;i++){const nx=new Date(re+'T12:00:00');nx.setDate(nx.getDate()+1);if(localDate(nx)===sd[i]){re=sd[i];}else{pts.push(rs===re?fmt(rs):fmt(rs)+' → '+fmt(re));rs=re=sd[i];}}if(sd.length)pts.push(rs===re?fmt(rs):fmt(rs)+' → '+fmt(re));}withOr.forEach(e=>{pts.push(`${e.start===e.end?fmt(e.start):fmt(e.start)+' → '+fmt(e.end)} <span style="background:${color}22;color:${color};border-radius:3px;padding:1px 5px;font-size:.67rem;font-weight:700">${e.oraInizio}–${e.oraFine}</span>`);});return pts.join(' &nbsp;·&nbsp; ');})();_cardsHtml+=`<div style="display:flex;align-items:baseline;gap:10px;padding:7px 12px;${i>0?'border-top:1px solid var(--line)':''}"><span style="font-weight:600;color:${col};font-size:.8rem;white-space:nowrap;min-width:100px">${u.split(' ').slice(0,2).join(' ')}</span><span style="font-size:.78rem;color:var(--ink-2);flex:1">${dateList}</span></div>`;});}
+    if(ovDays.length){_cardsHtml+=`<div style="padding:8px 12px;background:var(--warn-bg);border-top:1px solid rgba(125,78,0,.15)"><div style="font-weight:600;color:var(--warn);font-size:.76rem;margin-bottom:4px"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Sovrapposizioni (${ovDays.length} giorni)</div>${ovDays.map(([ds,us])=>{const labels=us.map(n=>{const e=_allMonthEntries.find(x=>x.user===n&&x.start<=ds&&x.end>=ds);const t=e?e.tipo:'';return `${n.split(' ').slice(0,2).join(' ')}<span style="font-size:.65rem;color:${TIPO_C(t)};font-weight:600;margin-left:3px">(${t})</span>`;});return `<div style="font-size:.74rem;color:var(--warn);margin-bottom:2px">${fmt(ds)}: ${labels.join(', ')}</div>`;}).join('')}</div>`;}
     else if(entries.length){_cardsHtml+=`<div style="padding:6px 12px;background:var(--ok-bg);border-top:1px solid rgba(0,122,76,.12);font-size:.74rem;color:var(--ok)"><i class="fa-solid fa-check" style="margin-right:5px"></i>Nessuna sovrapposizione</div>`;}
     _cardsHtml+=`</div>`;
   });
@@ -840,7 +845,7 @@ async function initRepPanel(){
     const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p).sort();
     const repPrjSel=document.getElementById('repProgetto');repPrjSel.innerHTML='<option value="">— Seleziona —</option>';myPrjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;repPrjSel.appendChild(o);});
     await buildRepGriglia();await renderRepTeam();
-  }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';await renderRepMine();}
+  }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});popSel('repUserMonth',mOpts,now.getMonth());popSel('repUserYear',yOpts,now.getFullYear());await renderRepMine();}
 }
 async function ferieGiorniSet(fullName,year,month){const r=RESOURCES.find(x=>x.fullName===fullName);const mine=r?(_read(K_FER,[])||[]).filter(f=>f.risorsaId===r.id):[];const set=new Set();mine.forEach(e=>{let cur=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(cur<=en){if(cur.getFullYear()===year&&cur.getMonth()===month)set.add(cur.getDate());cur.setDate(cur.getDate()+1);}});return set;}
 async function buildRepGriglia(){
@@ -1076,15 +1081,25 @@ async function renderRepTeam(){
   }).join('');
 }
 async function renderRepMine(){
-  const mine=await repForUser(currentUser);
   const el=document.getElementById('repMyList');
-  if(!mine.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità assegnata.</p>';return;}
-  const ferieMineMap={};
-  await Promise.all(mine.map(async r=>{ferieMineMap[r.anno+'|'+r.mese]=await ferieGiorniSet(currentUser,r.anno,r.mese);}));
-  const totGiorni=mine.reduce((s,r)=>s+r.giorni.length,0);
-  const totEuro=mine.reduce((s,r)=>s+calcRepEarningsFromDays(r.giorni,r.anno,r.mese),0);
-  const totConflitti=mine.reduce((s,r)=>{const ferie=ferieMineMap[r.anno+'|'+r.mese]||new Set();return s+r.giorni.filter(d=>ferie.has(d)).length;},0);
-  let html=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+  const monthEl=document.getElementById('repUserMonth'),yearEl=document.getElementById('repUserYear');
+  if(!monthEl||!yearEl)return;
+  const month=+monthEl.value,year=+yearEl.value;
+  const myRes=RESOURCES.find(x=>x.fullName===currentUser);
+  if(!myRes){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Risorsa non trovata.</p>';return;}
+  const allRep=(_cache.rep||[]).filter(r=>r.anno===year&&r.mese===month);
+  const myEntries=allRep.filter(r=>r.risorsaId===myRes.id);
+  const myProjects=new Set(myEntries.map(r=>r.progetto));
+  if(!myProjects.size){
+    const hasAny=(_cache.rep||[]).some(r=>r.risorsaId===myRes.id);
+    el.innerHTML=`<p style="color:var(--ink-3);font-size:.84rem">${hasAny?'Nessuna reperibilità assegnata per questo mese.':'Nessuna reperibilità assegnata.'}</p>`;
+    return;
+  }
+  const ferieSet=await ferieGiorniSet(currentUser,year,month);
+  const totGiorni=myEntries.reduce((s,r)=>s+r.giorni.length,0);
+  const totEuro=myEntries.reduce((s,r)=>s+calcRepEarningsFromDays(r.giorni,year,month),0);
+  const totConflitti=myEntries.reduce((s,r)=>s+r.giorni.filter(d=>ferieSet.has(d)).length,0);
+  let html=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
     <div style="background:var(--ok-bg);border:1px solid rgba(45,106,79,.2);border-radius:var(--r);padding:10px 16px;flex:1;min-width:120px">
       <div style="font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ok);margin-bottom:3px">Totale guadagno</div>
       <div style="font-size:1.4rem;font-weight:700;color:var(--ok);font-family:var(--f-display)">€${totEuro}</div>
@@ -1095,13 +1110,39 @@ async function renderRepMine(){
     </div>
     ${totConflitti?`<div style="background:var(--warn-bg);border:1px solid rgba(125,78,0,.2);border-radius:var(--r);padding:10px 16px;flex:1;min-width:120px"><div style="font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--warn);margin-bottom:3px">Conflitti ferie</div><div style="font-size:1.4rem;font-weight:700;color:var(--warn);font-family:var(--f-display)">${totConflitti}</div></div>`:''}
   </div>`;
-  html+=mine.map(r=>{
-    const ferie=ferieMineMap[r.anno+'|'+r.mese]||new Set();
-    const daysStr=r.giorni.map(d=>{const iF=ferie.has(d),wd=new Date(r.anno,r.mese,d).getDay(),isWe=wd===0||wd===6;return `<span style="display:inline-block;background:${iF?'var(--warn-bg)':isWe?'rgba(161,0,255,.1)':'var(--info-bg)'};color:${iF?'var(--warn)':isWe?'var(--amber)':'var(--info)'};border-radius:4px;padding:1px 6px;margin:1px 2px;font-size:.71rem;font-weight:${isWe?700:400}" title="${iF?'Giorno di ferie!':isWe?'Weekend €40':'Feriale €25'}">${iF?'⚠ ':''}${d} ${MONTHS[r.mese].slice(0,3)}</span>`;}).join('');
-    const conflitti=r.giorni.filter(d=>ferie.has(d)).length;
-    const earn=calcRepEarningsFromDays(r.giorni,r.anno,r.mese);
-    return `<div class="rep-entry"><div><div class="re-proj">${r.progetto}${r.etichetta?` <span style="font-size:.72rem;font-weight:400;color:var(--ink-3)">(${r.etichetta})</span>`:''}</div><div class="re-meta">${MONTHS[r.mese]} ${r.anno} · ${r.giorni.length} giorno/i · <span style="color:var(--ok);font-weight:700">€${earn}</span>${conflitti?` · <span style="color:var(--warn);font-weight:600">${conflitti} giorno/i in ferie!</span>`:''}</div><div class="re-days">${daysStr}</div></div></div>`;
-  }).join('');
+  const dim=new Date(year,month+1,0).getDate(),hol=getHol(year),DN=['D','L','M','M','G','V','S'];
+  for(const progetto of [...myProjects].sort()){
+    const projEntries=allRep.filter(r=>r.progetto===progetto);
+    const resInProj=RESOURCES.filter(r=>projEntries.some(e=>e.risorsaId===r.id));
+    const sorted=[myRes,...resInProj.filter(r=>r.id!==myRes.id)];
+    const tls=_prjTLsByName[progetto]||[];
+    html+=`<div style="margin-bottom:18px">`;
+    html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${progetto}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${tls.join(', ')}</span>`:''}</div>`;
+    html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
+    html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
+    for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
+      html+=`<th style="padding:2px 1px;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.12)':'var(--ink)'};color:${ih||iw?'var(--amber)':'var(--white)'};text-align:center;min-width:24px;font-size:.6rem"><div>${DN[wd]}</div><div>${d}</div></th>`;}
+    html+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:32px;font-size:.65rem">Gg</th>`;
+    html+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guad.</th>`;
+    html+=`</tr></thead><tbody>`;
+    sorted.forEach((r,ri)=>{
+      const entry=projEntries.find(e=>e.risorsaId===r.id);
+      const days=entry?new Set(entry.giorni):new Set();
+      const isMe=r.id===myRes.id;
+      html+=`<tr style="background:${isMe?'rgba(0,123,255,.06)':ri%2?'var(--stone)':'var(--white)'}">`;
+      html+=`<td style="padding:5px 10px;font-weight:${isMe?700:600};font-size:.74rem;color:${isMe?'var(--info)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span>${isMe?` <span style="font-size:.58rem;background:var(--info);color:white;border-radius:3px;padding:1px 4px;vertical-align:middle">tu</span>`:''}</td>`;
+      for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d),isFerieConflict=isMe&&ferieSet.has(d)&&on;
+        html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?(isFerieConflict?'rgba(201,0,60,.12)':'rgba(0,123,255,.12)'):ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}">`;
+        html+=`<div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?(isFerieConflict?'var(--danger)':'var(--info)'):'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white" title="${on?(isFerieConflict?'Reperibilità + ferie!':'assegnato'):''}">`;
+        html+=on?(isFerieConflict?'!':'✓'):'';
+        html+=`</div></td>`;}
+      const earn=isMe&&entry?calcRepEarningsFromDays(entry.giorni,year,month):null;
+      html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem;color:${isMe?'var(--info)':'var(--ink)'}">${days.size}</td>`;
+      html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;font-size:.72rem;border-left:1px solid var(--stone-3);color:${isMe?'var(--ok)':'var(--ink-3)'}">${earn!==null?`€${earn}`:'—'}</td>`;
+      html+=`</tr>`;
+    });
+    html+=`</tbody></table></div></div>`;
+  }
   el.innerHTML=html;
 }
 async function deleteRep(id,name,prog){openModal('Elimina reperibilità','Eliminare la reperibilità di "'+name+'" per "'+prog+'"?',async()=>{showSpinner();try{await call('deleteRep',{id});await reloadAll();}catch(e){hideSpinner();showMsg('repMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderRepTeam();showMsg('repMsg','Reperibilità eliminata.','ok');},'Elimina');}

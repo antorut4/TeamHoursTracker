@@ -258,7 +258,11 @@
         <div id="repUserView">
           <div class="card">
             <div class="card-title"><i class="fa-solid fa-tower-broadcast"></i> Le mie reperibilità</div>
-            <div id="repMyList"><p style="color:var(--ink-3);font-size:.83rem">Nessuna reperibilità assegnata.</p></div>
+            <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+              <select id="repUserMonth" onchange="renderRepMine()" style="font-size:.83rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink)"></select>
+              <select id="repUserYear" onchange="renderRepMine()" style="font-size:.83rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink)"></select>
+            </div>
+            <div id="repMyList"></div>
           </div>
         </div>
         <div id="repLeadView" style="display:none">
