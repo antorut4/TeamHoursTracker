@@ -26,6 +26,11 @@ async function bootstrap(){
   await sql`ALTER TABLE ferie DROP CONSTRAINT IF EXISTS ferie_tipo_check`;
   await sql`ALTER TABLE ferie ADD CONSTRAINT ferie_tipo_check CHECK (tipo IN ('Ferie', 'Malattia', 'Permesso/ROL'))`;
   await sql`ALTER TABLE reperibilita ADD COLUMN IF NOT EXISTS etichetta TEXT DEFAULT ''`;
+  await sql`ALTER TABLE reperibilita DROP CONSTRAINT IF EXISTS reperibilita_risorse_id_progetto_id_anno_mese_key`;
+  await sql`ALTER TABLE reperibilita DROP CONSTRAINT IF EXISTS reperibilita_risorsa_id_progetto_id_anno_mese_key`;
+  await sql`DROP INDEX IF EXISTS reperibilita_risorse_id_progetto_id_anno_mese_key`;
+  await sql`DROP INDEX IF EXISTS reperibilita_risorsa_id_progetto_id_anno_mese_key`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS rep_unique_per_turno ON reperibilita (risorsa_id, progetto_id, anno, mese, COALESCE(etichetta,''))`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
