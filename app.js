@@ -1070,7 +1070,8 @@ async function saveReperibilita(){
 async function renderRepTeam(){
   const fRis=document.getElementById('repFilterRisorsa')?.value||'',fAnno=document.getElementById('repFilterAnno')?.value||'',fMese=document.getElementById('repFilterMese')?.value;
   const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):RESOURCES.filter(r=>(r.progetti||[]).some(p=>(_prjTLsByName[p]||[]).includes(currentUser))).map(r=>r.fullName);
-  let filtered=(await getRepStore()).filter(r=>{if(!isAdmin&&!teamNames.includes(r.fullName))return false;if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
+  const myProjects=isAdmin?null:new Set(Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p));
+  let filtered=(await getRepStore()).filter(r=>{if(!isAdmin){if(!teamNames.includes(r.fullName))return false;if(!myProjects.has(r.progetto))return false;}if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
   const el=document.getElementById('repTeamList');
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata.</p>';return;}
   const ferieMap={};await Promise.all(filtered.map(async r=>{ferieMap[r.fullName+'|'+r.anno+'|'+r.mese]=await ferieGiorniSet(r.fullName,r.anno,r.mese);}));
