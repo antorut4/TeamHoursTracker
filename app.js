@@ -785,10 +785,16 @@ async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "
 async function changeAdminPwd(){const p1=document.getElementById('newPwd1').value,p2=document.getElementById('newPwd2').value;if(!p1){showMsg('pwdMsg','Inserisci la nuova password.','err');return;}if(p1!==p2){showMsg('pwdMsg','Le password non coincidono.','err');return;}if(p1.length<6){showMsg('pwdMsg','Minimo 6 caratteri.','err');return;}showSpinner();try{await call('setAdminPwd',{hash:simpleHash(p1)});}catch(e){hideSpinner();showMsg('pwdMsg','Errore: '+e.message,'err');return;}hideSpinner();document.getElementById('newPwd1').value='';document.getElementById('newPwd2').value='';showMsg('pwdMsg','Password aggiornata','ok');}
 // EXPORT
 async function exportExcel(){
-  if(typeof XLSX==='undefined'){alert('Libreria Excel non caricata. Controlla la connessione e ricarica la pagina.');return;}
+  const msgEl=document.getElementById('exportMsg');
+  const exportErr=msg=>{if(msgEl){msgEl.textContent=msg;msgEl.className='msg err';setTimeout(()=>{msgEl.className='msg';},6000);}console.error('[EXPORT]',msg);};
+  const exportOk=msg=>{if(msgEl){msgEl.textContent=msg;msgEl.className='msg ok';setTimeout(()=>{msgEl.className='msg';},3000);}};
+  console.log('[EXPORT] click, XLSX=',typeof XLSX);
+  if(typeof XLSX==='undefined'){exportErr('Libreria Excel non caricata — ricarica la pagina.');return;}
   showSpinner();
   try{
+    console.log('[EXPORT] reloadAll start');
     await reloadAll();
+    console.log('[EXPORT] reloadAll done, hrs=',_cache.hrs.length,'fer=',_cache.fer.length);
     const month=+document.getElementById('riepilogoMonth').value,year=+document.getElementById('riepilogoYear').value;
     const lf=(isTeamLead&&!isAdmin)?currentUser:(document.getElementById('riepilogoLead')?.value||''),members=getMembers(lf);
     let all={};(_read(K_HRS,[])||[]).filter(o=>o.anno===year&&o.mese===month).forEach(o=>{const res=RESOURCES.find(x=>x.id===o.risorsaId);if(res)all[res.fullName]={ore1:o.ore_q1,note1:o.note_q1,ore2:o.ore_q2,note2:o.note_q2};});
@@ -801,14 +807,18 @@ async function exportExcel(){
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sd),'Riepilogo Ore');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fd),'Ferie');
+    console.log('[EXPORT] workbook built, sd rows=',sd.length,'fd rows=',fd.length);
     const buf=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    const blob=new Blob([buf],{type:'application/octet-stream'});
+    const blob=new Blob([new Uint8Array(buf)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=`TeamHours_${MONTHS[month]}_${year}.xlsx`;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-  }catch(err){alert('Errore durante l\'esportazione: '+err.message);}
+    a.style.display='none';a.href=url;a.download=`TeamHours_${MONTHS[month]}_${year}.xlsx`;
+    document.body.appendChild(a);
+    console.log('[EXPORT] clicking download link, url=',url);
+    a.click();
+    setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
+    exportOk('File scaricato');
+  }catch(err){console.error('[EXPORT] error',err);exportErr('Errore: '+err.message);}
   finally{hideSpinner();}
 }
 async function exportICS(){
@@ -842,6 +852,8 @@ async function initRepPanel(){
     const rFilt=document.getElementById('repFilterRisorsa');rFilt.innerHTML='<option value="">Tutte le risorse</option>';team.forEach(r=>{const o=document.createElement('option');o.value=r.fullName;o.textContent=r.fullName;rFilt.appendChild(o);});
     const yFilt=document.getElementById('repFilterAnno');yFilt.innerHTML='<option value="">Tutti gli anni</option>';yOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;yFilt.appendChild(o);});
     const mFilt=document.getElementById('repFilterMese');mFilt.innerHTML='<option value="">Tutti i mesi</option>';mOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;mFilt.appendChild(o);});
+    mFilt.value=now.getMonth();
+    yFilt.value=now.getFullYear();
     const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p).sort();
     const repPrjSel=document.getElementById('repProgetto');repPrjSel.innerHTML='<option value="">— Seleziona —</option>';myPrjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;repPrjSel.appendChild(o);});
     await buildRepGriglia();await renderRepTeam();
@@ -925,6 +937,10 @@ async function buildRepGriglia(){
   const _avail=RESOURCES.filter(r=>!_inGrid.has(r.fullName));
   if(_avail.length){h+=`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select id="repAddExtraSelect" style="font-size:.8rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink);min-width:180px"><option value="">— Aggiungi risorsa —</option>${_avail.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}${_repHiddenResources.has(r.fullName)?' (nascosta)':''}</option>`).join('')}</select><button class="btn btn-ghost2 btn-sm" onclick="addExtraRepResource()"><i class="fa-solid fa-user-plus"></i> Aggiungi</button></div>`;}
   document.getElementById('repGriglia').innerHTML=h;
+  const mFilt=document.getElementById('repFilterMese'),yFilt=document.getElementById('repFilterAnno');
+  if(mFilt)mFilt.value=month;
+  if(yFilt)yFilt.value=year;
+  await renderRepTeam();
 }
 function addExtraRepResource(){const sel=document.getElementById('repAddExtraSelect');if(!sel||!sel.value)return;const name=sel.value;_repHiddenResources.delete(name);if(!_repExtraResources.includes(name))_repExtraResources.push(name);buildRepGriglia();}
 function removeRepResource(name,e){if(e)e.stopPropagation();const ei=_repExtraResources.indexOf(name);if(ei!==-1)_repExtraResources.splice(ei,1);else _repHiddenResources.add(name);buildRepGriglia();}
