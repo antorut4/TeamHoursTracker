@@ -1121,7 +1121,8 @@ async function renderRepTeam(){
       const anno=+meseKey.split('|')[0],mese=+meseKey.split('|')[1];
       const dim=new Date(anno,mese+1,0).getDate(),holSet=getHol(anno);
       const resOnPrj=RESOURCES.filter(r=>entries.some(e=>e.fullName===r.fullName)).sort((a,b)=>a.fullName.localeCompare(b.fullName));
-      const etichette=[...new Set(entries.map(e=>e.etichetta||''))].sort();
+      const tipiPrj=getRepTipiForPrj(progetto);
+      const etichette=tipiPrj[0]!==''?tipiPrj.filter(t=>entries.some(e=>(e.etichetta||'')===t)):[...new Set(entries.map(e=>e.etichetta||''))].sort();
       html+=`<div style="margin-bottom:14px"><div style="font-size:.78rem;font-weight:600;color:var(--ink-2);margin:10px 0 6px">${MONTHS[mese]} ${anno}</div>`;
       for(const eti of etichette){
         const etiEntries=entries.filter(e=>(e.etichetta||'')===eti);
