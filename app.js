@@ -465,7 +465,8 @@ async function saveFerie(){
 async function checkOverlap(){
   const start=document.getElementById('ferieStart').value,end=document.getElementById('ferieEnd').value;if(!start||!end)return;
   const r=RESOURCES.find(x=>x.fullName===currentUser),myId=r?r.id:0;
-  const overl=(_read(K_FER,[])||[]).filter(f=>f.risorsaId!==myId&&f.start<=end&&f.end>=start);
+  const myPrjs=new Set(r?.progetti||[]);
+  const overl=(_read(K_FER,[])||[]).filter(f=>{if(f.risorsaId===myId||f.start>end||f.end<start)return false;const other=RESOURCES.find(x=>x.id===f.risorsaId);return other&&(other.progetti||[]).some(p=>myPrjs.has(p));});
   const names=[...new Set(overl.map(f=>{const res=RESOURCES.find(x=>x.id===f.risorsaId);return res?res.fullName:'?';}))];
   const w=document.getElementById('overlapWarn');
   if(names.length){w.textContent='Sovrapposizione con: '+names.join(', ');w.style.display='block';}else w.style.display='none';
@@ -534,6 +535,7 @@ function getMyTeamMembers(){
   if(isTeamLead){const t=RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);return t.includes(currentUser)?t:[currentUser,...t];}
   return getMyProjectColleagues();
 }
+function _shareProject(a,b){const pa=new Set(RESOURCES.find(r=>r.fullName===a)?.progetti||[]);return(RESOURCES.find(r=>r.fullName===b)?.progetti||[]).some(p=>pa.has(p));}
 function renderFerieCalendar(){
   const el=document.getElementById('ferieCalendar');if(!el)return;
   const month=+document.getElementById('ferieCalMonth').value,year=+document.getElementById('ferieCalYear').value;
@@ -568,7 +570,7 @@ function renderFerieCalendar(){
     const entries=allFer.filter(e=>e.tipo===tp&&members.includes(e.user)&&e.end>=_monthStr+'-01'&&e.start<=_monthStr+'-'+String(dim).padStart(2,'0'));
     const tipoUsers=new Set(entries.map(e=>e.user));
     // Overlaps dove almeno un utente ha un'assenza di questo tipo (include cross-tipo)
-    const ovDays=Object.entries(_globalDayMap).filter(([,u])=>u.length>1&&u.some(n=>tipoUsers.has(n))).sort((a,b)=>a[0]<b[0]?-1:1);
+    const ovDays=Object.entries(_globalDayMap).filter(([,u])=>u.some(n=>tipoUsers.has(n))&&u.some((n,i)=>u.some((m,j)=>j>i&&_shareProject(n,m)))).map(([ds,us])=>[ds,us.filter(n=>us.some(m=>m!==n&&_shareProject(n,m)))]).filter(([,u])=>u.length>1).sort((a,b)=>a[0]<b[0]?-1:1);
     const byUser={};entries.forEach(e=>{if(!byUser[e.user])byUser[e.user]=[];byUser[e.user].push(e);});
     const userKeys=Object.keys(byUser).sort();
     _cardsHtml+=`<div style="margin-bottom:12px;border:1px solid ${color}38;border-radius:var(--r);overflow:hidden">`;
@@ -1085,9 +1087,10 @@ async function saveReperibilita(){
 }
 async function renderRepTeam(){
   const fRis=document.getElementById('repFilterRisorsa')?.value||'',fAnno=document.getElementById('repFilterAnno')?.value||'',fMese=document.getElementById('repFilterMese')?.value;
+  const selProgetto=document.getElementById('repProgetto')?.value||'';
   const teamNames=isAdmin?RESOURCES.map(r=>r.fullName):RESOURCES.filter(r=>(r.progetti||[]).some(p=>(_prjTLsByName[p]||[]).includes(currentUser))).map(r=>r.fullName);
   const myProjects=isAdmin?null:new Set(Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p));
-  let filtered=(await getRepStore()).filter(r=>{if(!isAdmin){if(!teamNames.includes(r.fullName))return false;if(!myProjects.has(r.progetto))return false;}if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
+  let filtered=(await getRepStore()).filter(r=>{if(!isAdmin){if(!teamNames.includes(r.fullName))return false;if(!myProjects.has(r.progetto))return false;}if(selProgetto&&r.progetto!==selProgetto)return false;if(fRis&&r.fullName!==fRis)return false;if(fAnno&&+r.anno!==+fAnno)return false;if(fMese!==''&&fMese!==undefined&&+r.mese!==+fMese)return false;return true;});
   const el=document.getElementById('repTeamList');
   if(!filtered.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità trovata.</p>';return;}
   const ferieMap={};
