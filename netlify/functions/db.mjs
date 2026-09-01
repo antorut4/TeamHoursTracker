@@ -93,8 +93,11 @@ async function saveFerie(p){
   const oraFine   = (p.tipo === 'Permesso/ROL' && p.oraFine)   ? p.oraFine   : null;
   await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine)
             VALUES (${p.risorsaId}, ${p.start}, ${p.end}, ${p.tipo}, ${p.note}, ${oraInizio}, ${oraFine})`;
-  // Notifica email ai TL — fire-and-forget, errori non bloccano il salvataggio
-  sendAbsenceNotification(p).catch(err => console.error('[absence-notify]', err.message));
+  // Notifica email ai TL — awaited, errori catturati per non bloccare il salvataggio
+  let notifica = { sent: 0, reason: 'ok' };
+  try { notifica = await sendAbsenceNotification(p); }
+  catch (err) { console.error('[absence-notify]', err.message); notifica = { sent: 0, reason: 'error', error: err.message }; }
+  return notifica;
 }
 async function deleteFerie(p){ await sql`DELETE FROM ferie WHERE id=${p.id}`; }
 
@@ -157,11 +160,11 @@ async function sendAbsenceNotification(p) {
   const GMAIL_USER = process.env.GMAIL_USER;
   const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
   const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
-  if (!GMAIL_USER || !GMAIL_PASS) return; // SMTP non configurato
+  if (!GMAIL_USER || !GMAIL_PASS) return { sent: 0, reason: 'no_smtp' };
 
   // 1. Risorsa che ha salvato l'assenza
   const [risorsa] = await sql`SELECT full_name FROM risorse WHERE id = ${p.risorsaId}`;
-  if (!risorsa) return;
+  if (!risorsa) return { sent: 0, reason: 'no_resource' };
   const personName = risorsa.full_name;
 
   // 2. TL dei progetti della risorsa (esclusa la risorsa stessa, con email valida)
@@ -175,7 +178,7 @@ async function sendAbsenceNotification(p) {
       AND ptl.risorsa_id != ${p.risorsaId}
       AND r.email IS NOT NULL AND r.email <> ''
     ORDER BY r.email, proj.nome`;
-  if (!tlRows.length) return; // nessun TL trovato
+  if (!tlRows.length) return { sent: 0, reason: 'no_tl' };
 
   // 3. Progetti della risorsa
   const projRows = await sql`
@@ -218,14 +221,19 @@ async function sendAbsenceNotification(p) {
   const html    = buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap);
   const text    = buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap);
 
+  let sent = 0;
+  const destinatari = [];
   for (const tl of Object.values(tlByEmail)) {
     await mailer.sendMail({
       from: `${FROM_NAME} <${GMAIL_USER}>`,
       to:   tl.email,
       subject, html, text
     });
+    sent++;
+    destinatari.push(tl.name);
     console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
   }
+  return { sent, destinatari, reason: 'ok' };
 }
 
 function buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap) {

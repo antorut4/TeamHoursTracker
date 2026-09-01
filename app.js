@@ -461,15 +461,23 @@ function initFerieRisorseCard(){
 function onFerieRisorsaChange(cb){const color=colorFor(cb.value);const label=document.getElementById('frlabel_'+cb.value.replace(/\s/g,'_'));if(label)label.style.borderColor=cb.checked?color:'var(--line)';const checked=[...document.querySelectorAll('#ferieRisorseCheck input:checked')].map(i=>i.value);saveFerieRisorse([currentUser,...checked]);renderFerieList();}
 function selAllFerieRisorse(sel){document.querySelectorAll('#ferieRisorseCheck input').forEach(cb=>{cb.checked=sel;const color=colorFor(cb.value);const label=document.getElementById('frlabel_'+cb.value.replace(/\s/g,'_'));if(label)label.style.borderColor=sel?color:'var(--line)';});const checked=sel?[...document.querySelectorAll('#ferieRisorseCheck input')].map(i=>i.value):[];saveFerieRisorse([currentUser,...checked]);renderFerieList();}
 // FERIE
+function _notificaMsg(n){
+  if(!n)return'';
+  if(n.reason==='no_smtp')return'(SMTP non configurato)';
+  if(n.reason==='no_tl')return'(Nessun Team Leader trovato)';
+  if(n.reason==='error')return'(Errore invio email)';
+  if(n.sent===0)return'';
+  return `Email inviata a: ${n.destinatari.join(', ')}.`;
+}
 async function saveFerie(){
   const start=document.getElementById('ferieStart').value,end=document.getElementById('ferieEnd').value;
   const tipo=document.getElementById('ferieTipo').value,note=document.getElementById('ferieNote').value;
   if(!start||!end){showMsg('ferieMsg','Inserisci date di inizio e fine.','err');return;}if(end<start){showMsg('ferieMsg','Data fine deve essere >= inizio.','err');return;}
   const user=isAdmin?null:currentUser;if(!user){showMsg('ferieMsg','Admin non può inserire ferie per sé.','err');return;}
   const r=RESOURCES.find(x=>x.fullName===user);if(!r){showMsg('ferieMsg','Risorsa non trovata.','err');return;}
-  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:note||null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  showSpinner();let _nRes;try{_nRes=await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:note||null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('ferieStart').value='';document.getElementById('ferieEnd').value='';document.getElementById('ferieNote').value='';document.getElementById('overlapWarn').style.display='none';
-  showMsg('ferieMsg',tipo+' aggiunto/a','ok');await renderFerieList();renderFerieCalendar();
+  showMsg('ferieMsg',tipo+' aggiunto/a. '+_notificaMsg(_nRes),'ok');await renderFerieList();renderFerieCalendar();
 }
 async function checkOverlap(){
   const start=document.getElementById('ferieStart').value,end=document.getElementById('ferieEnd').value;if(!start||!end)return;
@@ -1327,8 +1335,8 @@ function showPermessoTime(){
 async function pickFerieTipo(tipo){
   const dateStr=_feriePickerDate;closeFeriePicker();if(!dateStr)return;
   const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
-  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start:dateStr,end:dateStr,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
-  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
+  showSpinner();let _nR1;try{_nR1=await call('saveFerie',{risorsaId:r.id,start:dateStr,end:dateStr,tipo,note:null});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a. '+_notificaMsg(_nR1),'ok');
 }
 async function pickFerieTipoRange(tipo){
   const start=document.getElementById('feriePickerStart')?.value||_feriePickerDate;
@@ -1344,8 +1352,8 @@ async function pickFerieTipoRange(tipo){
   if(!start||!end){showMsg('ferieMsg','Seleziona le date.','err');return;}
   if(end<start){showMsg('ferieMsg','Data fine deve essere >= inizio.','err');return;}
   const r=RESOURCES.find(x=>x.fullName===currentUser);if(!r)return;
-  showSpinner();try{await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:null,oraInizio,oraFine});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
-  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a.','ok');
+  showSpinner();let _nR2;try{_nR2=await call('saveFerie',{risorsaId:r.id,start,end,tipo,note:null,oraInizio,oraFine});await reloadAll();}catch(e){hideSpinner();showMsg('ferieMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();renderFerieCalendar();showMsg('ferieMsg',tipo+' aggiunto/a. '+_notificaMsg(_nR2),'ok');
 }
 let _presWeekOffset=0;
 function _getMonday(offset){const t=new Date(),dow=t.getDay(),diff=dow===0?-6:1-dow,m=new Date(t);m.setDate(t.getDate()+diff+offset*7);m.setHours(0,0,0,0);return m;}
