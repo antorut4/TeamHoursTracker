@@ -1,16 +1,16 @@
 // ════════════════════════════════════════════════════════════════════════
 //  send-daily-reminder-background.mjs — Netlify Scheduled Background Function
-//  Schedule: 0 7 * * 1-5  (07:00 UTC = 08:00 CET / 09:00 CEST)
-//  Invia email giornaliera via Gmail SMTP a ogni risorsa con email.
-//  Background function = timeout 15 minuti (sufficiente per team grandi).
+//  Schedule: 0 8 * * 1-5  (08:00 UTC = 09:00 CET / 10:00 CEST)
+//  Ogni mattina invia l'email per registrare le ore del giorno PRECEDENTE.
+//  Lunedì → email per venerdì. Martedì-Venerdì → email per ieri.
 // ════════════════════════════════════════════════════════════════════════
 import { neon }       from '@neondatabase/serverless';
 import { createHmac } from 'crypto';
 import nodemailer      from 'nodemailer';
 
-const sql      = neon(process.env.DATABASE_URL);
-const SECRET   = process.env.DAILY_TOKEN_SECRET;
-const SITE_URL = (process.env.SITE_URL || '').replace(/\/$/, '');
+const sql       = neon(process.env.DATABASE_URL);
+const SECRET    = process.env.DAILY_TOKEN_SECRET;
+const SITE_URL  = (process.env.SITE_URL || '').replace(/\/$/, '');
 const FROM_NAME = process.env.FROM_NAME || 'Team Hours Tracker';
 
 // ── Nodemailer: connessione Gmail SMTP ──
@@ -24,9 +24,20 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// ── genera token (identico a daily.mjs) ──
+// ── calcola il giorno lavorativo precedente ──
+// Lunedì (1) → torna al venerdì scorso (-3 giorni)
+// Martedì-Venerdì (2-5) → ieri (-1 giorno)
+function getPreviousWorkday(today) {
+  const date = new Date(today);
+  const dow  = date.getUTCDay();
+  const back = dow === 1 ? 3 : 1;
+  date.setUTCDate(date.getUTCDate() - back);
+  return date.toISOString().split('T')[0];
+}
+
+// ── genera token valido 48 ore (copre anche il caso lunedì→venerdì) ──
 function generateToken(risorsaId, data) {
-  const exp = Math.floor(Date.now() / 1000) + 36 * 3600;
+  const exp = Math.floor(Date.now() / 1000) + 48 * 3600;
   const b64 = Buffer.from(JSON.stringify({ r: risorsaId, d: data, e: exp })).toString('base64url');
   const sig = createHmac('sha256', SECRET).update(b64).digest('hex');
   return `${b64}.${sig}`;
@@ -50,7 +61,7 @@ async function sendEmail(risorsa, dataISO) {
   await transporter.sendMail({
     from:    `${FROM_NAME} <${process.env.GMAIL_USER}>`,
     to:      risorsa.email,
-    subject: `Registra le tue ore — ${dateLabel}`,
+    subject: `Ore di ieri — ${dateLabel}`,
     html:    buildEmailHtml(firstName, risorsa.full_name, dateLabel, link)
   });
 }
@@ -63,8 +74,8 @@ export const handler = async () => {
     return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: 'weekend' }) };
   }
 
-  const dataISO = today.toISOString().split('T')[0];
-  console.log(`Invio reminder per ${dataISO}`);
+  const dataISO = getPreviousWorkday(today);
+  console.log(`Invio reminder per il giorno precedente: ${dataISO}`);
 
   const risorse = await sql`
     SELECT id, full_name, email
@@ -85,7 +96,7 @@ export const handler = async () => {
   }
 
   console.log(`Fine: ${results.sent} inviate, ${results.errors.length} errori`);
-  return { statusCode: 200, body: JSON.stringify({ ok: true, ...results }) };
+  return { statusCode: 200, body: JSON.stringify({ ok: true, dataISO, ...results }) };
 };
 
 function buildEmailHtml(firstName, fullName, dateLabel, link) {
@@ -120,15 +131,15 @@ function buildEmailHtml(firstName, fullName, dateLabel, link) {
 <div class="w">
   <div class="hd">
     <h1>Team Hours Tracker</h1>
-    <p>Registrazione ore giornaliera</p>
+    <p>Registrazione ore</p>
   </div>
   <div class="bd">
     <p class="name">Ciao ${firstName}!</p>
-    <p class="sub">Ricordati di registrare le tue ore lavorative di oggi.</p>
+    <p class="sub">Quante ore hai lavorato ieri?</p>
     <div class="badge">📅 ${dateLabel}</div><br>
-    <a href="${link}" class="btn">Registra le ore →</a>
+    <a href="${link}" class="btn">Inserisci le ore →</a>
     <p class="note">
-      Il link è personale e valido per 36 ore.<br>
+      Il link è personale e valido per 48 ore.<br>
       Se il pulsante non funziona, copia questo URL:<br>
       <a href="${link}">${link}</a>
     </p>
