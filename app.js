@@ -1424,11 +1424,12 @@ async function loadConsuntivo(){
 function _fmtOre(v){return v===0?'':(v%1===0?String(v):v.toFixed(1));}
 function _fmtOreTot(v){return v%1===0?String(v):v.toFixed(1);}
 
-// Griglia calendario stile reperibilità (read-only)
+// Griglia calendario stile reperibilità — celle editabili via click
 // resList: [{id, fullName}] — risorse da mostrare come righe
 function _buildConsuntivoGrid(rows,month,year,resList){
   const dim=new Date(year,month+1,0).getDate();
   const DN=['D','L','M','M','G','V','S'];
+  const mm=String(month+1).padStart(2,'0');
   // lookup: risorsaId → {giorno: ore}
   const lk={};
   rows.forEach(r=>{const day=new Date(r.data+'T12:00:00Z').getUTCDate();if(!lk[r.risorsa_id])lk[r.risorsa_id]={};lk[r.risorsa_id][day]=+r.ore;});
@@ -1456,10 +1457,12 @@ function _buildConsuntivoGrid(rows,month,year,resList){
     h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="line-height:1.35">${res.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${res.fullName.split(' ').slice(1).join(' ')}</span></div></td>`;
     for(let d=1;d<=dim;d++){
       const wd=new Date(year,month,d).getDay(),isWe=wd===0||wd===6;
-      const ore=rd[d];
+      const ore=rd[d]||0;
       const bdr=d===15?';border-right:2px solid var(--stone-3)':'';
       const bg=ore?'var(--ok-bg)':(isWe?'rgba(161,0,255,.04)':'inherit');
-      h+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${bg}${bdr}">`;
+      const dd=String(d).padStart(2,'0');
+      const dateISO=`${year}-${mm}-${dd}`;
+      h+=`<td title="Clicca per modificare" style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${bg};cursor:pointer${bdr}" onclick="_consuntivoClickCell(this,${res.id},'${dateISO}',${ore})">`;
       if(ore)h+=`<span style="font-size:.68rem;font-weight:600;color:var(--ok)">${_fmtOre(ore)}</span>`;
       h+=`</td>`;
     }
@@ -1481,6 +1484,39 @@ function _buildConsuntivoGrid(rows,month,year,resList){
   }
   h+=`</table></div>`;
   return h;
+}
+// Inline edit: click su cella → input → salva → refresh griglia
+async function _consuntivoClickCell(td,risorsaId,dateISO,currentOre){
+  if(td.querySelector('input'))return; // già in edit
+  const origHTML=td.innerHTML,origBg=td.style.background;
+  const inp=document.createElement('input');
+  inp.type='number';inp.min='0';inp.max='24';inp.step='0.5';
+  inp.value=currentOre>0?currentOre:'';
+  inp.style.cssText='width:36px;border:none;background:transparent;font-size:.7rem;font-weight:700;color:#a100ff;text-align:center;outline:2px solid #a100ff;border-radius:2px;padding:0 2px;';
+  td.innerHTML='';td.style.background='var(--amber-bg)';
+  td.appendChild(inp);inp.focus();if(inp.value)inp.select();
+  let done=false;
+  async function doSave(){
+    if(done)return;done=true;
+    const v=parseFloat(inp.value);
+    const ore=(!isNaN(v)&&v>0)?v:null;
+    showSpinner();
+    try{
+      await call('saveConsuntivo',{risorsaId,data:dateISO,ore});
+      hideSpinner();
+      await loadConsuntivo(); // refresh completo per aggiornare Q1/Q2/tot
+    }catch(e){
+      hideSpinner();
+      td.innerHTML=origHTML;td.style.background=origBg;
+      console.error('saveConsuntivo:',e.message);
+    }
+  }
+  function doCancel(){if(done)return;done=true;td.innerHTML=origHTML;td.style.background=origBg;}
+  inp.addEventListener('blur',doSave);
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();inp.blur();}
+    if(e.key==='Escape'){done=true;inp.removeEventListener('blur',doSave);doCancel();}
+  });
 }
 // Badge riepilogo Q1/Q2/Tot
 function _consuntivoSummary(q1,q2){

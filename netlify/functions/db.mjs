@@ -230,6 +230,19 @@ async function setAdminPwd(p){
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
 }
 
+// ── consuntivo: scrittura ore giornaliere su daily_hours ──
+// ore null/0/'': cancella la riga; altrimenti upsert
+async function saveConsuntivo(p){
+  const ore=(p.ore!==null&&p.ore!==''&&!isNaN(+p.ore)&&+p.ore>0)?+p.ore:null;
+  if(ore===null){
+    await sql`DELETE FROM daily_hours WHERE risorsa_id=${p.risorsaId} AND data=${p.data}`;
+  }else{
+    await sql`INSERT INTO daily_hours (risorsa_id, data, ore, updated_at)
+              VALUES (${p.risorsaId}, ${p.data}, ${ore}, NOW())
+              ON CONFLICT (risorsa_id, data) DO UPDATE SET ore=EXCLUDED.ore, updated_at=NOW()`;
+  }
+}
+
 // ── consuntivo: lettura ore giornaliere da daily_hours (sola lettura) ──
 async function getConsuntivo(p){
   const anno = +p.anno;
@@ -252,7 +265,7 @@ const ACTIONS = {
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
-  getConsuntivo
+  getConsuntivo, saveConsuntivo
 };
 
 export async function handler(event){
