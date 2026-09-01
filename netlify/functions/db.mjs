@@ -230,6 +230,20 @@ async function setAdminPwd(p){
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
 }
 
+// ── consuntivo: lettura ore giornaliere da daily_hours (sola lettura) ──
+async function getConsuntivo(p){
+  const anno = +p.anno;
+  const mese = +p.mese; // 0-based dal frontend → EXTRACT(MONTH) è 1-based
+  const rows = await sql`
+    SELECT dh.risorsa_id, dh.data::text AS data, dh.ore::float AS ore, r.full_name
+    FROM daily_hours dh
+    JOIN risorse r ON r.id = dh.risorsa_id
+    WHERE EXTRACT(YEAR  FROM dh.data) = ${anno}
+      AND EXTRACT(MONTH FROM dh.data) = ${mese + 1}
+    ORDER BY dh.risorsa_id, dh.data`;
+  return rows;
+}
+
 // ── routing: whitelist esplicita delle action consentite ──
 const ACTIONS = {
   bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
@@ -237,7 +251,8 @@ const ACTIONS = {
   addResource, saveEdit, deleteResource, saveRep, deleteRep, getRepForProject,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs, setResourceManager, toggleIsManager, saveRepTipi
+  saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
+  getConsuntivo
 };
 
 export async function handler(event){

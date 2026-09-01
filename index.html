@@ -95,13 +95,14 @@
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">Personale</div>
-        <div class="nav-item active" id="navOre" onclick="showTab('ore')" style="display:none"><i class="fa-regular fa-clock"></i> Le mie ore</div>
+        <div class="nav-item active" id="navOre" onclick="showTab('ore')" style="display:none"><i class="fa-regular fa-clock"></i> Forecast ore</div>
         <div class="nav-item" id="navFerie" onclick="showTab('ferie')"><i class="fa-solid fa-umbrella-beach"></i> Ferie</div>
         <div class="nav-item" id="navRep" onclick="showTab('reperibilita')" style="display:none"><i class="fa-solid fa-tower-broadcast"></i> Reperibilità</div>
         <div class="nav-item" id="navPresenze" onclick="showTab('presenze')" style="display:none"><i class="fa-solid fa-building-user"></i> Presenze</div>
+        <div class="nav-item" id="navConsuntivo" onclick="showTab('consuntivo')" style="display:none"><i class="fa-solid fa-list-check"></i> Ore Consuntivate</div>
         <div class="nav-section" id="navSectionTeam" style="display:none">Team</div>
         <div class="nav-item" id="navDashboard" onclick="showTab('dashboard')" style="display:none"><i class="fa-solid fa-gauge-high"></i> Dashboard</div>
-        <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Riepilogo ore</div>
+        <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Forecast ore</div>
         <div class="nav-item" id="navTrend" onclick="showTab('trend')" style="display:none"><i class="fa-solid fa-chart-line"></i> Trend</div>
         <div class="nav-item" id="navOverview" onclick="showTab('overview')" style="display:none"><i class="fa-regular fa-calendar-days"></i> Overview ferie</div>
         <div class="nav-item" id="navRepOverview" onclick="showTab('rep-overview')" style="display:none"><i class="fa-solid fa-tower-broadcast"></i> Ov. Reperibilità</div>
@@ -119,7 +120,7 @@
       <div id="alertBanner"><i class="fa-solid fa-triangle-exclamation"></i><span id="alertText"></span></div>
       <!-- ORE -->
       <div class="panel" id="panel-ore">
-        <div class="page-header"><h1>Le mie ore</h1><p>Inserisci le ore lavorate per ciascuna quindicina</p></div>
+        <div class="page-header"><h1>Forecast ore</h1><p>Inserisci le ore previste per ciascuna quindicina</p></div>
         <div class="card">
           <div class="card-title"><i class="fa-regular fa-calendar-plus"></i> Inserimento mensile</div>
           <div class="field-row">
@@ -312,6 +313,19 @@
           <div class="table-wrap" id="presenzeGrid"></div>
           <div id="presenzeMsg" class="msg" style="margin-top:10px"></div>
         </div>
+      </div>
+      <!-- CONSUNTIVO -->
+      <div class="panel" id="panel-consuntivo">
+        <div class="page-header"><h1>Ore Consuntivate</h1><p>Ore giornaliere effettivamente lavorate (da reminder email)</p></div>
+        <div class="card">
+          <div class="card-title"><i class="fa-solid fa-sliders"></i> Filtri</div>
+          <div class="field-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+            <div class="field" style="min-width:140px"><label>Mese</label><select id="consuntivoMonth" onchange="loadConsuntivo().catch(console.error)"></select></div>
+            <div class="field" style="min-width:100px"><label>Anno</label><select id="consuntivoYear" onchange="loadConsuntivo().catch(console.error)"></select></div>
+            <div class="field" style="min-width:200px" id="consuntivoResField"><label>Risorsa</label><select id="consuntivoRes" onchange="loadConsuntivo().catch(console.error)"><option value="">Tutte le risorse</option></select></div>
+          </div>
+        </div>
+        <div id="consuntivoContent"></div>
       </div>
       <!-- OVERVIEW REPERIBILITÀ -->
       <div class="panel" id="panel-rep-overview">

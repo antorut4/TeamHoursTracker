@@ -113,6 +113,7 @@ async function launchApp(){
   navVis('navFerie',!isAdmin);
   navVis('navRep',!isAdmin);
   navVis('navPresenze',true);
+  navVis('navConsuntivo',true);
   navVis('navSectionTeam',isAdmin||isTeamLead);
   navVis('navDashboard',isAdmin||isTeamLead);
   navVis('navRiepilogo',isAdmin||isTeamLead);
@@ -127,8 +128,8 @@ async function launchApp(){
 // INIT
 async function initApp(){
   const now=new Date(),mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
-  ['oreMonth','riepilogoMonth','ovMonth','adminFerMonth','ferieCalMonth'].forEach(id=>popSel(id,mOpts,now.getMonth()));
-  ['oreYear','riepilogoYear','ovYear','adminFerYear','ferieCalYear'].forEach(id=>popSel(id,yOpts,now.getFullYear()));
+  ['oreMonth','riepilogoMonth','ovMonth','adminFerMonth','ferieCalMonth','consuntivoMonth'].forEach(id=>popSel(id,mOpts,now.getMonth()));
+  ['oreYear','riepilogoYear','ovYear','adminFerYear','ferieCalYear','consuntivoYear'].forEach(id=>popSel(id,yOpts,now.getFullYear()));
   popSel('filterAnno',[{v:'',l:'Tutti gli anni'},...yOpts],'');
   refreshDropdowns();
   if(!isAdmin){await loadOreForm();await renderMyOre();checkAlerts();}
@@ -136,6 +137,13 @@ async function initApp(){
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
   ['resLCField','editLCField'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=(isAdmin||isTeamLead)?'':'none';});
+  // consuntivoRes: visibile solo a manager/admin, permette di filtrare per risorsa
+  const consuntivoResField=document.getElementById('consuntivoResField');
+  if(consuntivoResField)consuntivoResField.style.display=(isAdmin||isTeamLead)?'':'none';
+  if(isAdmin||isTeamLead){
+    const rOpts=[{v:'',l:'Tutte le risorse'},...RESOURCES.map(r=>({v:r.id,l:r.fullName}))];
+    popSel('consuntivoRes',rOpts,'');
+  }
   if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     await renderResourceList();
@@ -173,8 +181,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard'];
-const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo'];
+const NAV_MAP={ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -192,6 +200,7 @@ async function showTab(t){
   if(t==='rep-overview')initRepOverviewPanel();
   if(t==='ferie'&&!isAdmin){renderFerieCalendar();}
   if(t==='presenze')initPresenzePanel();
+  if(t==='consuntivo')loadConsuntivo().catch(console.error);
 }
 // ORE
 async function loadOreForm(){
@@ -1393,6 +1402,87 @@ async function togglePresenzaDay(dateStr,risorsaId){
   }catch(e){hideSpinner();showMsg('presenzeMsg','Errore: '+e.message,'err');return;}
   hideSpinner();renderPresenzeGrid();
 }
+// CONSUNTIVO
+async function loadConsuntivo(){
+  const month=+document.getElementById('consuntivoMonth').value;
+  const year=+document.getElementById('consuntivoYear').value;
+  const el=document.getElementById('consuntivoContent');
+  if(!el)return;
+  el.innerHTML='<div class="msg">Caricamento...</div>';
+  showSpinner();
+  let rows;
+  try{rows=await call('getConsuntivo',{anno:year,mese:month});}catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
+  hideSpinner();
+  if(isAdmin||isTeamLead){
+    _renderConsuntivoTeam(rows,month,year);
+  }else{
+    const r=RESOURCES.find(x=>x.fullName===currentUser);
+    const myRows=r?rows.filter(x=>+x.risorsa_id===+r.id):[];
+    _renderConsuntivoCollab(myRows,month,year);
+  }
+}
+function _renderConsuntivoCollab(rows,month,year){
+  const el=document.getElementById('consuntivoContent');
+  if(!rows.length){el.innerHTML='<div class="card"><p style="color:var(--muted);text-align:center;padding:24px 0">Nessuna ora consuntivata per questo mese.</p></div>';return;}
+  const q1=rows.filter(r=>new Date(r.data).getUTCDate()<=15).reduce((s,r)=>s+(+r.ore),0);
+  const q2=rows.filter(r=>new Date(r.data).getUTCDate()>15).reduce((s,r)=>s+(+r.ore),0);
+  const tot=q1+q2;
+  let html=`<div class="card">
+    <div class="card-title"><i class="fa-solid fa-calendar-days"></i> ${MONTHS[month]} ${year}</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+      <div style="background:var(--surface2);border-radius:var(--r);padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">I Quindicina</div>
+        <div style="font-size:1.4rem;font-weight:700;color:var(--ink)">${q1.toFixed(1)}</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:var(--r);padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">II Quindicina</div>
+        <div style="font-size:1.4rem;font-weight:700;color:var(--ink)">${q2.toFixed(1)}</div>
+      </div>
+      <div style="background:var(--accent-light,#f3e8ff);border-radius:var(--r);padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">Totale mese</div>
+        <div style="font-size:1.4rem;font-weight:700;color:var(--accent,#a100ff)">${tot.toFixed(1)}</div>
+      </div>
+    </div>
+    <table class="data-table" style="width:100%"><thead><tr><th>Data</th><th style="text-align:right">Ore</th></tr></thead><tbody>`;
+  rows.forEach(r=>{
+    const d=new Date(r.data+'T12:00:00Z');
+    const lbl=d.toLocaleDateString('it-IT',{weekday:'short',day:'numeric',month:'short'});
+    html+=`<tr><td>${lbl}</td><td style="text-align:right">${(+r.ore).toFixed(1)}</td></tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  el.innerHTML=html;
+}
+function _renderConsuntivoTeam(rows,month,year){
+  const el=document.getElementById('consuntivoContent');
+  const filterRes=+(document.getElementById('consuntivoRes')?.value||0);
+  const filtered=filterRes?rows.filter(r=>+r.risorsa_id===filterRes):rows;
+  if(!filtered.length){el.innerHTML='<div class="card"><p style="color:var(--muted);text-align:center;padding:24px 0">Nessuna ora consuntivata per questo mese.</p></div>';return;}
+  // raggruppa per risorsa
+  const byRes={};
+  filtered.forEach(r=>{
+    if(!byRes[r.risorsa_id])byRes[r.risorsa_id]={name:r.full_name,rows:[]};
+    byRes[r.risorsa_id].rows.push(r);
+  });
+  let html='';
+  Object.values(byRes).sort((a,b)=>a.name.localeCompare(b.name,'it')).forEach(({name,rows:rr})=>{
+    const q1=rr.filter(r=>new Date(r.data).getUTCDate()<=15).reduce((s,r)=>s+(+r.ore),0);
+    const q2=rr.filter(r=>new Date(r.data).getUTCDate()>15).reduce((s,r)=>s+(+r.ore),0);
+    const tot=q1+q2;
+    html+=`<div class="card" style="margin-bottom:16px">
+      <div class="card-title"><i class="fa-solid fa-user"></i> ${name}
+        <span style="float:right;font-size:.82rem;font-weight:400;color:var(--muted)">Q1: ${q1.toFixed(1)} | Q2: ${q2.toFixed(1)} | Tot: <strong>${tot.toFixed(1)}</strong></span>
+      </div>
+      <table class="data-table" style="width:100%"><thead><tr><th>Data</th><th style="text-align:right">Ore</th></tr></thead><tbody>`;
+    rr.forEach(r=>{
+      const d=new Date(r.data+'T12:00:00Z');
+      const lbl=d.toLocaleDateString('it-IT',{weekday:'short',day:'numeric',month:'short'});
+      html+=`<tr><td>${lbl}</td><td style="text-align:right">${(+r.ore).toFixed(1)}</td></tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  });
+  el.innerHTML=html;
+}
+
 // AVVIO
 (async function init(){
   showSpinner();
