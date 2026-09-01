@@ -6,7 +6,8 @@
 //  Le tabelle utenti_pwd/config sono accessibili solo da qui (le password
 //  non escono mai: i check ritornano un boolean, mai l'hash).
 // ════════════════════════════════════════════════════════════════════════
-import { neon } from '@neondatabase/serverless';
+import { neon }    from '@neondatabase/serverless';
+import nodemailer   from 'nodemailer';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -92,8 +93,366 @@ async function saveFerie(p){
   const oraFine   = (p.tipo === 'Permesso/ROL' && p.oraFine)   ? p.oraFine   : null;
   await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine)
             VALUES (${p.risorsaId}, ${p.start}, ${p.end}, ${p.tipo}, ${p.note}, ${oraInizio}, ${oraFine})`;
+  // Notifica email ai TL — fire-and-forget, errori non bloccano il salvataggio
+  sendAbsenceNotification(p).catch(err => console.error('[absence-notify]', err.message));
 }
 async function deleteFerie(p){ await sql`DELETE FROM ferie WHERE id=${p.id}`; }
+
+// ════════════════════════════════════════════════════════════════════════
+//  Notifica assenza — invia email ai TL dei progetti della risorsa
+// ════════════════════════════════════════════════════════════════════════
+
+function _absenceTransporter() {
+  return nodemailer.createTransport({
+    host:   'smtp.gmail.com',
+    port:   587,
+    secure: false,
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
+  });
+}
+
+// "2026-09-01" → "01/09/2026"
+function _fmtDateIT(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+// Tipo → colori email
+function _tipoColor(tipo) {
+  if (tipo === 'Ferie')        return { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' };
+  if (tipo === 'Malattia')     return { bg: '#fee2e2', text: '#dc2626', border: '#fca5a5' };
+  return                              { bg: '#fef3c7', text: '#d97706', border: '#fcd34d' }; // Permesso/ROL
+}
+
+// Espande [start, end] in array di ISO date
+function _expandDays(start, end) {
+  const days = [];
+  let cur = new Date(start + 'T12:00:00Z');
+  const fin = new Date(end   + 'T12:00:00Z');
+  while (cur <= fin) { days.push(cur.toISOString().split('T')[0]); cur.setUTCDate(cur.getUTCDate() + 1); }
+  return days;
+}
+
+// Costruisce mappa overlap: { progetto → { isoDay → [{name, tipo}] } }
+// La nuova assenza (newName/tipo) appare in ogni giorno dove c'è almeno un collega
+function _buildOverlapMap(newName, tipo, start, end, overlaps) {
+  const days = _expandDays(start, end);
+  const map  = {};
+  overlaps.forEach(ov => {
+    const ovS = new Date(ov.data_inizio + 'T12:00:00Z');
+    const ovE = new Date(ov.data_fine   + 'T12:00:00Z');
+    days.forEach(day => {
+      const d = new Date(day + 'T12:00:00Z');
+      if (d < ovS || d > ovE) return;
+      if (!map[ov.progetto])       map[ov.progetto] = {};
+      if (!map[ov.progetto][day])  map[ov.progetto][day] = [{ name: newName, tipo }];
+      if (!map[ov.progetto][day].some(x => x.name === ov.full_name))
+        map[ov.progetto][day].push({ name: ov.full_name, tipo: ov.tipo });
+    });
+  });
+  return map;
+}
+
+async function sendAbsenceNotification(p) {
+  const GMAIL_USER = process.env.GMAIL_USER;
+  const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
+  const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
+  if (!GMAIL_USER || !GMAIL_PASS) return; // SMTP non configurato
+
+  // 1. Risorsa che ha salvato l'assenza
+  const [risorsa] = await sql`SELECT full_name FROM risorse WHERE id = ${p.risorsaId}`;
+  if (!risorsa) return;
+  const personName = risorsa.full_name;
+
+  // 2. TL dei progetti della risorsa (esclusa la risorsa stessa, con email valida)
+  const tlRows = await sql`
+    SELECT DISTINCT r.full_name, r.email, proj.nome AS progetto
+    FROM allocazioni a
+    JOIN progetti proj ON proj.id = a.progetto_id
+    JOIN progetto_team_leads ptl ON ptl.progetto_id = proj.id
+    JOIN risorse r ON r.id = ptl.risorsa_id
+    WHERE a.risorsa_id = ${p.risorsaId}
+      AND ptl.risorsa_id != ${p.risorsaId}
+      AND r.email IS NOT NULL AND r.email <> ''
+    ORDER BY r.email, proj.nome`;
+  if (!tlRows.length) return; // nessun TL trovato
+
+  // 3. Progetti della risorsa
+  const projRows = await sql`
+    SELECT proj.nome
+    FROM allocazioni a
+    JOIN progetti proj ON proj.id = a.progetto_id
+    WHERE a.risorsa_id = ${p.risorsaId}
+    ORDER BY proj.nome`;
+  const progetti = projRows.map(r => r.nome);
+
+  // 4. Sovrapposizioni con altri colleghi sugli stessi progetti
+  const overlapRows = await sql`
+    SELECT DISTINCT
+      f.risorsa_id, r.full_name, f.data_inizio::text AS data_inizio,
+      f.data_fine::text AS data_fine, f.tipo, proj.nome AS progetto
+    FROM ferie f
+    JOIN risorse r      ON r.id   = f.risorsa_id
+    JOIN allocazioni a  ON a.risorsa_id = f.risorsa_id
+    JOIN progetti proj  ON proj.id = a.progetto_id
+    WHERE f.risorsa_id != ${p.risorsaId}
+      AND a.progetto_id IN (
+        SELECT progetto_id FROM allocazioni WHERE risorsa_id = ${p.risorsaId}
+      )
+      AND f.data_fine   >= ${p.start}::date
+      AND f.data_inizio <= ${p.end}::date
+    ORDER BY proj.nome, f.data_inizio, r.full_name`;
+
+  const overlapMap = _buildOverlapMap(personName, p.tipo, p.start, p.end, overlapRows);
+  const hasOverlap = Object.keys(overlapMap).length > 0;
+
+  // 5. Deduplicazione TL per email
+  const tlByEmail = {};
+  tlRows.forEach(tl => {
+    if (!tlByEmail[tl.email]) tlByEmail[tl.email] = { name: tl.full_name, email: tl.email };
+  });
+
+  // 6. Invio email
+  const mailer  = _absenceTransporter();
+  const subject = `[Nuova assenza] ${personName}`;
+  const html    = buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap);
+  const text    = buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap);
+
+  for (const tl of Object.values(tlByEmail)) {
+    await mailer.sendMail({
+      from: `${FROM_NAME} <${GMAIL_USER}>`,
+      to:   tl.email,
+      subject, html, text
+    });
+    console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
+  }
+}
+
+function buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap) {
+  const col = _tipoColor(p.tipo);
+  let t = `Team Hours Tracker — Nuova assenza\n\n`;
+  t += `${personName} ha inserito una nuova assenza.\n\n`;
+  t += `Tipo: ${p.tipo}\n`;
+  t += `Periodo: ${_fmtDateIT(p.start)} - ${_fmtDateIT(p.end)}\n`;
+  t += `\nProgetti coinvolti:\n${progetti.map(n => `- ${n}`).join('\n')}\n`;
+  if (hasOverlap) {
+    t += `\n⚠️ SONO PRESENTI ASSENZE CONTEMPORANEE:\n\n`;
+    Object.entries(overlapMap).forEach(([prog, byDay]) => {
+      t += `${prog}\n`;
+      Object.entries(byDay).sort(([a],[b])=>a.localeCompare(b)).forEach(([day, people]) => {
+        t += `  ${_fmtDateIT(day)}\n`;
+        people.forEach(x => { t += `  - ${x.name} (${x.tipo})\n`; });
+      });
+      t += '\n';
+    });
+  } else {
+    t += `\nNessuna sovrapposizione rilevata.\n`;
+  }
+  t += `\n---\nMessaggio automatico generato da Team Hours Tracker.`;
+  return t;
+}
+
+function buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap) {
+  const col    = _tipoColor(p.tipo);
+  const period = p.start === p.end
+    ? _fmtDateIT(p.start)
+    : `${_fmtDateIT(p.start)} — ${_fmtDateIT(p.end)}`;
+
+  // ── sezione sovrapposizioni ──
+  let overlapHtml = '';
+  if (hasOverlap) {
+    let ovBody = '';
+    Object.entries(overlapMap).forEach(([prog, byDay]) => {
+      ovBody += `
+        <tr><td colspan="2" style="padding:10px 0 4px;font-family:Arial,Helvetica,sans-serif;
+            font-size:13px;font-weight:700;color:#92400e;">${prog}</td></tr>`;
+      Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b)).forEach(([day, people]) => {
+        ovBody += `
+        <tr><td colspan="2" style="padding:4px 0 2px;font-family:Arial,Helvetica,sans-serif;
+            font-size:12px;color:#78350f;font-weight:600;">${_fmtDateIT(day)}</td></tr>`;
+        people.forEach(x => {
+          const pc = _tipoColor(x.tipo);
+          ovBody += `
+        <tr>
+          <td style="padding:2px 0 2px 12px;font-family:Arial,Helvetica,sans-serif;
+              font-size:12px;color:#451a03;">• ${x.name}</td>
+          <td style="padding:2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;">
+            <span style="background:${pc.bg};color:${pc.text};border-radius:3px;
+                padding:1px 6px;font-weight:600;">${x.tipo}</span>
+          </td>
+        </tr>`;
+        });
+      });
+    });
+    overlapHtml = `
+      <tr>
+        <td style="padding:0 40px 32px;background-color:#ffffff;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+                 style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:6px;overflow:hidden;">
+            <tr>
+              <td bgcolor="#fef3c7" style="background-color:#fef3c7;padding:12px 16px;">
+                <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;
+                   font-weight:700;color:#92400e;">&#9888;&#65039; Sono presenti assenze contemporanee</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                  ${ovBody}
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`;
+  } else {
+    overlapHtml = `
+      <tr>
+        <td style="padding:0 40px 32px;background-color:#ffffff;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+                 style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;">
+            <tr>
+              <td style="padding:12px 16px;">
+                <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;
+                   color:#166534;">&#10003; Nessuna sovrapposizione rilevata.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`;
+  }
+
+  // ── progetti list ──
+  const progettiHtml = progetti.map(n =>
+    `<tr><td style="padding:2px 0 2px 0;font-family:Arial,Helvetica,sans-serif;
+       font-size:13px;color:#374151;">• ${n}</td></tr>`
+  ).join('');
+
+  return `<!DOCTYPE html>
+<html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Nuova assenza — ${personName}</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<style>table{border-collapse:collapse;}</style>
+<![endif]-->
+<style>
+body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+@media(prefers-color-scheme:dark){
+  .dm-outer{background-color:#1e1e2e!important;}
+  .dm-card{background-color:#2a2a3e!important;}
+  .dm-body{background-color:#2a2a3e!important;}
+  .dm-foot{background-color:#222230!important;}
+  .dm-title{color:#e8e8e8!important;}
+  .dm-sub{color:#bbbbbb!important;}
+  .dm-label{color:#aaaaaa!important;}
+  .dm-value{color:#ffffff!important;}
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;">
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+       class="dm-outer" style="background-color:#f0f2f5;">
+  <tr><td align="center" valign="top" style="padding:40px 16px;">
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600"
+           class="dm-card" style="max-width:600px;width:100%;background-color:#ffffff;">
+
+      <!-- HEADER -->
+      <tr>
+        <td align="center" bgcolor="#A100FF"
+            style="background-color:#A100FF;padding:28px 40px;">
+          <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;
+                    font-family:Arial,Helvetica,sans-serif;">Team Hours Tracker</p>
+          <p style="margin:6px 0 0;font-size:13px;color:#e8c4ff;
+                    font-family:Arial,Helvetica,sans-serif;">Notifica assenza</p>
+        </td>
+      </tr>
+
+      <!-- INTRO -->
+      <tr>
+        <td align="left" bgcolor="#ffffff" class="dm-body"
+            style="background-color:#ffffff;padding:32px 40px 20px;">
+          <p style="margin:0;font-size:16px;font-weight:600;color:#111827;
+                    font-family:Arial,Helvetica,sans-serif;" class="dm-title">
+            ${personName} ha inserito una nuova assenza.
+          </p>
+        </td>
+      </tr>
+
+      <!-- TIPO + PERIODO -->
+      <tr>
+        <td bgcolor="#ffffff" class="dm-body"
+            style="background-color:#ffffff;padding:0 40px 24px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="padding-right:24px;vertical-align:top;">
+                <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#6b7280;
+                          text-transform:uppercase;letter-spacing:.06em;
+                          font-family:Arial,Helvetica,sans-serif;" class="dm-label">Tipo</p>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td bgcolor="${col.bg}" style="background-color:${col.bg};border:1px solid ${col.border};
+                        border-radius:4px;padding:5px 14px;">
+                      <p style="margin:0;font-size:13px;font-weight:700;color:${col.text};
+                                font-family:Arial,Helvetica,sans-serif;">${p.tipo}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+              <td style="vertical-align:top;">
+                <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#6b7280;
+                          text-transform:uppercase;letter-spacing:.06em;
+                          font-family:Arial,Helvetica,sans-serif;" class="dm-label">Periodo</p>
+                <p style="margin:0;font-size:14px;font-weight:600;color:#111827;
+                          font-family:Arial,Helvetica,sans-serif;" class="dm-value">${period}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- PROGETTI -->
+      <tr>
+        <td bgcolor="#ffffff" class="dm-body"
+            style="background-color:#ffffff;padding:0 40px 28px;">
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#6b7280;
+                    text-transform:uppercase;letter-spacing:.06em;
+                    font-family:Arial,Helvetica,sans-serif;" class="dm-label">Progetti coinvolti</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            ${progettiHtml}
+          </table>
+        </td>
+      </tr>
+
+      <!-- SOVRAPPOSIZIONI -->
+      ${overlapHtml}
+
+      <!-- FOOTER -->
+      <tr>
+        <td align="center" bgcolor="#f8f9fc" class="dm-foot"
+            style="background-color:#f8f9fc;padding:18px 40px;border-top:1px solid #eeeeee;">
+          <p style="margin:0;font-size:12px;color:#aaaaaa;
+                    font-family:Arial,Helvetica,sans-serif;">
+            Messaggio automatico generato da Team Hours Tracker.<br>
+            Non rispondere a questa email.
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+
+</body>
+</html>`;
+}
 
 // ── progetti (la DELETE sfrutta ON DELETE CASCADE sulle allocazioni) ──
 async function addProject(p){
