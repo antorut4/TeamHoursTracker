@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Daily Hours Reminder — Design & Implementation</title>
+<style>
+:root {
+  --accent:#A100FF;--accent2:#7b00cc;--accent-bg:#f3e8ff;
+  --bg:#f6f7fb;--card:#fff;--border:#e5e7eb;
+  --text:#111827;--muted:#6b7280;--code-bg:#1e1e2e;
+  --success:#10b981;--warn:#f59e0b;--info:#3b82f6;
+  color-scheme:light;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0d0d14;--card:#1a1a2e;--border:#2d2d40;
+  --text:#e4e4f0;--muted:#9ca3af;--accent-bg:#2d1a44;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0d0d14;--card:#1a1a2e;--border:#2d2d40;
+  --text:#e4e4f0;--muted:#9ca3af;--accent-bg:#2d1a44;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:15px;line-height:1.6}
+body{display:grid;grid-template-columns:260px 1fr;grid-template-rows:auto 1fr;min-height:100vh}
+/* ── header ── */
+header{grid-column:1/-1;background:var(--accent);color:#fff;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+header h1{font-size:17px;font-weight:700;letter-spacing:.3px}
+header span{font-size:12px;opacity:.8}
+/* ── sidebar ── */
+aside{background:var(--card);border-right:1px solid var(--border);padding:20px 0;position:sticky;top:57px;height:calc(100vh - 57px);overflow-y:auto}
+.nav-group{padding:4px 0}
+.nav-label{padding:8px 20px 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+aside a{display:block;padding:6px 20px;color:var(--muted);text-decoration:none;font-size:13px;border-left:3px solid transparent;transition:all .15s}
+aside a:hover{color:var(--accent);background:var(--accent-bg);border-left-color:var(--accent)}
+aside a.active{color:var(--accent);background:var(--accent-bg);border-left-color:var(--accent);font-weight:600}
+/* ── main ── */
+main{padding:32px 40px;max-width:900px}
+/* ── sections ── */
+section{margin-bottom:56px}
+section h2{font-size:22px;font-weight:700;color:var(--text);padding-bottom:10px;border-bottom:2px solid var(--accent);margin-bottom:20px;display:flex;align-items:center;gap:10px}
+section h2 .badge{font-size:11px;font-weight:600;background:var(--accent-bg);color:var(--accent);padding:2px 8px;border-radius:10px;vertical-align:middle}
+h3{font-size:16px;font-weight:700;color:var(--text);margin:24px 0 10px}
+h4{font-size:14px;font-weight:600;color:var(--muted);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+p{margin-bottom:12px;color:var(--text)}
+ul,ol{margin:0 0 12px 20px}
+li{margin-bottom:4px;color:var(--text)}
+/* ── callouts ── */
+.callout{padding:14px 18px;border-radius:8px;margin:16px 0;border-left:4px solid;font-size:14px}
+.callout.green{background:#d1fae5;border-color:#10b981;color:#065f46}
+.callout.amber{background:#fef3c7;border-color:#f59e0b;color:#92400e}
+.callout.blue{background:#dbeafe;border-color:#3b82f6;color:#1e3a8a}
+.callout.purple{background:var(--accent-bg);border-color:var(--accent);color:var(--accent2)}
+@media(prefers-color-scheme:dark){
+  .callout.green{background:#064e3b;color:#6ee7b7}
+  .callout.amber{background:#451a03;color:#fcd34d}
+  .callout.blue{background:#1e3a8a;color:#93c5fd}
+  .callout.purple{background:#2d1a44;color:#c084fc}
+}
+/* ── code blocks ── */
+.file-block{margin:16px 0}
+.file-header{background:#2d2d3f;color:#e2e8f0;padding:8px 14px;border-radius:8px 8px 0 0;font-size:12px;font-weight:700;display:flex;justify-content:space-between;align-items:center;font-family:'SF Mono',Monaco,'Cascadia Code',monospace}
+.file-header .action{font-size:11px;padding:2px 8px;border-radius:4px;font-weight:700}
+.file-header .new{background:#10b981;color:#fff}
+.file-header .modify{background:#f59e0b;color:#1a1a2e}
+.file-header .run-once{background:#3b82f6;color:#fff}
+pre{background:var(--code-bg);color:#cdd6f4;padding:16px;border-radius:0 0 8px 8px;overflow-x:auto;font-size:13px;line-height:1.6;font-family:'SF Mono',Monaco,'Cascadia Code','Fira Code',monospace;tab-size:2;white-space:pre}
+pre.standalone{border-radius:8px}
+code{font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:13px;background:var(--accent-bg);color:var(--accent2);padding:1px 5px;border-radius:3px}
+pre code{background:none;color:inherit;padding:0}
+/* syntax tokens */
+.kw{color:#cba6f7}.fn{color:#89b4fa}.str{color:#a6e3a1}.cmt{color:#6c7086;font-style:italic}.num{color:#fab387}.op{color:#89dceb}.type{color:#f38ba8}
+/* ── tables ── */
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+th{background:var(--accent);color:#fff;padding:10px 12px;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:hover td{background:var(--accent-bg)}
+/* ── flow diagram ── */
+.flow{display:flex;flex-wrap:wrap;gap:0;margin:20px 0;align-items:center}
+.flow-box{background:var(--card);border:2px solid var(--border);border-radius:8px;padding:12px 16px;font-size:13px;font-weight:600;text-align:center;min-width:110px}
+.flow-box.accent{background:var(--accent);color:#fff;border-color:var(--accent)}
+.flow-box.green{background:#d1fae5;color:#065f46;border-color:#10b981}
+.flow-box.blue{background:#dbeafe;color:#1e3a8a;border-color:#3b82f6}
+.flow-arrow{padding:0 8px;font-size:18px;color:var(--muted)}
+/* ── env table ── */
+.env-row{display:grid;grid-template-columns:220px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
+.env-key{font-family:monospace;color:var(--accent2);font-weight:600}
+.env-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-left:4px}
+.env-badge.new{background:#d1fae5;color:#065f46}
+.env-badge.existing{background:#dbeafe;color:#1e3a8a}
+/* ── step pills ── */
+.steps{counter-reset:step;list-style:none;margin:0;padding:0}
+.steps li{counter-increment:step;display:flex;gap:12px;margin-bottom:16px;align-items:flex-start}
+.steps li::before{content:counter(step);background:var(--accent);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:2px}
+/* ── responsive ── */
+@media(max-width:768px){
+  body{grid-template-columns:1fr}
+  aside{display:none}
+  main{padding:20px 16px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Daily Hours Reminder — Design &amp; Implementation</h1>
+  <span>Team Hours Tracker · Progetto Accenture</span>
+</header>
+
+<aside>
+  <div class="nav-group">
+    <div class="nav-label">Panoramica</div>
+    <a href="#arch">Architettura</a>
+    <a href="#choices">Scelte tecniche</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Database</div>
+    <a href="#schema">Schema dati</a>
+    <a href="#migration">Migration SQL</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">File da creare</div>
+    <a href="#daily-fn">daily.mjs</a>
+    <a href="#reminder-fn">send-daily-reminder.mjs</a>
+    <a href="#frontend">daily-hours.html</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">File da modificare</div>
+    <a href="#db-mod">db.mjs</a>
+    <a href="#toml-mod">netlify.toml</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-label">Riferimento</div>
+    <a href="#envvars">Variabili d'ambiente</a>
+    <a href="#setup">Setup step-by-step</a>
+    <a href="#edge">Edge case &amp; errori</a>
+    <a href="#files">Elenco file</a>
+  </div>
+</aside>
+
+<main>
+
+<!-- ═══════════════════════ ARCHITETTURA ═══════════════════════ -->
+<section id="arch">
+<h2>Architettura completa</h2>
+
+<p>La funzionalità aggiunge tre nuovi componenti al progetto esistente, senza toccare nulla di ciò che già funziona.</p>
+
+<div class="flow" style="margin:20px 0">
+  <div class="flow-box accent">Netlify Scheduler<br><small>07:00 UTC lun-ven</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box blue">send-daily-reminder.mjs<br><small>genera token + invia email</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">Resend API<br><small>email HTML</small></div>
+</div>
+
+<div class="flow" style="margin:8px 0 20px">
+  <div class="flow-box">Email collaboratore<br><small>link token 36h</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box blue">daily-hours.html<br><small>form mobile</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box blue">daily.mjs<br><small>valida token + salva</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box green">daily_hours<br><small>tabella Neon</small></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box green">ore_mensili<br><small>via trigger SQL</small></div>
+</div>
+
+<div class="callout purple"><strong>Invariante chiave:</strong> il frontend esistente (app.js) non viene modificato. Continua a leggere ore_mensili come sempre. Il trigger PostgreSQL mantiene automaticamente ore_mensili sincronizzato con daily_hours.</div>
+
+<h3>Componenti</h3>
+<table>
+  <tr><th>Componente</th><th>Tipo</th><th>Responsabilità</th></tr>
+  <tr><td><code>daily_hours</code></td><td>Tabella DB</td><td>Fonte primaria ore giornaliere (risorsa, data, ore)</td></tr>
+  <tr><td><code>sync_ore_mensili_from_daily()</code></td><td>Trigger SQL</td><td>Ricalcola ore_q1/q2 dopo ogni INSERT/UPDATE/DELETE su daily_hours</td></tr>
+  <tr><td><code>netlify/functions/daily.mjs</code></td><td>Netlify Function</td><td>API token-based: getByToken, saveByToken</td></tr>
+  <tr><td><code>netlify/functions/send-daily-reminder.mjs</code></td><td>Netlify Scheduled Function</td><td>Genera token, invia email via Resend</td></tr>
+  <tr><td><code>daily-hours.html</code></td><td>Pagina statica</td><td>Form mobile-first per inserire ore (no login)</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════ SCELTE TECNICHE ═══════════════════════ -->
+<section id="choices">
+<h2>Scelte tecniche</h2>
+
+<h3>Email: Resend vs SendGrid</h3>
+<p><strong>Scelta: Resend.</strong></p>
+<table>
+  <tr><th>Criterio</th><th>Resend</th><th>SendGrid</th></tr>
+  <tr><td>Integrazione</td><td>REST puro — un solo <code>fetch()</code>, nessun SDK</td><td>SDK dedicato o REST verboso</td></tr>
+  <tr><td>Free tier</td><td>3.000 email/mese, 100/giorno</td><td>100/giorno (limite più stretto)</td></tr>
+  <tr><td>Setup dominio</td><td>Verifica DNS semplice (5 min)</td><td>Più passaggi, portale complesso</td></tr>
+  <tr><td>DX</td><td>Moderna, docs eccellenti</td><td>Enterprise, over-engineered per questo uso</td></tr>
+  <tr><td>Compatibilità Netlify</td><td>Perfetta — usato in molti template ufficiali</td><td>Funziona ma non nativo nell'ecosistema</td></tr>
+</table>
+<div class="callout green">Con 30–50 collaboratori, Resend free tier (3.000 email/mese) è più che sufficiente per ~22 giorni lavorativi × 50 persone = 1.100 email/mese.</div>
+
+<h3>Aggregazione: trigger SQL vs logica applicativa</h3>
+<p><strong>Scelta: trigger PostgreSQL.</strong></p>
+<ul>
+  <li><strong>Atomicità garantita</strong>: il ricalcolo avviene nello stesso statement che inserisce i dati — nessuna finestra di incoerenza.</li>
+  <li><strong>Idempotente</strong>: somma tutto da zero per quel mese, non tiene stato precedente.</li>
+  <li><strong>Non dimenticabile</strong>: funziona indipendentemente da dove vengono inseriti i dati (API, psql diretto, future funzioni).</li>
+  <li><strong>Logica applicativa</strong>: richiederebbe due round-trip (insert + update) e una transazione esplicita — più codice, più failure mode.</li>
+</ul>
+
+<h3>Token sicuro: JWT vs HMAC custom</h3>
+<p><strong>Scelta: HMAC-SHA256 custom (nessuna dipendenza esterna).</strong></p>
+<ul>
+  <li>Il progetto ha zero dipendenze extra — manteniamo questa filosofia.</li>
+  <li>Node.js crypto è built-in su Netlify (Node 18+).</li>
+  <li>Struttura: <code>base64url(JSON{r,d,e}).hmac_hex</code> — firmato, con scadenza, impossibile alterare risorsa o data senza invalidare la firma.</li>
+  <li>JWT richiederebbe <code>jsonwebtoken</code> o <code>jose</code> — dipendenze non necessarie.</li>
+</ul>
+<div class="callout amber"><strong>Requisito:</strong> generare <code>DAILY_TOKEN_SECRET</code> con almeno 32 byte casuali. Usare: <code>openssl rand -hex 32</code> o <code>node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"</code></div>
+</section>
+
+<!-- ═══════════════════════ SCHEMA ═══════════════════════ -->
+<section id="schema">
+<h2>Schema dati</h2>
+
+<h3>Tabella <code>daily_hours</code> (nuova)</h3>
+<table>
+  <tr><th>Colonna</th><th>Tipo</th><th>Note</th></tr>
+  <tr><td>id</td><td>BIGSERIAL PK</td><td>Auto-incrementale</td></tr>
+  <tr><td>risorsa_id</td><td>INTEGER NOT NULL</td><td>FK → risorse(id) ON DELETE CASCADE</td></tr>
+  <tr><td>data</td><td>DATE NOT NULL</td><td>Giorno lavorativo (YYYY-MM-DD)</td></tr>
+  <tr><td>ore</td><td>NUMERIC(5,2) NOT NULL</td><td>Es: 8.00, 7.50, 4.25 — range 0–24</td></tr>
+  <tr><td>created_at</td><td>TIMESTAMP</td><td>DEFAULT NOW()</td></tr>
+  <tr><td>updated_at</td><td>TIMESTAMP</td><td>DEFAULT NOW() — aggiornato manualmente via trigger/upsert</td></tr>
+  <tr><td colspan="2">UNIQUE (risorsa_id, data)</td><td>Impedisce duplicati per la stessa giornata</td></tr>
+</table>
+
+<h3>Relazioni con tabelle esistenti</h3>
+<div class="callout blue">
+  <strong>ore_mensili</strong> rimane invariata. Il trigger <code>trg_sync_ore_mensili</code> aggiorna automaticamente
+  <code>ore_q1</code> (giorni 1–15) e <code>ore_q2</code> (giorni 16–fine mese) ogni volta che cambia un record
+  in <code>daily_hours</code>. Le note (<code>note_q1</code>, <code>note_q2</code>) non vengono mai toccate dal trigger.
+</div>
+
+<h3>Logica di aggregazione</h3>
+<pre class="standalone">-- Esempio per settembre 2026, risorsa 42:
+-- daily_hours: 1 sett=8, 2 sett=7, 15 sett=8, 16 sett=7, 30 sett=8
+--
+-- ore_q1 = 8 + 7 + 8          = 23   (giorni 1–15)
+-- ore_q2 = 7 + 8              = 15   (giorni 16–30)
+--
+-- Se modifico il 1 sett da 8 a 6:
+-- ore_q1 = 6 + 7 + 8          = 21   (ricalcolo completo da zero)</pre>
+</section>
+
+<!-- ═══════════════════════ MIGRATION SQL ═══════════════════════ -->
+<section id="migration">
+<h2>Migration SQL <span class="badge">eseguire una volta su Neon</span></h2>
+
+<div class="callout amber"><strong>Come eseguire:</strong> accedi al progetto su <a href="https://console.neon.tech">console.neon.tech</a> → SQL Editor → incolla e lancia. Oppure tramite psql: <code>psql $DATABASE_URL -f migration_daily_hours.sql</code></div>
+
+<div class="file-block">
+<div class="file-header">
+  <span>migration_daily_hours.sql</span>
+  <span class="action run-once">ESEGUIRE UNA VOLTA</span>
+</div>
+<pre><span class="cmt">-- ═══════════════════════════════════════════════════════════════
+--  Team Hours Tracker — Migration: Daily Hours Reminder
+--  Eseguire UNA SOLA VOLTA sul database Neon
+-- ═══════════════════════════════════════════════════════════════</span>
+
+<span class="cmt">-- 1. Tabella principale: ore giornaliere</span>
+<span class="kw">CREATE TABLE IF NOT EXISTS</span> daily_hours (
+    id         BIGSERIAL <span class="kw">PRIMARY KEY</span>,
+    risorsa_id <span class="type">INTEGER</span>      <span class="kw">NOT NULL REFERENCES</span> risorse(id) <span class="kw">ON DELETE CASCADE</span>,
+    data       <span class="type">DATE</span>         <span class="kw">NOT NULL</span>,
+    ore        <span class="type">NUMERIC(5,2)</span> <span class="kw">NOT NULL</span>,
+    created_at <span class="type">TIMESTAMP</span>    <span class="kw">DEFAULT</span> NOW(),
+    updated_at <span class="type">TIMESTAMP</span>    <span class="kw">DEFAULT</span> NOW(),
+    <span class="kw">UNIQUE</span> (risorsa_id, data)
+);
+
+<span class="cmt">-- 2. Funzione trigger: ricalcola ore_mensili da daily_hours</span>
+<span class="kw">CREATE OR REPLACE FUNCTION</span> <span class="fn">sync_ore_mensili_from_daily</span>()
+<span class="kw">RETURNS TRIGGER LANGUAGE</span> plpgsql <span class="kw">AS</span> $$
+<span class="kw">DECLARE</span>
+    v_risorsa_id <span class="type">INTEGER</span>;
+    v_anno       <span class="type">INTEGER</span>;
+    v_mese       <span class="type">INTEGER</span>;
+    v_ore_q1     <span class="type">NUMERIC</span>;
+    v_ore_q2     <span class="type">NUMERIC</span>;
+<span class="kw">BEGIN</span>
+    <span class="cmt">-- Per DELETE usa OLD; per INSERT/UPDATE usa NEW</span>
+    <span class="kw">IF</span> TG_OP = <span class="str">'DELETE'</span> <span class="kw">THEN</span>
+        v_risorsa_id := OLD.risorsa_id;
+        v_anno       := <span class="fn">EXTRACT</span>(<span class="kw">YEAR</span>  <span class="kw">FROM</span> OLD.data)::<span class="type">INTEGER</span>;
+        v_mese       := <span class="fn">EXTRACT</span>(<span class="kw">MONTH</span> <span class="kw">FROM</span> OLD.data)::<span class="type">INTEGER</span>;
+    <span class="kw">ELSE</span>
+        v_risorsa_id := NEW.risorsa_id;
+        v_anno       := <span class="fn">EXTRACT</span>(<span class="kw">YEAR</span>  <span class="kw">FROM</span> NEW.data)::<span class="type">INTEGER</span>;
+        v_mese       := <span class="fn">EXTRACT</span>(<span class="kw">MONTH</span> <span class="kw">FROM</span> NEW.data)::<span class="type">INTEGER</span>;
+    <span class="kw">END IF</span>;
+
+    <span class="cmt">-- Ricalcolo aggregato completo (idempotente)</span>
+    <span class="kw">SELECT</span>
+        <span class="fn">COALESCE</span>(<span class="fn">SUM</span>(<span class="kw">CASE WHEN</span> <span class="fn">EXTRACT</span>(<span class="kw">DAY FROM</span> data) &lt;= <span class="num">15</span> <span class="kw">THEN</span> ore <span class="kw">ELSE</span> <span class="num">0</span> <span class="kw">END</span>), <span class="num">0</span>),
+        <span class="fn">COALESCE</span>(<span class="fn">SUM</span>(<span class="kw">CASE WHEN</span> <span class="fn">EXTRACT</span>(<span class="kw">DAY FROM</span> data) &gt;  <span class="num">15</span> <span class="kw">THEN</span> ore <span class="kw">ELSE</span> <span class="kw">0</span> <span class="kw">END</span>), <span class="num">0</span>)
+    <span class="kw">INTO</span> v_ore_q1, v_ore_q2
+    <span class="kw">FROM</span> daily_hours
+    <span class="kw">WHERE</span> risorsa_id = v_risorsa_id
+      <span class="kw">AND</span> <span class="fn">EXTRACT</span>(<span class="kw">YEAR</span>  <span class="kw">FROM</span> data) = v_anno
+      <span class="kw">AND</span> <span class="fn">EXTRACT</span>(<span class="kw">MONTH</span> <span class="kw">FROM</span> data) = v_mese;
+
+    <span class="cmt">-- Upsert in ore_mensili (NON tocca le note)</span>
+    <span class="kw">INSERT INTO</span> ore_mensili (risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2)
+    <span class="kw">VALUES</span> (v_risorsa_id, v_anno, v_mese, v_ore_q1, <span class="kw">NULL</span>, v_ore_q2, <span class="kw">NULL</span>)
+    <span class="kw">ON CONFLICT</span> (risorsa_id, anno, mese)
+    <span class="kw">DO UPDATE SET</span>
+        ore_q1 = EXCLUDED.ore_q1,
+        ore_q2 = EXCLUDED.ore_q2;
+        <span class="cmt">-- note_q1 e note_q2 non vengono mai sovrascritte</span>
+
+    <span class="kw">RETURN</span> <span class="fn">COALESCE</span>(NEW, OLD);
+<span class="kw">END</span>;
+$$;
+
+<span class="cmt">-- 3. Trigger (DROP + CREATE = idempotente)</span>
+<span class="kw">DROP TRIGGER IF EXISTS</span> trg_sync_ore_mensili <span class="kw">ON</span> daily_hours;
+<span class="kw">CREATE TRIGGER</span> trg_sync_ore_mensili
+<span class="kw">AFTER INSERT OR UPDATE OR DELETE ON</span> daily_hours
+<span class="kw">FOR EACH ROW EXECUTE FUNCTION</span> <span class="fn">sync_ore_mensili_from_daily</span>();
+
+<span class="cmt">-- Verifica</span>
+<span class="kw">SELECT</span> <span class="str">'Migration completata'</span> <span class="kw">AS</span> status;</pre>
+</div>
+</section>
+
+<!-- ═══════════════════════ daily.mjs ═══════════════════════ -->
+<section id="daily-fn">
+<h2>netlify/functions/daily.mjs <span class="badge">NUOVO</span></h2>
+
+<p>Gestisce le API token-based per i collaboratori. Nessun login richiesto — il token identifica utente e giorno.</p>
+
+<div class="file-block">
+<div class="file-header">
+  <span>netlify/functions/daily.mjs</span>
+  <span class="action new">NUOVO FILE</span>
+</div>
+<pre><span class="cmt">// ════════════════════════════════════════════════════════════════════════
+//  daily.mjs — API token-based per registrazione ore giornaliere
+//  Nessun login. Il token (HMAC-SHA256) identifica utente + giorno.
+//  Endpoint: POST /api/daily  { action, payload }
+//  Actions: getByToken, saveByToken
+// ════════════════════════════════════════════════════════════════════════</span>
+<span class="kw">import</span> { neon }           <span class="kw">from</span> <span class="str">'@neondatabase/serverless'</span>;
+<span class="kw">import</span> { createHmac, timingSafeEqual } <span class="kw">from</span> <span class="str">'crypto'</span>;
+
+<span class="kw">const</span> sql    = <span class="fn">neon</span>(process.env.DATABASE_URL);
+<span class="kw">const</span> SECRET = process.env.DAILY_TOKEN_SECRET;
+
+<span class="cmt">// ── Token: {r: risorsaId, d: 'YYYY-MM-DD', e: unixExpiry} ──────────────</span>
+<span class="kw">function</span> <span class="fn">generateToken</span>(risorsaId, data) {
+  <span class="kw">const</span> exp = Math.<span class="fn">floor</span>(Date.<span class="fn">now</span>() / <span class="num">1000</span>) + <span class="num">36</span> * <span class="num">3600</span>; <span class="cmt">// 36 ore</span>
+  <span class="kw">const</span> b64 = Buffer.<span class="fn">from</span>(JSON.<span class="fn">stringify</span>({ r: risorsaId, d: data, e: exp })).<span class="fn">toString</span>(<span class="str">'base64url'</span>);
+  <span class="kw">const</span> sig = <span class="fn">createHmac</span>(<span class="str">'sha256'</span>, SECRET).<span class="fn">update</span>(b64).<span class="fn">digest</span>(<span class="str">'hex'</span>);
+  <span class="kw">return</span> <span class="str">`</span>${b64}<span class="str">.</span>${sig}<span class="str">`</span>;
+}
+
+<span class="kw">function</span> <span class="fn">verifyToken</span>(token) {
+  <span class="kw">if</span> (!SECRET) <span class="kw">throw new</span> Error(<span class="str">'DAILY_TOKEN_SECRET non configurato'</span>);
+  <span class="kw">const</span> dot = token.<span class="fn">indexOf</span>(<span class="str">'.'</span>);
+  <span class="kw">if</span> (dot &lt; <span class="num">1</span>) <span class="kw">throw new</span> Error(<span class="str">'Token malformato'</span>);
+  <span class="kw">const</span> b64      = token.<span class="fn">slice</span>(<span class="num">0</span>, dot);
+  <span class="kw">const</span> sig      = token.<span class="fn">slice</span>(dot + <span class="num">1</span>);
+  <span class="kw">const</span> expected = <span class="fn">createHmac</span>(<span class="str">'sha256'</span>, SECRET).<span class="fn">update</span>(b64).<span class="fn">digest</span>(<span class="str">'hex'</span>);
+  <span class="kw">let</span> valid = <span class="kw">false</span>;
+  <span class="kw">try</span> { valid = <span class="fn">timingSafeEqual</span>(Buffer.<span class="fn">from</span>(sig, <span class="str">'hex'</span>), Buffer.<span class="fn">from</span>(expected, <span class="str">'hex'</span>)); } <span class="kw">catch</span> {}
+  <span class="kw">if</span> (!valid) <span class="kw">throw new</span> Error(<span class="str">'Firma token non valida'</span>);
+  <span class="kw">let</span> payload;
+  <span class="kw">try</span> { payload = JSON.<span class="fn">parse</span>(Buffer.<span class="fn">from</span>(b64, <span class="str">'base64url'</span>).<span class="fn">toString</span>()); }
+  <span class="kw">catch</span> { <span class="kw">throw new</span> Error(<span class="str">'Payload token non valido'</span>); }
+  <span class="kw">if</span> (!payload.r || !payload.d || !payload.e) <span class="kw">throw new</span> Error(<span class="str">'Token campi mancanti'</span>);
+  <span class="kw">if</span> (Math.<span class="fn">floor</span>(Date.<span class="fn">now</span>() / <span class="num">1000</span>) > payload.e) <span class="kw">throw new</span> Error(<span class="str">'Token scaduto'</span>);
+  <span class="kw">return</span> payload; <span class="cmt">// { r: risorsaId, d: 'YYYY-MM-DD', e: exp }</span>
+}
+
+<span class="cmt">// ── getByToken: valida token, restituisce risorsa + ore già inserite ───</span>
+<span class="kw">async function</span> <span class="fn">getByToken</span>(p) {
+  <span class="kw">const</span> { r: risorsaId, d: data } = <span class="fn">verifyToken</span>(p.token);
+  <span class="kw">const</span> [risorsa] = <span class="kw">await</span> sql<span class="str">`SELECT id, full_name FROM risorse WHERE id=${</span>risorsaId<span class="str">}`</span>;
+  <span class="kw">if</span> (!risorsa) <span class="kw">throw new</span> Error(<span class="str">'Risorsa non trovata'</span>);
+  <span class="kw">const</span> [entry] = <span class="kw">await</span> sql<span class="str">`
+    SELECT ore::float AS ore
+    FROM daily_hours
+    WHERE risorsa_id=${</span>risorsaId<span class="str">} AND data=${</span>data<span class="str">}::date`</span>;
+  <span class="kw">return</span> {
+    risorsaId: +risorsa.id,
+    data,
+    fullName:  risorsa.full_name,
+    ore:       entry != <span class="kw">null</span> ? entry.ore : <span class="kw">null</span>
+  };
+}
+
+<span class="cmt">// ── saveByToken: upsert daily_hours → il trigger aggiorna ore_mensili ──</span>
+<span class="kw">async function</span> <span class="fn">saveByToken</span>(p) {
+  <span class="kw">const</span> { r: risorsaId, d: data } = <span class="fn">verifyToken</span>(p.token);
+  <span class="kw">const</span> ore = <span class="fn">parseFloat</span>(p.ore);
+  <span class="kw">if</span> (<span class="fn">isNaN</span>(ore) || ore &lt; <span class="num">0</span> || ore > <span class="num">24</span>) <span class="kw">throw new</span> Error(<span class="str">'Valore ore non valido (0–24)'</span>);
+  <span class="kw">const</span> [row] = <span class="kw">await</span> sql<span class="str">`
+    INSERT INTO daily_hours (risorsa_id, data, ore, updated_at)
+    VALUES (${</span>risorsaId<span class="str">}, ${</span>data<span class="str">}::date, ${</span>ore<span class="str">}, NOW())
+    ON CONFLICT (risorsa_id, data)
+    DO UPDATE SET ore=${</span>ore<span class="str">}, updated_at=NOW()
+    RETURNING id, ore::float AS ore`</span>;
+  <span class="kw">return</span> { id: row.id, ore: row.ore };
+}
+
+<span class="cmt">// ── routing ────────────────────────────────────────────────────────────</span>
+<span class="kw">const</span> ACTIONS = { getByToken, saveByToken };
+
+<span class="kw">export async function</span> <span class="fn">handler</span>(event) {
+  <span class="kw">const</span> headers = {
+    <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>,
+    <span class="str">'Access-Control-Allow-Origin'</span>: <span class="str">'*'</span>
+  };
+  <span class="kw">if</span> (event.httpMethod === <span class="str">'OPTIONS'</span>) <span class="kw">return</span> { statusCode: <span class="num">200</span>, headers };
+  <span class="kw">if</span> (event.httpMethod !== <span class="str">'POST'</span>)
+    <span class="kw">return</span> { statusCode: <span class="num">405</span>, headers, body: JSON.<span class="fn">stringify</span>({ error: <span class="str">'Method Not Allowed'</span> }) };
+
+  <span class="kw">let</span> action, payload;
+  <span class="kw">try</span> {
+    <span class="kw">const</span> parsed = JSON.<span class="fn">parse</span>(event.body || <span class="str">'{}'</span>);
+    action = parsed.action; payload = parsed.payload || {};
+  } <span class="kw">catch</span> {
+    <span class="kw">return</span> { statusCode: <span class="num">400</span>, headers, body: JSON.<span class="fn">stringify</span>({ error: <span class="str">'Body JSON non valido'</span> }) };
+  }
+
+  <span class="kw">const</span> fn = ACTIONS[action];
+  <span class="kw">if</span> (!fn)
+    <span class="kw">return</span> { statusCode: <span class="num">400</span>, headers, body: JSON.<span class="fn">stringify</span>({ error: <span class="str">`Action sconosciuta: ${</span>action<span class="str">}`</span> }) };
+
+  <span class="kw">try</span> {
+    <span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">fn</span>(payload);
+    <span class="kw">return</span> { statusCode: <span class="num">200</span>, headers, body: JSON.<span class="fn">stringify</span>({ ok: <span class="kw">true</span>, data: result }) };
+  } <span class="kw">catch</span> (err) {
+    <span class="kw">const</span> status = (err.message.<span class="fn">includes</span>(<span class="str">'scaduto'</span>) || err.message.<span class="fn">includes</span>(<span class="str">'firma'</span>)) ? <span class="num">401</span> : <span class="num">500</span>;
+    <span class="kw">return</span> { statusCode: status, headers, body: JSON.<span class="fn">stringify</span>({ error: err.message }) };
+  }
+}</pre>
+</div>
+</section>
+
+<!-- ═══════════════════════ send-daily-reminder.mjs ═══════════════════════ -->
+<section id="reminder-fn">
+<h2>netlify/functions/send-daily-reminder.mjs <span class="badge">NUOVO</span></h2>
+
+<p>Funzione schedulata. Gira ogni giorno lavorativo alle 07:00 UTC (08:00 CET / 09:00 CEST). Genera token, invia email a tutte le risorse con indirizzo email registrato.</p>
+
+<div class="file-block">
+<div class="file-header">
+  <span>netlify/functions/send-daily-reminder.mjs</span>
+  <span class="action new">NUOVO FILE</span>
+</div>
+<pre><span class="cmt">// ════════════════════════════════════════════════════════════════════════
+//  send-daily-reminder.mjs — Netlify Scheduled Function
+//  Schedule: 0 7 * * 1-5  (07:00 UTC lun-ven)
+//  Genera token HMAC + invia email Resend a ogni risorsa con email.
+// ════════════════════════════════════════════════════════════════════════</span>
+<span class="kw">import</span> { neon }      <span class="kw">from</span> <span class="str">'@neondatabase/serverless'</span>;
+<span class="kw">import</span> { createHmac } <span class="kw">from</span> <span class="str">'crypto'</span>;
+
+<span class="kw">const</span> sql          = <span class="fn">neon</span>(process.env.DATABASE_URL);
+<span class="kw">const</span> SECRET       = process.env.DAILY_TOKEN_SECRET;
+<span class="kw">const</span> SITE_URL     = (process.env.SITE_URL || <span class="str">''</span>).<span class="fn">replace</span>(<span class="str">/\/$/</span>, <span class="str">''</span>);
+<span class="kw">const</span> RESEND_KEY   = process.env.RESEND_API_KEY;
+<span class="kw">const</span> FROM_EMAIL   = process.env.FROM_EMAIL   || <span class="str">'noreply@example.com'</span>;
+<span class="kw">const</span> FROM_NAME    = process.env.FROM_NAME    || <span class="str">'Team Hours Tracker'</span>;
+
+<span class="cmt">// ── genera token identico a daily.mjs (stesso algoritmo) ──</span>
+<span class="kw">function</span> <span class="fn">generateToken</span>(risorsaId, data) {
+  <span class="kw">const</span> exp = Math.<span class="fn">floor</span>(Date.<span class="fn">now</span>() / <span class="num">1000</span>) + <span class="num">36</span> * <span class="num">3600</span>;
+  <span class="kw">const</span> b64 = Buffer.<span class="fn">from</span>(JSON.<span class="fn">stringify</span>({ r: risorsaId, d: data, e: exp })).<span class="fn">toString</span>(<span class="str">'base64url'</span>);
+  <span class="kw">const</span> sig = <span class="fn">createHmac</span>(<span class="str">'sha256'</span>, SECRET).<span class="fn">update</span>(b64).<span class="fn">digest</span>(<span class="str">'hex'</span>);
+  <span class="kw">return</span> <span class="str">`</span>${b64}<span class="str">.</span>${sig}<span class="str">`</span>;
+}
+
+<span class="cmt">// ── formatta data in italiano ──</span>
+<span class="kw">function</span> <span class="fn">formatDateIT</span>(iso) {
+  <span class="kw">const</span> DAYS   = [<span class="str">'Domenica'</span>,<span class="str">'Lunedì'</span>,<span class="str">'Martedì'</span>,<span class="str">'Mercoledì'</span>,<span class="str">'Giovedì'</span>,<span class="str">'Venerdì'</span>,<span class="str">'Sabato'</span>];
+  <span class="kw">const</span> MONTHS = [<span class="str">'gennaio'</span>,<span class="str">'febbraio'</span>,<span class="str">'marzo'</span>,<span class="str">'aprile'</span>,<span class="str">'maggio'</span>,<span class="str">'giugno'</span>,
+                  <span class="str">'luglio'</span>,<span class="str">'agosto'</span>,<span class="str">'settembre'</span>,<span class="str">'ottobre'</span>,<span class="str">'novembre'</span>,<span class="str">'dicembre'</span>];
+  <span class="kw">const</span> [y,m,d] = iso.<span class="fn">split</span>(<span class="str">'-'</span>);
+  <span class="kw">const</span> dt = <span class="kw">new</span> Date(<span class="str">`</span>${iso}<span class="str">T12:00:00Z`</span>);
+  <span class="kw">return</span> <span class="str">`</span>${DAYS[dt.<span class="fn">getUTCDay</span>()]}<span class="str"> </span>${<span class="fn">parseInt</span>(d)}<span class="str"> </span>${MONTHS[<span class="fn">parseInt</span>(m)-<span class="num">1</span>]}<span class="str"> </span>${y}<span class="str">`</span>;
+}
+
+<span class="cmt">// ── invia email tramite Resend REST API ──</span>
+<span class="kw">async function</span> <span class="fn">sendEmail</span>(to, fullName, dataISO) {
+  <span class="kw">const</span> token     = <span class="fn">generateToken</span>(fullName._id, dataISO); <span class="cmt">// passato dal chiamante</span>
+  <span class="kw">const</span> dateLabel = <span class="fn">formatDateIT</span>(dataISO);
+  <span class="kw">const</span> firstName = fullName.full_name.<span class="fn">split</span>(<span class="str">' '</span>)[<span class="num">0</span>];
+  <span class="kw">const</span> link      = <span class="str">`</span>${SITE_URL}<span class="str">/daily-hours.html?token=</span>${<span class="fn">encodeURIComponent</span>(token)}<span class="str">`</span>;
+
+  <span class="kw">const</span> res = <span class="kw">await</span> <span class="fn">fetch</span>(<span class="str">'https://api.resend.com/emails'</span>, {
+    method:  <span class="str">'POST'</span>,
+    headers: { <span class="str">'Authorization'</span>: <span class="str">`Bearer </span>${RESEND_KEY}<span class="str">`</span>, <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span> },
+    body: JSON.<span class="fn">stringify</span>({
+      from:    <span class="str">`</span>${FROM_NAME}<span class="str"> &lt;</span>${FROM_EMAIL}<span class="str">&gt;`</span>,
+      to:      [to],
+      subject: <span class="str">`Registra le tue ore — </span>${dateLabel}<span class="str">`</span>,
+      html:    <span class="fn">buildEmailHtml</span>(firstName, fullName.full_name, dateLabel, link)
+    })
+  });
+  <span class="kw">if</span> (!res.ok) {
+    <span class="kw">const</span> body = <span class="kw">await</span> res.<span class="fn">text</span>();
+    <span class="kw">throw new</span> Error(<span class="str">`Resend </span>${res.status}<span class="str">: </span>${body}<span class="str">`</span>);
+  }
+}
+
+<span class="cmt">// ── handler principale (Netlify chiama questo ogni giorno lav.) ──</span>
+<span class="kw">export const</span> handler = <span class="kw">async</span> (event) => {
+  <span class="kw">const</span> today = <span class="kw">new</span> Date();
+  <span class="kw">const</span> dow   = today.<span class="fn">getUTCDay</span>(); <span class="cmt">// 0=dom, 6=sab</span>
+  <span class="kw">if</span> (dow === <span class="num">0</span> || dow === <span class="num">6</span>) {
+    console.<span class="fn">log</span>(<span class="str">'Weekend — nessuna email'</span>);
+    <span class="kw">return</span> { statusCode: <span class="num">200</span>, body: JSON.<span class="fn">stringify</span>({ ok: <span class="kw">true</span>, skipped: <span class="str">'weekend'</span> }) };
+  }
+
+  <span class="kw">const</span> dataISO = today.<span class="fn">toISOString</span>().<span class="fn">split</span>(<span class="str">'T'</span>)[<span class="num">0</span>]; <span class="cmt">// 'YYYY-MM-DD'</span>
+  console.<span class="fn">log</span>(<span class="str">`Invio reminder per </span>${dataISO}<span class="str">`</span>);
+
+  <span class="kw">const</span> risorse = <span class="kw">await</span> sql<span class="str">`
+    SELECT id AS _id, full_name, email
+    FROM risorse
+    WHERE email IS NOT NULL AND email &lt;&gt; ''
+    ORDER BY cognome, nome`</span>;
+
+  <span class="kw">const</span> results = { sent: <span class="num">0</span>, errors: [] };
+  <span class="kw">for</span> (<span class="kw">const</span> r <span class="kw">of</span> risorse) {
+    <span class="kw">try</span> {
+      <span class="kw">await</span> <span class="fn">sendEmail</span>(r.email, r, dataISO);
+      results.sent++;
+      console.<span class="fn">log</span>(<span class="str">`✓ </span>${r.email}<span class="str">`</span>);
+    } <span class="kw">catch</span> (err) {
+      console.<span class="fn">error</span>(<span class="str">`✗ </span>${r.email}<span class="str">: </span>${err.message}<span class="str">`</span>);
+      results.errors.<span class="fn">push</span>({ email: r.email, error: err.message });
+    }
+  }
+
+  console.<span class="fn">log</span>(<span class="str">`Fine: </span>${results.sent}<span class="str"> inviate, </span>${results.errors.<span class="fn">length</span>}<span class="str"> errori`</span>);
+  <span class="kw">return</span> { statusCode: <span class="num">200</span>, body: JSON.<span class="fn">stringify</span>({ ok: <span class="kw">true</span>, ...results }) };
+};
+
+<span class="cmt">// ── template email HTML ────────────────────────────────────────────────</span>
+<span class="kw">function</span> <span class="fn">buildEmailHtml</span>(firstName, fullName, dateLabel, link) {
+  <span class="kw">return</span> <span class="str">`&lt;!DOCTYPE html&gt;
+&lt;html lang="it"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width,initial-scale=1"&gt;
+&lt;title&gt;Registra le ore — ${dateLabel}&lt;/title&gt;
+&lt;style&gt;
+  body{margin:0;padding:0;background:#f4f6f9;
+       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}
+  .w{max-width:600px;margin:40px auto;background:#fff;border-radius:12px;
+     overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+  .hd{background:#A100FF;padding:32px 40px;text-align:center}
+  .hd h1{margin:0;color:#fff;font-size:22px;font-weight:600}
+  .hd p{margin:4px 0 0;color:rgba(255,255,255,.8);font-size:13px}
+  .bd{padding:36px 40px}
+  .name{font-size:20px;font-weight:700;color:#111827;margin:0 0 6px}
+  .sub{font-size:15px;color:#555;margin:0 0 24px}
+  .badge{display:inline-block;background:#f3e8ff;color:#7b00cc;
+         padding:8px 16px;border-radius:6px;font-size:14px;font-weight:700;margin-bottom:28px}
+  .btn{display:block;text-align:center;background:#A100FF;color:#fff;
+       text-decoration:none;padding:16px 32px;border-radius:8px;
+       font-size:16px;font-weight:700;max-width:260px;margin:0 auto}
+  .note{margin:24px 0 0;font-size:13px;color:#888;text-align:center}
+  .note a{color:#A100FF;word-break:break-all}
+  .ft{background:#f8f9fc;padding:18px 40px;text-align:center;border-top:1px solid #eee}
+  .ft p{margin:0;font-size:12px;color:#aaa}
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class="w"&gt;
+  &lt;div class="hd"&gt;
+    &lt;h1&gt;Team Hours Tracker&lt;/h1&gt;
+    &lt;p&gt;Registrazione ore giornaliera&lt;/p&gt;
+  &lt;/div&gt;
+  &lt;div class="bd"&gt;
+    &lt;p class="name"&gt;Ciao ${firstName}!&lt;/p&gt;
+    &lt;p class="sub"&gt;Ricordati di registrare le tue ore lavorative di oggi.&lt;/p&gt;
+    &lt;div class="badge"&gt;📅 ${dateLabel}&lt;/div&gt;&lt;br&gt;
+    &lt;a href="${link}" class="btn"&gt;Registra le ore →&lt;/a&gt;
+    &lt;p class="note"&gt;
+      Il link è personale e valido per 36 ore.&lt;br&gt;
+      Se il pulsante non funziona, copia questo URL:&lt;br&gt;
+      &lt;a href="${link}"&gt;${link}&lt;/a&gt;
+    &lt;/p&gt;
+  &lt;/div&gt;
+  &lt;div class="ft"&gt;
+    &lt;p&gt;Messaggio automatico per ${fullName}. Non rispondere a questa email.&lt;/p&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;`</span>;
+}</pre>
+</div>
+</section>
+
+<!-- ═══════════════════════ daily-hours.html ═══════════════════════ -->
+<section id="frontend">
+<h2>daily-hours.html <span class="badge">NUOVO</span></h2>
+
+<p>Pagina standalone nella root del progetto. Mobile-first, nessun framework, nessuna dipendenza esterna.</p>
+
+<div class="file-block">
+<div class="file-header">
+  <span>daily-hours.html</span>
+  <span class="action new">NUOVO FILE (root progetto)</span>
+</div>
+<pre><span class="op">&lt;!DOCTYPE html&gt;</span>
+<span class="kw">&lt;html</span> lang=<span class="str">"it"</span><span class="kw">&gt;</span>
+<span class="kw">&lt;head&gt;</span>
+<span class="kw">&lt;meta</span> charset=<span class="str">"utf-8"</span><span class="kw">&gt;</span>
+<span class="kw">&lt;meta</span> name=<span class="str">"viewport"</span> content=<span class="str">"width=device-width,initial-scale=1"</span><span class="kw">&gt;</span>
+<span class="kw">&lt;title&gt;</span>Registra ore — Team Hours Tracker<span class="kw">&lt;/title&gt;</span>
+<span class="kw">&lt;style&gt;</span>
+:root{
+  --accent:#A100FF;--accent2:#7b00cc;--accent-bg:#f3e8ff;
+  --bg:#f4f6f9;--card:#fff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+     min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--card);border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.1);
+      width:100%;max-width:400px;overflow:hidden}
+.card-hd{background:var(--accent);padding:26px 28px;text-align:center}
+.card-hd h1{color:#fff;font-size:17px;font-weight:700}
+.card-hd small{color:rgba(255,255,255,.75);font-size:12px;display:block;margin-top:3px}
+.card-bd{padding:28px}
+.u-name{font-size:20px;font-weight:700;color:var(--text);text-align:center;margin-bottom:6px}
+.u-date{display:flex;align-items:center;justify-content:center;gap:6px;
+        background:var(--accent-bg);color:var(--accent2);padding:7px 16px;
+        border-radius:20px;font-size:14px;font-weight:700;width:fit-content;
+        margin:0 auto 24px}
+label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;
+      letter-spacing:.6px;color:var(--muted);margin-bottom:8px}
+.ore-wrap{position:relative;margin-bottom:6px}
+input[type=number]{width:100%;padding:14px 48px 14px 20px;font-size:30px;font-weight:700;
+                   color:var(--text);border:2px solid var(--border);border-radius:10px;
+                   text-align:center;outline:none;transition:border-color .2s;
+                   -moz-appearance:textfield;background:var(--card)}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
+input[type=number]:focus{border-color:var(--accent)}
+.ore-unit{position:absolute;right:16px;top:50%;transform:translateY(-50%);
+          color:var(--muted);font-size:14px;font-weight:600;pointer-events:none}
+.hint{text-align:center;font-size:12px;color:var(--muted);margin-bottom:12px}
+.qbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+.qbtn{padding:6px 13px;border:1.5px solid var(--border);border-radius:6px;background:var(--card);
+      font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .15s}
+.qbtn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-save{width:100%;padding:15px;background:var(--accent);color:#fff;border:none;
+          border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;
+          transition:background .2s;letter-spacing:.3px}
+.btn-save:hover:not(:disabled){background:var(--accent2)}
+.btn-save:disabled{background:#d1d5db;cursor:not-allowed}
+.alert{padding:12px 16px;border-radius:8px;font-size:14px;font-weight:500;
+       margin-top:14px;display:none;line-height:1.4}
+.alert.ok{background:#d1fae5;color:#065f46;display:block}
+.alert.err{background:#fee2e2;color:#7f1d1d;display:block}
+.loading,.oops{text-align:center;padding:36px 20px}
+.spin{width:36px;height:36px;border:3px solid var(--accent-bg);
+      border-top-color:var(--accent);border-radius:50%;
+      animation:spin .8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.oops .ico{font-size:44px;margin-bottom:14px}
+.oops h2{color:var(--text);font-size:17px;margin-bottom:8px}
+.oops p{color:var(--muted);font-size:14px;line-height:1.5}
+<span class="kw">&lt;/style&gt;</span>
+<span class="kw">&lt;/head&gt;</span>
+<span class="kw">&lt;body&gt;</span>
+<span class="kw">&lt;div</span> class=<span class="str">"card"</span><span class="kw">&gt;</span>
+  <span class="kw">&lt;div</span> class=<span class="str">"card-hd"</span><span class="kw">&gt;</span>
+    <span class="kw">&lt;h1&gt;</span>Registrazione Ore<span class="kw">&lt;/h1&gt;</span>
+    <span class="kw">&lt;small&gt;</span>Team Hours Tracker<span class="kw">&lt;/small&gt;</span>
+  <span class="kw">&lt;/div&gt;</span>
+  <span class="kw">&lt;div</span> class=<span class="str">"card-bd"</span> id=<span class="str">"app"</span><span class="kw">&gt;</span>
+    <span class="kw">&lt;div</span> class=<span class="str">"loading"</span><span class="kw">&gt;&lt;div</span> class=<span class="str">"spin"</span><span class="kw">&gt;&lt;/div&gt;&lt;p</span> style=<span class="str">"color:var(--muted);font-size:14px"</span><span class="kw">&gt;</span>Caricamento...<span class="kw">&lt;/p&gt;&lt;/div&gt;</span>
+  <span class="kw">&lt;/div&gt;</span>
+<span class="kw">&lt;/div&gt;</span>
+
+<span class="kw">&lt;script&gt;</span>
+<span class="kw">const</span> API = <span class="str">'/api/daily'</span>;
+<span class="kw">let</span> _token = <span class="kw">null</span>;
+
+<span class="kw">async function</span> <span class="fn">callApi</span>(action, payload) {
+  <span class="kw">const</span> r = <span class="kw">await</span> <span class="fn">fetch</span>(API, {
+    method: <span class="str">'POST'</span>,
+    headers: { <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span> },
+    body: JSON.<span class="fn">stringify</span>({ action, payload })
+  });
+  <span class="kw">const</span> json = <span class="kw">await</span> r.<span class="fn">json</span>();
+  <span class="kw">if</span> (!json.ok) <span class="kw">throw new</span> Error(json.error || <span class="str">'Errore sconosciuto'</span>);
+  <span class="kw">return</span> json.data;
+}
+
+<span class="kw">function</span> <span class="fn">fmtDate</span>(iso) {
+  <span class="kw">const</span> DAYS   = [<span class="str">'Domenica'</span>,<span class="str">'Lunedì'</span>,<span class="str">'Martedì'</span>,<span class="str">'Mercoledì'</span>,<span class="str">'Giovedì'</span>,<span class="str">'Venerdì'</span>,<span class="str">'Sabato'</span>];
+  <span class="kw">const</span> MONTHS = [<span class="str">'gennaio'</span>,<span class="str">'febbraio'</span>,<span class="str">'marzo'</span>,<span class="str">'aprile'</span>,<span class="str">'maggio'</span>,<span class="str">'giugno'</span>,
+                  <span class="str">'luglio'</span>,<span class="str">'agosto'</span>,<span class="str">'settembre'</span>,<span class="str">'ottobre'</span>,<span class="str">'novembre'</span>,<span class="str">'dicembre'</span>];
+  <span class="kw">const</span> dt = <span class="kw">new</span> Date(<span class="str">`</span>${iso}<span class="str">T12:00:00Z`</span>);
+  <span class="kw">return</span> <span class="str">`</span>${DAYS[dt.<span class="fn">getUTCDay</span>()]}<span class="str"> </span>${dt.<span class="fn">getUTCDate</span>()}<span class="str"> </span>${MONTHS[dt.<span class="fn">getUTCMonth</span>()]}<span class="str"> </span>${dt.<span class="fn">getUTCFullYear</span>()}<span class="str">`</span>;
+}
+
+<span class="kw">function</span> <span class="fn">renderErr</span>(msg) {
+  document.<span class="fn">getElementById</span>(<span class="str">'app'</span>).innerHTML = <span class="str">`
+    &lt;div class="oops"&gt;
+      &lt;div class="ico"&gt;🔐&lt;/div&gt;
+      &lt;h2&gt;Link non valido&lt;/h2&gt;
+      &lt;p&gt;</span>${msg}<span class="str">&lt;/p&gt;
+    &lt;/div&gt;`</span>;
+}
+
+<span class="kw">function</span> <span class="fn">renderForm</span>(d) {
+  <span class="kw">const</span> dateLabel = <span class="fn">fmtDate</span>(d.data);
+  document.<span class="fn">getElementById</span>(<span class="str">'app'</span>).innerHTML = <span class="str">`
+    &lt;div class="u-name"&gt;</span>${d.fullName}<span class="str">&lt;/div&gt;
+    &lt;div class="u-date"&gt;📅 </span>${dateLabel}<span class="str">&lt;/div&gt;
+    </span>${d.ore !== <span class="kw">null</span> ? <span class="str">'&lt;div class="alert ok" id="banner"&gt;✓ Ore già registrate — puoi modificarle&lt;/div&gt;'</span> : <span class="str">''</span>}<span class="str">
+    &lt;label for="ore-inp"&gt;Ore lavorate&lt;/label&gt;
+    &lt;div class="ore-wrap"&gt;
+      &lt;input type="number" id="ore-inp"
+             value="</span>${d.ore !== <span class="kw">null</span> ? d.ore : <span class="str">''</span>}<span class="str">"
+             min="0" max="24" step="0.25" placeholder="0" inputmode="decimal"&gt;
+      &lt;span class="ore-unit"&gt;h&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class="hint"&gt;Es: 8 · 7.5 · 4.25&lt;/div&gt;
+    &lt;div class="qbtns"&gt;
+      </span>${[<span class="num">4</span>,<span class="num">6</span>,<span class="num">7</span>,<span class="num">7.5</span>,<span class="num">8</span>].<span class="fn">map</span>(v =&gt; <span class="str">`&lt;button class="qbtn" onclick="setH(</span>${v}<span class="str">)"&gt;</span>${v}<span class="str">h&lt;/button&gt;`</span>).<span class="fn">join</span>(<span class="str">''</span>)}<span class="str">
+    &lt;/div&gt;
+    &lt;button class="btn-save" id="save" onclick="doSave()"&gt;Salva&lt;/button&gt;
+    &lt;div class="alert" id="alert"&gt;&lt;/div&gt;`</span>;
+  document.<span class="fn">getElementById</span>(<span class="str">'ore-inp'</span>).<span class="fn">focus</span>();
+}
+
+<span class="kw">function</span> <span class="fn">setH</span>(v) {
+  document.<span class="fn">getElementById</span>(<span class="str">'ore-inp'</span>).value = v;
+  document.<span class="fn">getElementById</span>(<span class="str">'ore-inp'</span>).<span class="fn">focus</span>();
+}
+
+<span class="kw">async function</span> <span class="fn">doSave</span>() {
+  <span class="kw">const</span> inp  = document.<span class="fn">getElementById</span>(<span class="str">'ore-inp'</span>);
+  <span class="kw">const</span> btn  = document.<span class="fn">getElementById</span>(<span class="str">'save'</span>);
+  <span class="kw">const</span> alrt = document.<span class="fn">getElementById</span>(<span class="str">'alert'</span>);
+  <span class="kw">const</span> bnr  = document.<span class="fn">getElementById</span>(<span class="str">'banner'</span>);
+  <span class="kw">const</span> ore  = <span class="fn">parseFloat</span>(inp.value);
+  <span class="kw">if</span> (<span class="fn">isNaN</span>(ore) || ore &lt; <span class="num">0</span> || ore &gt; <span class="num">24</span>) {
+    alrt.className = <span class="str">'alert err'</span>;
+    alrt.textContent = <span class="str">'⚠ Inserisci un valore valido (0–24)'</span>;
+    <span class="kw">return</span>;
+  }
+  btn.disabled = <span class="kw">true</span>; btn.textContent = <span class="str">'Salvataggio...'</span>;
+  alrt.className = <span class="str">'alert'</span>;
+  <span class="kw">try</span> {
+    <span class="kw">await</span> <span class="fn">callApi</span>(<span class="str">'saveByToken'</span>, { token: _token, ore });
+    alrt.className = <span class="str">'alert ok'</span>;
+    alrt.textContent = <span class="str">`✓ ${</span>ore<span class="str">} ore salvate!`</span>;
+    <span class="kw">if</span> (bnr) bnr.style.display = <span class="str">'none'</span>;
+  } <span class="kw">catch</span> (e) {
+    alrt.className = <span class="str">'alert err'</span>;
+    alrt.textContent = <span class="str">'✗ '</span> + e.message;
+  } <span class="kw">finally</span> {
+    btn.disabled = <span class="kw">false</span>; btn.textContent = <span class="str">'Salva'</span>;
+  }
+}
+
+(<span class="kw">async</span> () =&gt; {
+  <span class="kw">const</span> params = <span class="kw">new</span> URLSearchParams(window.location.search);
+  _token = params.<span class="fn">get</span>(<span class="str">'token'</span>);
+  <span class="kw">if</span> (!_token) { <span class="fn">renderErr</span>(<span class="str">'Nessun token nel link. Usa il link ricevuto via email.'</span>); <span class="kw">return</span>; }
+  <span class="kw">try</span> {
+    <span class="kw">const</span> data = <span class="kw">await</span> <span class="fn">callApi</span>(<span class="str">'getByToken'</span>, { token: _token });
+    <span class="fn">renderForm</span>(data);
+  } <span class="kw">catch</span> (e) {
+    <span class="kw">const</span> scaduto = e.message.<span class="fn">includes</span>(<span class="str">'scaduto'</span>);
+    <span class="kw">const</span> firma   = e.message.<span class="fn">includes</span>(<span class="str">'firma'</span>) || e.message.<span class="fn">includes</span>(<span class="str">'malformato'</span>);
+    <span class="fn">renderErr</span>(scaduto ? <span class="str">'Link scaduto. Attendi l\'email di domani.'</span>
+            : firma   ? <span class="str">'Link non valido. Usa il link ricevuto via email.'</span>
+            : <span class="str">'Errore: '</span> + e.message);
+  }
+})();
+<span class="kw">&lt;/script&gt;</span>
+<span class="kw">&lt;/body&gt;</span>
+<span class="kw">&lt;/html&gt;</span></pre>
+</div>
+</section>
+
+<!-- ═══════════════════════ db.mjs MODIFICHE ═══════════════════════ -->
+<section id="db-mod">
+<h2>netlify/functions/db.mjs <span class="badge">MODIFICA</span></h2>
+
+<p>Aggiungere <strong>solo</strong> la creazione della tabella <code>daily_hours</code> nella funzione <code>bootstrap()</code>. Nessun'altra modifica.</p>
+
+<div class="callout blue">Il trigger SQL viene creato una volta sola tramite la migration. Non va inserito in bootstrap — sarebbe ridondante e lento.</div>
+
+<h4>Aggiungere all'interno di bootstrap(), DOPO le migrazioni esistenti</h4>
+<div class="file-block">
+<div class="file-header">
+  <span>netlify/functions/db.mjs — aggiunta in bootstrap()</span>
+  <span class="action modify">MODIFICA MINIMA</span>
+</div>
+<pre><span class="cmt">// Aggiungere DOPO la riga:
+// await sql`CREATE UNIQUE INDEX IF NOT EXISTS rep_unique_per_turno ...`
+// e PRIMA del blocco con Promise.all()</span>
+
+<span class="kw">await</span> sql<span class="str">`CREATE TABLE IF NOT EXISTS daily_hours (
+    id         BIGSERIAL PRIMARY KEY,
+    risorsa_id INTEGER      NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
+    data       DATE         NOT NULL,
+    ore        NUMERIC(5,2) NOT NULL,
+    created_at TIMESTAMP    DEFAULT NOW(),
+    updated_at TIMESTAMP    DEFAULT NOW(),
+    UNIQUE (risorsa_id, data)
+)`</span>;</pre>
+</div>
+
+<p>La posizione esatta nel file è dopo la riga ~34 (dopo il <code>CREATE UNIQUE INDEX IF NOT EXISTS rep_unique_per_turno</code>), prima del blocco <code>const [progetti, risorse, ...]</code>.</p>
+</section>
+
+<!-- ═══════════════════════ netlify.toml MODIFICHE ═══════════════════════ -->
+<section id="toml-mod">
+<h2>netlify.toml <span class="badge">MODIFICA</span></h2>
+
+<div class="file-block">
+<div class="file-header">
+  <span>netlify.toml — versione completa dopo le modifiche</span>
+  <span class="action modify">MODIFICA</span>
+</div>
+<pre><span class="cmt"># Configurazione Netlify per Team Hours Tracker</span>
+[build]
+  publish   = <span class="str">"."</span>
+  functions = <span class="str">"netlify/functions"</span>
+
+[[redirects]]
+  from   = <span class="str">"/api/db"</span>
+  to     = <span class="str">"/.netlify/functions/db"</span>
+  status = <span class="num">200</span>
+
+<span class="cmt"># ── AGGIUNTO: redirect per API daily hours ──────────────────────────</span>
+[[redirects]]
+  from   = <span class="str">"/api/daily"</span>
+  to     = <span class="str">"/.netlify/functions/daily"</span>
+  status = <span class="num">200</span>
+
+<span class="cmt"># ── AGGIUNTO: funzione schedulata (07:00 UTC = 08:00 CET / 09:00 CEST) ─</span>
+[functions.<span class="str">"send-daily-reminder"</span>]
+  schedule = <span class="str">"0 7 * * 1-5"</span></pre>
+</div>
+</section>
+
+<!-- ═══════════════════════ ENV VARS ═══════════════════════ -->
+<section id="envvars">
+<h2>Variabili d'ambiente</h2>
+
+<p>Aggiungere sul pannello Netlify → Site Configuration → Environment Variables.</p>
+
+<div class="env-row" style="font-weight:700;border-bottom:2px solid var(--accent)">
+  <div>Variabile</div><div>Descrizione</div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">DATABASE_URL</span><span class="env-badge existing">già presente</span></div>
+  <div>Connection string Neon. Nessuna modifica necessaria.</div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">DAILY_TOKEN_SECRET</span><span class="env-badge new">NUOVO</span></div>
+  <div>Segreto HMAC-SHA256. Genera con: <code>openssl rand -hex 32</code><br>
+  <strong>Minimo 32 caratteri hex (256 bit). Non condividere mai.</strong></div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">RESEND_API_KEY</span><span class="env-badge new">NUOVO</span></div>
+  <div>API key Resend. Ottieni da <strong>resend.com → API Keys</strong>. Formato: <code>re_XXXXXXXX</code></div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">SITE_URL</span><span class="env-badge new">NUOVO</span></div>
+  <div>URL base del sito, senza slash finale. Es: <code>https://teamhours.netlify.app</code><br>
+  Usato per costruire il link nelle email.</div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">FROM_EMAIL</span><span class="env-badge new">NUOVO</span></div>
+  <div>Indirizzo mittente verificato su Resend. Es: <code>team-hours@yourdomain.com</code><br>
+  <strong>Deve essere un dominio verificato su Resend</strong> (o <code>onboarding@resend.dev</code> in test).</div>
+</div>
+<div class="env-row">
+  <div><span class="env-key">FROM_NAME</span><span class="env-badge new">NUOVO (opzionale)</span></div>
+  <div>Nome mittente email. Default: <code>Team Hours Tracker</code></div>
+</div>
+
+<div class="callout amber" style="margin-top:16px">
+  <strong>Per il file .env locale</strong> (test in locale con server.mjs), aggiungere le stesse variabili al file <code>.env</code> — il server le carica automaticamente.
+</div>
+</section>
+
+<!-- ═══════════════════════ SETUP ═══════════════════════ -->
+<section id="setup">
+<h2>Setup step-by-step</h2>
+<ol class="steps">
+  <li>
+    <div>
+      <strong>Crea account Resend</strong> su <code>resend.com</code> → verifica il dominio mittente (Settings → Domains).
+      In fase di test, puoi usare <code>onboarding@resend.dev</code> per inviare solo alla tua email.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Esegui la migration SQL</strong> su Neon Console → SQL Editor: incolla il contenuto di <code>migration_daily_hours.sql</code> e lancia.
+      Verifica che stampi "Migration completata".
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Genera il secret</strong>: <code>openssl rand -hex 32</code> → copia il risultato.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Aggiungi le variabili d'ambiente</strong> su Netlify → Site Configuration → Environment Variables:
+      <code>DAILY_TOKEN_SECRET</code>, <code>RESEND_API_KEY</code>, <code>SITE_URL</code>, <code>FROM_EMAIL</code>, <code>FROM_NAME</code>.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Crea i 3 nuovi file</strong> nel progetto:
+      <ul style="margin-top:6px">
+        <li><code>netlify/functions/daily.mjs</code></li>
+        <li><code>netlify/functions/send-daily-reminder.mjs</code></li>
+        <li><code>daily-hours.html</code></li>
+      </ul>
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Modifica <code>netlify/functions/db.mjs</code></strong>: aggiungi la riga <code>CREATE TABLE IF NOT EXISTS daily_hours</code> nella funzione <code>bootstrap()</code>.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Modifica <code>netlify.toml</code></strong>: aggiungi il redirect <code>/api/daily</code> e la configurazione della funzione schedulata.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Deploy su Netlify</strong> (git push → auto-deploy). Verifica che tutte le funzioni appaiano nella tab Functions del sito.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Test manuale</strong>: invoca <code>send-daily-reminder</code> manualmente dal pannello Netlify → Functions → send-daily-reminder → Test function.
+      Controlla la casella email e clicca il link ricevuto.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Verifica aggregazione</strong>: dopo aver salvato ore tramite il link, vai su Netlify DB o app principale e controlla che <code>ore_mensili</code> si sia aggiornata.
+    </div>
+  </li>
+</ol>
+</section>
+
+<!-- ═══════════════════════ EDGE CASE ═══════════════════════ -->
+<section id="edge">
+<h2>Edge case &amp; gestione errori</h2>
+
+<table>
+  <tr><th>Scenario</th><th>Comportamento</th></tr>
+  <tr>
+    <td>Token scaduto (oltre 36h)</td>
+    <td>Risposta HTTP 401, messaggio "Link scaduto. Attendi l'email di domani."</td>
+  </tr>
+  <tr>
+    <td>Token manomesso / firma errata</td>
+    <td>Risposta HTTP 401. <code>timingSafeEqual</code> previene timing attacks.</td>
+  </tr>
+  <tr>
+    <td>Risorsa eliminata dopo emissione token</td>
+    <td><code>getByToken</code> lancia "Risorsa non trovata" — HTTP 500 con messaggio chiaro.</td>
+  </tr>
+  <tr>
+    <td>Ore già inserite, l'utente riapre il link</td>
+    <td>Form pre-compilato con il valore esistente + banner "già registrate — puoi modificarle".</td>
+  </tr>
+  <tr>
+    <td>Utente riapre il link più volte</td>
+    <td>ON CONFLICT DO UPDATE: ogni salvataggio sovrascrive il precedente, trigger ricalcola.</td>
+  </tr>
+  <tr>
+    <td>Ore = 0 (giornata non lavorata)</td>
+    <td>Valore valido, salvato normalmente. Il trigger aggiorna ore_q1/q2 di conseguenza.</td>
+  </tr>
+  <tr>
+    <td>Ore > 24</td>
+    <td>Blocco lato client (input) + validazione backend — risposta 500 "Valore ore non valido".</td>
+  </tr>
+  <tr>
+    <td>Risorsa senza email</td>
+    <td>La query del reminder filtra <code>WHERE email IS NOT NULL AND email &lt;&gt; ''</code> — saltata silenziosamente.</td>
+  </tr>
+  <tr>
+    <td>Email non recapitata (bounce)</td>
+    <td>Log dell'errore in console Netlify, contatore <code>errors[]</code> nel response body. Funzione non si interrompe.</td>
+  </tr>
+  <tr>
+    <td>Funzione schedulata invocata nel weekend</td>
+    <td>Check <code>getUTCDay() === 0/6</code> → ritorno immediato con <code>skipped: 'weekend'</code>.</td>
+  </tr>
+  <tr>
+    <td>Nota già esistente in ore_mensili</td>
+    <td>Il trigger usa <code>DO UPDATE SET ore_q1=..., ore_q2=...</code> — le note non vengono mai toccate.</td>
+  </tr>
+  <tr>
+    <td>ore_mensili mai esistita per quel mese</td>
+    <td>Il trigger fa INSERT con note NULL — riga creata automaticamente.</td>
+  </tr>
+  <tr>
+    <td>daily_hours DELETE (riga eliminata)</td>
+    <td>Trigger usa OLD per identificare mese, ricalcola da zero — ore_mensili si riduce correttamente.</td>
+  </tr>
+  <tr>
+    <td>DAILY_TOKEN_SECRET non configurato</td>
+    <td><code>verifyToken</code> lancia "DAILY_TOKEN_SECRET non configurato" — segnale chiaro di config mancante.</td>
+  </tr>
+  <tr>
+    <td>Concorrenza: due tab salvano contemporaneamente</td>
+    <td>ON CONFLICT (risorsa_id, data) DO UPDATE è atomico in Postgres — vince l'ultimo.</td>
+  </tr>
+</table>
+</section>
+
+<!-- ═══════════════════════ ELENCO FILE ═══════════════════════ -->
+<section id="files">
+<h2>Elenco completo file</h2>
+
+<h3>File da creare</h3>
+<table>
+  <tr><th>File</th><th>Descrizione</th></tr>
+  <tr><td><code>migration_daily_hours.sql</code></td><td>Eseguire una volta su Neon: crea tabella + trigger</td></tr>
+  <tr><td><code>netlify/functions/daily.mjs</code></td><td>API token-based (getByToken, saveByToken)</td></tr>
+  <tr><td><code>netlify/functions/send-daily-reminder.mjs</code></td><td>Funzione schedulata: genera token + invia email Resend</td></tr>
+  <tr><td><code>daily-hours.html</code></td><td>Pagina frontend mobile-first per inserimento ore</td></tr>
+</table>
+
+<h3>File da modificare</h3>
+<table>
+  <tr><th>File</th><th>Modifica</th></tr>
+  <tr>
+    <td><code>netlify/functions/db.mjs</code></td>
+    <td>Aggiungere <code>CREATE TABLE IF NOT EXISTS daily_hours</code> in <code>bootstrap()</code> — 12 righe</td>
+  </tr>
+  <tr>
+    <td><code>netlify.toml</code></td>
+    <td>Aggiungere redirect <code>/api/daily</code> e config funzione schedulata — 6 righe</td>
+  </tr>
+</table>
+
+<h3>File NON modificati (invarianti)</h3>
+<table>
+  <tr><th>File</th><th>Motivo</th></tr>
+  <tr><td><code>app.js</code></td><td>Il frontend esistente non sa nulla di daily_hours — continua a leggere ore_mensili identicamente</td></tr>
+  <tr><td><code>index.html</code></td><td>Nessuna modifica necessaria — daily-hours.html è una pagina separata</td></tr>
+  <tr><td><code>styles.css</code></td><td>La pagina daily-hours.html ha il proprio CSS inline</td></tr>
+  <tr><td><code>package.json</code></td><td>Nessuna dipendenza aggiunta — Resend via REST puro, crypto built-in</td></tr>
+</table>
+
+<div class="callout green" style="margin-top:24px">
+  <strong>Zero dipendenze aggiunte.</strong> Resend viene chiamato con <code>fetch()</code> nativo. Il modulo <code>crypto</code> è built-in in Node 18+. Il progetto mantiene una sola dipendenza esterna: <code>@neondatabase/serverless</code>.
+</div>
+</section>
+
+</main>
+
+<script>
+const links = document.querySelectorAll('aside a');
+const sections = document.querySelectorAll('section[id]');
+function onScroll() {
+  let cur = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) cur = s.id; });
+  links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + cur));
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+</script>
+</body>
+</html>

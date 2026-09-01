@@ -31,6 +31,15 @@ async function bootstrap(){
   await sql`DROP INDEX IF EXISTS reperibilita_risorse_id_progetto_id_anno_mese_key`;
   await sql`DROP INDEX IF EXISTS reperibilita_risorsa_id_progetto_id_anno_mese_key`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS rep_unique_per_turno ON reperibilita (risorsa_id, progetto_id, anno, mese, COALESCE(etichetta,''))`;
+  await sql`CREATE TABLE IF NOT EXISTS daily_hours (
+    id         BIGSERIAL    PRIMARY KEY,
+    risorsa_id INTEGER      NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
+    data       DATE         NOT NULL,
+    ore        NUMERIC(5,2) NOT NULL,
+    created_at TIMESTAMP    DEFAULT NOW(),
+    updated_at TIMESTAMP    DEFAULT NOW(),
+    UNIQUE (risorsa_id, data)
+  )`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,

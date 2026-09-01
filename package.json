@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Tracker ore/ferie/reperibilita del team, con proxy serverless verso Neon",
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.0"
+    "@neondatabase/serverless": "^1.0.0",
+    "nodemailer": "^6.9.0"
   }
 }

@@ -7,3 +7,11 @@
   from = "/api/db"
   to = "/.netlify/functions/db"
   status = 200
+
+[[redirects]]
+  from = "/api/daily"
+  to = "/.netlify/functions/daily"
+  status = 200
+
+[functions."send-daily-reminder-background"]
+  schedule = "0 7 * * 1-5"
