@@ -204,7 +204,7 @@ async function sendAbsenceNotification(p) {
       )
       AND f.data_fine   >= ${p.start}::date
       AND f.data_inizio <= ${p.end}::date
-    ORDER BY proj.nome, f.data_inizio, r.full_name`;
+    ORDER BY progetto, data_inizio, full_name`;
 
   const overlapMap = _buildOverlapMap(personName, p.tipo, p.start, p.end, overlapRows);
   const hasOverlap = Object.keys(overlapMap).length > 0;
