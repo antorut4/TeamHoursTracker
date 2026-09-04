@@ -41,6 +41,18 @@ async function bootstrap(){
     updated_at TIMESTAMP    DEFAULT NOW(),
     UNIQUE (risorsa_id, data)
   )`;
+  await sql`CREATE TABLE IF NOT EXISTS email_log (
+    id           BIGSERIAL PRIMARY KEY,
+    tipo         TEXT NOT NULL,
+    destinatario TEXT NOT NULL,
+    nome         TEXT,
+    oggetto      TEXT,
+    stato        TEXT NOT NULL,
+    errore       TEXT,
+    meta         JSONB,
+    created_at   TIMESTAMP DEFAULT NOW()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS email_log_created_idx ON email_log (created_at DESC)`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
@@ -104,6 +116,15 @@ async function deleteFerie(p){ await sql`DELETE FROM ferie WHERE id=${p.id}`; }
 // ════════════════════════════════════════════════════════════════════════
 //  Notifica assenza — invia email ai TL dei progetti della risorsa
 // ════════════════════════════════════════════════════════════════════════
+
+// Scrive una riga in email_log. Non deve mai far fallire l'invio: errori silenziati.
+async function _logEmail(tipo, destinatario, nome, oggetto, stato, errore, meta) {
+  try {
+    await sql`INSERT INTO email_log (tipo, destinatario, nome, oggetto, stato, errore, meta)
+              VALUES (${tipo}, ${destinatario}, ${nome || null}, ${oggetto || null},
+                      ${stato}, ${errore || null}, ${meta ? JSON.stringify(meta) : null})`;
+  } catch (e) { console.error('[email_log]', e.message); }
+}
 
 function _absenceTransporter() {
   return nodemailer.createTransport({
@@ -178,7 +199,12 @@ async function sendAbsenceNotification(p) {
       AND ptl.risorsa_id != ${p.risorsaId}
       AND r.email IS NOT NULL AND r.email <> ''
     ORDER BY r.email, proj.nome`;
-  if (!tlRows.length) return { sent: 0, reason: 'no_tl' };
+  if (!tlRows.length) {
+    await _logEmail('assenza', '—', personName, `[Nuova assenza] ${personName}`, 'skipped',
+                    'Nessun Team Leader con email sui progetti della risorsa',
+                    { risorsa: personName, tipo: p.tipo, dal: p.start, al: p.end });
+    return { sent: 0, reason: 'no_tl' };
+  }
 
   // 3. Progetti della risorsa
   const projRows = await sql`
@@ -221,19 +247,27 @@ async function sendAbsenceNotification(p) {
   const html    = buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap);
   const text    = buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap);
 
-  let sent = 0;
+  const meta = { risorsa: personName, tipo: p.tipo, dal: p.start, al: p.end, progetti, overlap: hasOverlap };
+  let sent = 0, failed = 0;
   const destinatari = [];
   for (const tl of Object.values(tlByEmail)) {
-    await mailer.sendMail({
-      from: `${FROM_NAME} <${GMAIL_USER}>`,
-      to:   tl.email,
-      subject, html, text
-    });
-    sent++;
-    destinatari.push(tl.name);
-    console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
+    try {
+      await mailer.sendMail({
+        from: `${FROM_NAME} <${GMAIL_USER}>`,
+        to:   tl.email,
+        subject, html, text
+      });
+      sent++;
+      destinatari.push(tl.name);
+      console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
+      await _logEmail('assenza', tl.email, tl.name, subject, 'sent', null, meta);
+    } catch (err) {
+      failed++;
+      console.error(`[absence-notify] ✗ ${tl.email}: ${err.message}`);
+      await _logEmail('assenza', tl.email, tl.name, subject, 'error', err.message, meta);
+    }
   }
-  return { sent, destinatari, reason: 'ok' };
+  return { sent, failed, destinatari, reason: failed && !sent ? 'error' : 'ok' };
 }
 
 function buildAbsenceEmailText(personName, p, progetti, overlapMap, hasOverlap) {
@@ -597,6 +631,22 @@ async function setAdminPwd(p){
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
 }
 
+// ── email log: ultime N righe, filtrabili per tipo/stato ──
+async function getEmailLog(p){
+  const limit = Math.min(+p.limit || 100, 500);
+  const tipo  = p.tipo  || null;
+  const stato = p.stato || null;
+  const rows = await sql`
+    SELECT id, tipo, destinatario, nome, oggetto, stato, errore, meta,
+           to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
+    FROM email_log
+    WHERE (${tipo}::text  IS NULL OR tipo  = ${tipo})
+      AND (${stato}::text IS NULL OR stato = ${stato})
+    ORDER BY created_at DESC
+    LIMIT ${limit}`;
+  return rows;
+}
+
 // ── consuntivo: scrittura ore giornaliere su daily_hours ──
 // ore null/0/'': cancella la riga; altrimenti upsert
 async function saveConsuntivo(p){
@@ -632,7 +682,7 @@ const ACTIONS = {
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
-  getConsuntivo, saveConsuntivo
+  getConsuntivo, saveConsuntivo, getEmailLog
 };
 
 export async function handler(event){

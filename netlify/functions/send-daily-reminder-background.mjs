@@ -23,6 +23,15 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+// Scrive una riga in email_log. Errori silenziati: il log non deve rompere l'invio.
+async function logEmail(destinatario, nome, oggetto, stato, errore, meta) {
+  try {
+    await sql`INSERT INTO email_log (tipo, destinatario, nome, oggetto, stato, errore, meta)
+              VALUES ('daily_reminder', ${destinatario}, ${nome || null}, ${oggetto || null},
+                      ${stato}, ${errore || null}, ${meta ? JSON.stringify(meta) : null})`;
+  } catch (e) { console.error('[email_log]', e.message); }
+}
+
 function getPreviousWorkday(today) {
   const date = new Date(today);
   const dow  = date.getUTCDay();
@@ -64,13 +73,15 @@ async function sendEmail(risorsa, dataISO) {
   const expDate   = new Date(Date.now() + 48 * 3600 * 1000);
   const expLabel  = formatDateShortIT(expDate);
 
+  const subject = `Ore di ieri — ${dateLabel}`;
   await transporter.sendMail({
     from:    `${FROM_NAME} <${process.env.GMAIL_USER}>`,
     to:      risorsa.email,
-    subject: `Ore di ieri — ${dateLabel}`,
+    subject,
     html:    buildEmailHtml(firstName, risorsa.full_name, dateLabel, link, expLabel),
     text:    buildEmailText(firstName, risorsa.full_name, dateLabel, link, expLabel)
   });
+  return subject;
 }
 
 export const handler = async () => {
@@ -93,12 +104,14 @@ export const handler = async () => {
   const results = { sent: 0, errors: [] };
   for (const r of risorse) {
     try {
-      await sendEmail(r, dataISO);
+      const subject = await sendEmail(r, dataISO);
       results.sent++;
       console.log(`✓ ${r.email}`);
+      await logEmail(r.email, r.full_name, subject, 'sent', null, { giorno: dataISO });
     } catch (err) {
       console.error(`✗ ${r.email}: ${err.message}`);
       results.errors.push({ email: r.email, error: err.message });
+      await logEmail(r.email, r.full_name, `Ore di ieri — ${dataISO}`, 'error', err.message, { giorno: dataISO });
     }
   }
 

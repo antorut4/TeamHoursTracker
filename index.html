@@ -456,6 +456,33 @@
             <div id="pwdMsg" class="msg"></div>
           </div>
         </div>
+        <div class="card" id="adminEmailLogCard">
+          <div class="acc-header">
+            <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-envelope-open-text"></i> Log invii email</div>
+            <button class="acc-toggle" onclick="toggleAcc(this);loadEmailLog()"><i class="fa-solid fa-chevron-down"></i></button>
+          </div>
+          <div class="acc-body">
+            <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
+              <div class="field" style="max-width:170px"><label>Tipo</label>
+                <select id="emailLogTipo" onchange="loadEmailLog()">
+                  <option value="">Tutti</option>
+                  <option value="daily_reminder">Reminder ore</option>
+                  <option value="assenza">Notifica assenza</option>
+                </select>
+              </div>
+              <div class="field" style="max-width:150px"><label>Stato</label>
+                <select id="emailLogStato" onchange="loadEmailLog()">
+                  <option value="">Tutti</option>
+                  <option value="sent">Inviata</option>
+                  <option value="error">Errore</option>
+                  <option value="skipped">Saltata</option>
+                </select>
+              </div>
+              <div><button class="btn btn-ghost2" onclick="loadEmailLog()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+            </div>
+            <div id="emailLogContent" style="margin-top:12px"></div>
+          </div>
+        </div>
       </div>
     </main>
   </div>

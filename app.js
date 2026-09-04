@@ -144,11 +144,11 @@ async function initApp(){
     const rOpts=[{v:'',l:'Tutte le risorse'},...RESOURCES.map(r=>({v:r.id,l:r.fullName}))];
     popSel('consuntivoRes',rOpts,'');
   }
-  if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
+  if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard','adminEmailLogCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     await renderResourceList();
     // Nascondi i card riservati al super-admin (gestione progetti è visibile al manager, filtrata)
-    ['adminResByPrjCard','adminPwdCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+    ['adminResByPrjCard','adminPwdCard','adminEmailLogCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
     await renderProjectList();await populateSearchByProject();
     // Nascondi il filtro team lead nell'elenco risorse (il manager vede solo il suo team)
     const flEl=document.getElementById('filterResLead');if(flEl)flEl.closest('.search-row') && (flEl.style.display='none');
@@ -1567,6 +1567,45 @@ function _renderConsuntivoTeam(rows,month,year){
   el.innerHTML=`<div class="card"><div class="card-title"><i class="fa-solid fa-calendar-days"></i> ${MONTHS[month]} ${year}${suffix}</div>${_consuntivoSummary(q1,q2)}${_buildConsuntivoGrid(filtered,month,year,resList)}</div>`;
 }
 
+// LOG EMAIL (admin)
+async function loadEmailLog(){
+  const el=document.getElementById('emailLogContent');if(!el)return;
+  const tipo=document.getElementById('emailLogTipo')?.value||'';
+  const stato=document.getElementById('emailLogStato')?.value||'';
+  el.innerHTML='<div class="msg">Caricamento...</div>';
+  showSpinner();
+  let rows;
+  try{rows=await call('getEmailLog',{tipo:tipo||null,stato:stato||null,limit:200});}
+  catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
+  hideSpinner();
+  if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.82rem;padding:14px 0">Nessun invio registrato.</p>';return;}
+  const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza'};
+  const badge=s=>{
+    if(s==='sent')return'<span style="background:var(--ok-bg);color:var(--ok);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">INVIATA</span>';
+    if(s==='error')return'<span style="background:var(--danger-bg);color:var(--danger);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">ERRORE</span>';
+    return'<span style="background:var(--amber-bg);color:var(--amber);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">SALTATA</span>';
+  };
+  let h='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.74rem"><thead><tr>';
+  ['Quando','Tipo','Destinatario','Stato','Dettaglio'].forEach(t=>{
+    h+=`<th style="padding:6px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;font-size:.68rem">${t}</th>`;});
+  h+='</tr></thead><tbody>';
+  rows.forEach((r,i)=>{
+    const m=r.meta||{};
+    let det='';
+    if(r.stato==='error')det=`<span style="color:var(--danger)">${r.errore||''}</span>`;
+    else if(r.stato==='skipped')det=`<span style="color:var(--ink-3)">${r.errore||''}</span>`;
+    else if(r.tipo==='assenza')det=`<span style="color:var(--ink-3)">${m.risorsa||''} — ${m.tipo||''} ${m.dal||''}${m.al&&m.al!==m.dal?'→'+m.al:''}${m.overlap?' <strong style="color:var(--amber)">⚠ overlap</strong>':''}</span>`;
+    else det=`<span style="color:var(--ink-3)">giorno ${m.giorno||''}</span>`;
+    h+=`<tr style="background:${i%2?'var(--stone)':'var(--white)'}">`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap;color:var(--ink-3)">${r.quando||''}</td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap">${TIPO_LBL[r.tipo]||r.tipo}</td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap"><div style="font-weight:600;color:var(--ink)">${r.nome||'—'}</div><div style="font-size:.66rem;color:var(--ink-3)">${r.destinatario}</div></td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap">${badge(r.stato)}</td>`;
+    h+=`<td style="padding:5px 10px">${det}</td></tr>`;
+  });
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
 // AVVIO
 (async function init(){
   showSpinner();
