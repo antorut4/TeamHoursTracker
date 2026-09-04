@@ -24,7 +24,7 @@ async function reloadAll(){
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null,dailyReminder:r.daily_reminder!==false}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note,oraInizio:f.ora_inizio||null,oraFine:f.ora_fine||null}));
@@ -1411,7 +1411,32 @@ async function togglePresenzaDay(dateStr,risorsaId){
   hideSpinner();renderPresenzeGrid();
 }
 // CONSUNTIVO
+// Promemoria email: sincronizza il checkbox con lo stato della risorsa loggata
+function _syncNotifChk(){
+  const card=document.getElementById('consuntivoNotifCard'),chk=document.getElementById('consuntivoNotifChk');
+  if(!card||!chk)return;
+  const r=isAdmin?null:RESOURCES.find(x=>x.fullName===currentUser);
+  if(!r){card.style.display='none';return;}   // admin non ha una risorsa propria
+  card.style.display='';
+  chk.checked=r.dailyReminder!==false;
+}
+async function toggleDailyReminder(cb){
+  const r=RESOURCES.find(x=>x.fullName===currentUser);
+  if(!r){cb.checked=!cb.checked;return;}
+  const val=cb.checked;
+  cb.disabled=true;showSpinner();
+  try{
+    await call('setDailyReminder',{risorsaId:r.id,value:val});
+    r.dailyReminder=val;
+    showMsg('consuntivoNotifMsg',val?'Promemoria attivato.':'Promemoria disattivato.','ok');
+  }catch(e){
+    cb.checked=!val; // rollback: lo stato mostrato deve riflettere il DB
+    showMsg('consuntivoNotifMsg','Errore: '+e.message,'err');
+  }
+  hideSpinner();cb.disabled=false;
+}
 async function loadConsuntivo(){
+  _syncNotifChk();
   const month=+document.getElementById('consuntivoMonth').value;
   const year=+document.getElementById('consuntivoYear').value;
   const el=document.getElementById('consuntivoContent');
@@ -1580,10 +1605,14 @@ async function loadEmailLog(){
   hideSpinner();
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.82rem;padding:14px 0">Nessun invio registrato.</p>';return;}
   const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza'};
+  const _bg=(bg,c,t)=>`<span style="background:${bg};color:${c};border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700;white-space:nowrap">${t}</span>`;
   const badge=s=>{
-    if(s==='sent')return'<span style="background:var(--ok-bg);color:var(--ok);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">INVIATA</span>';
-    if(s==='error')return'<span style="background:var(--danger-bg);color:var(--danger);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">ERRORE</span>';
-    return'<span style="background:var(--amber-bg);color:var(--amber);border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700">SALTATA</span>';
+    if(s==='sent')     return _bg('var(--ok-bg)','var(--ok)','INVIATA');
+    if(s==='error')    return _bg('var(--danger-bg)','var(--danger)','ERRORE');
+    if(s==='run_start')return _bg('var(--stone-2)','var(--ink-2)','▶ AVVIO');
+    if(s==='run_end')  return _bg('var(--stone-2)','var(--ink-2)','■ FINE');
+    if(s==='run_error')return _bg('var(--danger-bg)','var(--danger)','✖ CRASH');
+    return _bg('var(--amber-bg)','var(--amber)','SALTATA');
   };
   let h='<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.74rem"><thead><tr>';
   ['Quando','Tipo','Destinatario','Stato','Dettaglio'].forEach(t=>{
@@ -1592,10 +1621,13 @@ async function loadEmailLog(){
   rows.forEach((r,i)=>{
     const m=r.meta||{};
     let det='';
-    if(r.stato==='error')det=`<span style="color:var(--danger)">${r.errore||''}</span>`;
+    if(r.stato==='run_start')det=`<span style="color:var(--ink-3)">Avvio invio reminder del ${m.giorno||''}</span>`;
+    else if(r.stato==='run_end')det=`<span style="color:var(--ink-3)">${m.destinatari||0} destinatari — <strong style="color:var(--ok)">${m.inviate||0} inviate</strong>${m.errori?`, <strong style="color:var(--danger)">${m.errori} errori</strong>`:''}</span>`;
+    else if(r.stato==='run_error')det=`<span style="color:var(--danger)">Crash: ${r.errore||''}</span>`;
+    else if(r.stato==='error')det=`<span style="color:var(--danger)">${r.errore||''}${m.responseCode?` (SMTP ${m.responseCode})`:''}</span>`;
     else if(r.stato==='skipped')det=`<span style="color:var(--ink-3)">${r.errore||''}</span>`;
     else if(r.tipo==='assenza')det=`<span style="color:var(--ink-3)">${m.risorsa||''} — ${m.tipo||''} ${m.dal||''}${m.al&&m.al!==m.dal?'→'+m.al:''}${m.overlap?' <strong style="color:var(--amber)">⚠ overlap</strong>':''}</span>`;
-    else det=`<span style="color:var(--ink-3)">giorno ${m.giorno||''}</span>`;
+    else det=`<span style="color:var(--ink-3)">giorno ${m.giorno||''}${m.response?` · <span title="${String(m.response).replace(/"/g,'&quot;')}">${String(m.response).slice(0,28)}</span>`:''}</span>`;
     h+=`<tr style="background:${i%2?'var(--stone)':'var(--white)'}">`;
     h+=`<td style="padding:5px 10px;white-space:nowrap;color:var(--ink-3)">${r.quando||''}</td>`;
     h+=`<td style="padding:5px 10px;white-space:nowrap">${TIPO_LBL[r.tipo]||r.tipo}</td>`;

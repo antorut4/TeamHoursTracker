@@ -317,6 +317,14 @@
       <!-- CONSUNTIVO -->
       <div class="panel" id="panel-consuntivo">
         <div class="page-header"><h1>Ore Consuntivate</h1><p>Ore giornaliere effettivamente lavorate (da reminder email)</p></div>
+        <div class="card" id="consuntivoNotifCard">
+          <div class="card-title"><i class="fa-regular fa-bell"></i> Promemoria email</div>
+          <label class="mgr-check-label" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="consuntivoNotifChk" onchange="toggleDailyReminder(this)"/>
+            <span>Ricevi ogni mattina l'email per registrare le ore del giorno precedente</span>
+          </label>
+          <div id="consuntivoNotifMsg" class="msg"></div>
+        </div>
         <div class="card">
           <div class="card-title"><i class="fa-solid fa-sliders"></i> Filtri</div>
           <div class="field-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
@@ -476,6 +484,9 @@
                   <option value="sent">Inviata</option>
                   <option value="error">Errore</option>
                   <option value="skipped">Saltata</option>
+                  <option value="run_start">Avvio run</option>
+                  <option value="run_end">Fine run</option>
+                  <option value="run_error">Crash run</option>
                 </select>
               </div>
               <div><button class="btn btn-ghost2" onclick="loadEmailLog()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>

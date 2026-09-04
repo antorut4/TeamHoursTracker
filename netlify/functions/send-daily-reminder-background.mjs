@@ -74,49 +74,86 @@ async function sendEmail(risorsa, dataISO) {
   const expLabel  = formatDateShortIT(expDate);
 
   const subject = `Ore di ieri — ${dateLabel}`;
-  await transporter.sendMail({
+  const info = await transporter.sendMail({
     from:    `${FROM_NAME} <${process.env.GMAIL_USER}>`,
     to:      risorsa.email,
     subject,
     html:    buildEmailHtml(firstName, risorsa.full_name, dateLabel, link, expLabel),
     text:    buildEmailText(firstName, risorsa.full_name, dateLabel, link, expLabel)
   });
-  return subject;
+  return { subject, info };
 }
 
 export const handler = async () => {
   const today = new Date();
   const dow   = today.getUTCDay();
+  const RUN   = '(sistema)';
+
+  // Weekend: tracciato esplicitamente, così "nessuna riga" non è mai ambiguo
   if (dow === 0 || dow === 6) {
     console.log('Weekend — nessuna email inviata');
+    await logEmail(RUN, null, null, 'skipped', 'Weekend — esecuzione saltata',
+                   { giorno: today.toISOString().split('T')[0], dow });
     return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: 'weekend' }) };
   }
 
   const dataISO = getPreviousWorkday(today);
   console.log(`Invio reminder per il giorno precedente: ${dataISO}`);
 
-  const risorse = await sql`
-    SELECT id, full_name, email
-    FROM risorse
-    WHERE email IS NOT NULL AND email <> ''
-    ORDER BY cognome, nome`;
+  // run_start senza run_end ⇒ la funzione è crashata o andata in timeout a metà
+  await logEmail(RUN, null, null, 'run_start', null, { giorno: dataISO });
 
-  const results = { sent: 0, errors: [] };
-  for (const r of risorse) {
-    try {
-      const subject = await sendEmail(r, dataISO);
-      results.sent++;
-      console.log(`✓ ${r.email}`);
-      await logEmail(r.email, r.full_name, subject, 'sent', null, { giorno: dataISO });
-    } catch (err) {
-      console.error(`✗ ${r.email}: ${err.message}`);
-      results.errors.push({ email: r.email, error: err.message });
-      await logEmail(r.email, r.full_name, `Ore di ieri — ${dataISO}`, 'error', err.message, { giorno: dataISO });
+  try {
+    const risorse = await sql`
+      SELECT id, full_name, email
+      FROM risorse
+      WHERE email IS NOT NULL AND email <> ''
+        AND COALESCE(daily_reminder, TRUE) = TRUE
+      ORDER BY cognome, nome`;
+
+    const results = { sent: 0, errors: [] };
+    for (const r of risorse) {
+      try {
+        const { subject, info } = await sendEmail(r, dataISO);
+        // sendMail risolve anche con destinatari rifiutati: va trattato come errore
+        const rejected = info?.rejected || [];
+        const meta = {
+          giorno:    dataISO,
+          messageId: info?.messageId || null,
+          response:  info?.response  || null,
+          accepted:  info?.accepted  || [],
+          rejected
+        };
+        if (rejected.length) {
+          results.errors.push({ email: r.email, error: 'destinatario rifiutato da SMTP' });
+          console.error(`✗ ${r.email}: rifiutato — ${info?.response || ''}`);
+          await logEmail(r.email, r.full_name, subject, 'error', 'Destinatario rifiutato da SMTP', meta);
+        } else {
+          results.sent++;
+          console.log(`✓ ${r.email} — ${info?.response || ''}`);
+          await logEmail(r.email, r.full_name, subject, 'sent', null, meta);
+        }
+      } catch (err) {
+        console.error(`✗ ${r.email}: ${err.message}`);
+        results.errors.push({ email: r.email, error: err.message });
+        await logEmail(r.email, r.full_name, `Ore di ieri — ${dataISO}`, 'error', err.message,
+                       { giorno: dataISO, code: err.code || null, responseCode: err.responseCode || null });
+      }
     }
-  }
 
-  console.log(`Fine: ${results.sent} inviate, ${results.errors.length} errori`);
-  return { statusCode: 200, body: JSON.stringify({ ok: true, dataISO, ...results }) };
+    console.log(`Fine: ${results.sent} inviate, ${results.errors.length} errori`);
+    await logEmail(RUN, null, null, 'run_end', null, {
+      giorno: dataISO, destinatari: risorse.length,
+      inviate: results.sent, errori: results.errors.length
+    });
+    return { statusCode: 200, body: JSON.stringify({ ok: true, dataISO, ...results }) };
+
+  } catch (err) {
+    // Crash prima o durante il loop (query risorse, SMTP non raggiungibile, ecc.)
+    console.error('[daily-reminder] crash:', err.message);
+    await logEmail(RUN, null, null, 'run_error', err.message, { giorno: dataISO });
+    return { statusCode: 500, body: JSON.stringify({ ok: false, dataISO, error: err.message }) };
+  }
 };
 
 // ── Versione testo puro (client senza HTML, screen reader, etc.) ──

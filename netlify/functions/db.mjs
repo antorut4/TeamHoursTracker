@@ -53,6 +53,8 @@ async function bootstrap(){
     created_at   TIMESTAMP DEFAULT NOW()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS email_log_created_idx ON email_log (created_at DESC)`;
+  // Reminder giornaliero: attivo di default per tutti (anche per le righe già esistenti)
+  await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS daily_reminder BOOLEAN NOT NULL DEFAULT TRUE`;
 
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
@@ -66,7 +68,7 @@ async function bootstrap(){
         LEFT JOIN risorse r ON ptl.risorsa_id = r.id
         GROUP BY p.id, p.nome, p.wbs
         ORDER BY p.nome`,
-    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost, daily_reminder FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
@@ -252,19 +254,30 @@ async function sendAbsenceNotification(p) {
   const destinatari = [];
   for (const tl of Object.values(tlByEmail)) {
     try {
-      await mailer.sendMail({
+      const info = await mailer.sendMail({
         from: `${FROM_NAME} <${GMAIL_USER}>`,
         to:   tl.email,
         subject, html, text
       });
-      sent++;
-      destinatari.push(tl.name);
-      console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
-      await _logEmail('assenza', tl.email, tl.name, subject, 'sent', null, meta);
+      const rejected = info?.rejected || [];
+      const infoMeta = { ...meta, messageId: info?.messageId || null,
+                         response: info?.response || null, rejected };
+      if (rejected.length) {
+        // sendMail risolve anche con destinatari rifiutati
+        failed++;
+        console.error(`[absence-notify] ✗ ${tl.email}: rifiutato — ${info?.response || ''}`);
+        await _logEmail('assenza', tl.email, tl.name, subject, 'error', 'Destinatario rifiutato da SMTP', infoMeta);
+      } else {
+        sent++;
+        destinatari.push(tl.name);
+        console.log(`[absence-notify] ✓ ${tl.email} — ${personName} ${p.tipo} ${p.start}→${p.end}`);
+        await _logEmail('assenza', tl.email, tl.name, subject, 'sent', null, infoMeta);
+      }
     } catch (err) {
       failed++;
       console.error(`[absence-notify] ✗ ${tl.email}: ${err.message}`);
-      await _logEmail('assenza', tl.email, tl.name, subject, 'error', err.message, meta);
+      await _logEmail('assenza', tl.email, tl.name, subject, 'error', err.message,
+                      { ...meta, code: err.code || null, responseCode: err.responseCode || null });
     }
   }
   return { sent, failed, destinatari, reason: failed && !sent ? 'error' : 'ok' };
@@ -556,6 +569,11 @@ async function toggleIsManager(p){
   await sql`UPDATE risorse SET is_manager=${!!p.value} WHERE id=${p.risorsaId}`;
 }
 
+// ── reminder giornaliero on/off per risorsa ──
+async function setDailyReminder(p){
+  await sql`UPDATE risorse SET daily_reminder=${!!p.value} WHERE id=${p.risorsaId}`;
+}
+
 async function saveRep(p){
   const [proj] = await sql`SELECT id FROM progetti WHERE nome=${p.progetto}`;
   if(!proj) throw new Error('Progetto non trovato: ' + p.progetto);
@@ -682,7 +700,7 @@ const ACTIONS = {
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
-  getConsuntivo, saveConsuntivo, getEmailLog
+  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder
 };
 
 export async function handler(event){
