@@ -146,6 +146,7 @@ async function initApp(){
   }
   if(isAdmin){['adminPrjCard','adminResByPrjCard','adminPwdCard','adminEmailLogCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
+    const sfBtn=document.getElementById('sollecitaForecastBtn');if(sfBtn)sfBtn.style.display='';
     await renderResourceList();
     // Nascondi i card riservati al super-admin (gestione progetti è visibile al manager, filtrata)
     ['adminResByPrjCard','adminPwdCard','adminEmailLogCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
@@ -260,6 +261,22 @@ async function deleteMyOre(id,label){
     showSpinner();try{await call('deleteOre',{id});await reloadAll();}catch(e){hideSpinner();showMsg('oreMsg','Errore: '+e.message,'err');return;}
     hideSpinner();showMsg('oreMsg','Ore eliminate.','ok');await renderMyOre();checkAlerts();
   },'Elimina');
+}
+async function sollecitaForecast(){
+  const r=RESOURCES.find(x=>x.fullName===currentUser);
+  if(!r){showMsg('sollecitaMsg','Risorsa non trovata.','err');return;}
+  showSpinner();
+  let res;
+  try{res=await call('sollecitaForecast',{managerId:r.id});}
+  catch(e){hideSpinner();showMsg('sollecitaMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();
+  if(res.reason==='no_smtp'){showMsg('sollecitaMsg','SMTP non configurato.','err');return;}
+  if(res.reason==='no_resources'){showMsg('sollecitaMsg','Nessuna risorsa nel tuo team con email configurata.','warn');return;}
+  if(res.reason==='all_complete'){showMsg('sollecitaMsg','Tutte le risorse hanno compilato il Forecast. ','ok');return;}
+  let msg=`Solleciti inviati: ${res.sent}`;
+  if(res.skipped)msg+=`, già completi: ${res.skipped}`;
+  if(res.failed)msg+=`, errori: ${res.failed}`;
+  showMsg('sollecitaMsg',msg,res.sent>0?'ok':'warn');
 }
 // RIEPILOGO
 async function loadRiepilogo(){

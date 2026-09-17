@@ -649,6 +649,208 @@ async function setAdminPwd(p){
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+//  Sollecito Forecast — invia email alle risorse con ore mancanti
+// ════════════════════════════════════════════════════════════════════════
+
+async function sollecitaForecast(p) {
+  const GMAIL_USER = process.env.GMAIL_USER;
+  const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
+  const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
+  const SITE_URL   = (process.env.SITE_URL || '').replace(/\/$/, '');
+  if (!GMAIL_USER || !GMAIL_PASS) return { sent: 0, reason: 'no_smtp' };
+
+  const [manager] = await sql`SELECT full_name FROM risorse WHERE id = ${p.managerId}`;
+  if (!manager) return { sent: 0, reason: 'no_manager' };
+  const managerName = manager.full_name;
+
+  // Quindicine attese: dall'inizio dell'anno corrente fino al mese corrente
+  const now          = new Date();
+  const currentYear  = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-based
+  const currentDay   = now.getDate();
+
+  const expected = [];
+  for (let m = 0; m <= currentMonth; m++) {
+    expected.push({ mese: m, q: 1 });
+    if (m < currentMonth || currentDay > 15) expected.push({ mese: m, q: 2 });
+  }
+
+  // Risorse del manager con email
+  const risorse = await sql`
+    SELECT id, full_name, email FROM risorse
+    WHERE manager_id = ${p.managerId}
+      AND email IS NOT NULL AND email <> ''
+    ORDER BY cognome, nome`;
+
+  if (!risorse.length) return { sent: 0, skipped: 0, reason: 'no_resources' };
+
+  // Ore forecast esistenti per l'anno corrente
+  const oreRows = await sql`
+    SELECT risorsa_id, mese, ore_q1, ore_q2
+    FROM ore_mensili
+    WHERE anno = ${currentYear}
+      AND risorsa_id IN (SELECT id FROM risorse WHERE manager_id = ${p.managerId})`;
+
+  const oreByRes = {};
+  oreRows.forEach(r => {
+    if (!oreByRes[r.risorsa_id]) oreByRes[r.risorsa_id] = {};
+    oreByRes[r.risorsa_id][r.mese] = { q1: r.ore_q1, q2: r.ore_q2 };
+  });
+
+  // Individua chi ha quindicine mancanti
+  const toNotify = [];
+  for (const risorsa of risorse) {
+    const oreR = oreByRes[risorsa.id] || {};
+    const hasMissing = expected.some(({ mese, q }) => {
+      const row = oreR[mese];
+      const val = row ? (q === 1 ? row.q1 : row.q2) : null;
+      return val === null || val === undefined;
+    });
+    if (hasMissing) toNotify.push(risorsa);
+  }
+
+  const skipped = risorse.length - toNotify.length;
+  if (!toNotify.length) return { sent: 0, skipped, reason: 'all_complete' };
+
+  const mailer  = _absenceTransporter();
+  const subject = 'URGENTE - Inserimento ore Forecast';
+  let sent = 0, failed = 0;
+  const destinatari = [];
+
+  for (const risorsa of toNotify) {
+    const html = _buildForecastSollecitaHtml(risorsa.full_name, managerName, SITE_URL);
+    const text = _buildForecastSollecitaText(risorsa.full_name, managerName, SITE_URL);
+    const meta = { risorsa: risorsa.full_name, manager: managerName };
+    try {
+      const info     = await mailer.sendMail({ from: `${FROM_NAME} <${GMAIL_USER}>`, to: risorsa.email, subject, html, text });
+      const rejected = info?.rejected || [];
+      if (rejected.length) {
+        failed++;
+        await _logEmail('sollecito_forecast', risorsa.email, risorsa.full_name, subject, 'error',
+                        'Destinatario rifiutato da SMTP', { ...meta, rejected });
+      } else {
+        sent++;
+        destinatari.push(risorsa.full_name);
+        await _logEmail('sollecito_forecast', risorsa.email, risorsa.full_name, subject, 'sent', null,
+                        { ...meta, messageId: info?.messageId || null });
+      }
+    } catch (err) {
+      failed++;
+      await _logEmail('sollecito_forecast', risorsa.email, risorsa.full_name, subject, 'error',
+                      err.message, { ...meta, code: err.code || null });
+    }
+  }
+
+  return { sent, failed, skipped, destinatari, reason: 'ok' };
+}
+
+function _buildForecastSollecitaText(risorsa, manager, siteUrl) {
+  return [
+    `Ciao ${risorsa},`,
+    '',
+    `${manager} ti sta sollecitando per l'inserimento delle ore Forecast.`,
+    '',
+    'Ti chiediamo di procedere con la compilazione delle ore mancanti accedendo al seguente link:',
+    siteUrl,
+    '',
+    'Grazie.',
+    '',
+    '---',
+    'Messaggio automatico generato da Team Hours Tracker.'
+  ].join('\n');
+}
+
+function _buildForecastSollecitaHtml(risorsa, manager, siteUrl) {
+  return `<!DOCTYPE html>
+<html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Inserimento ore Forecast</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<style>table{border-collapse:collapse;}</style>
+<![endif]-->
+<style>
+body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+@media(prefers-color-scheme:dark){
+  .dm-outer{background-color:#1e1e2e!important;}
+  .dm-card{background-color:#2a2a3e!important;}
+  .dm-body{background-color:#2a2a3e!important;}
+  .dm-foot{background-color:#222230!important;}
+  .dm-title{color:#e8e8e8!important;}
+  .dm-text{color:#cccccc!important;}
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+       class="dm-outer" style="background-color:#f0f2f5;">
+  <tr><td align="center" valign="top" style="padding:40px 16px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600"
+           class="dm-card" style="max-width:600px;width:100%;background-color:#ffffff;">
+      <!-- HEADER -->
+      <tr>
+        <td align="center" bgcolor="#A100FF" style="background-color:#A100FF;padding:28px 40px;">
+          <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">Team Hours Tracker</p>
+          <p style="margin:6px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;">Inserimento ore Forecast</p>
+        </td>
+      </tr>
+      <!-- BODY -->
+      <tr>
+        <td class="dm-body" style="background-color:#ffffff;padding:32px 40px 24px;">
+          <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;color:#111827;" class="dm-title">Ciao ${risorsa},</p>
+          <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
+            <strong>${manager}</strong> ti sta sollecitando per l'inserimento delle ore Forecast.
+          </p>
+          <p style="margin:0 0 28px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
+            Ti chiediamo di procedere con la compilazione delle ore mancanti accedendo al seguente link:
+          </p>
+          <!--[if mso]>
+          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml"
+            href="${siteUrl}" style="height:44px;v-text-anchor:middle;width:260px;"
+            arcsize="11%" stroke="f" fillcolor="#A100FF">
+            <w:anchorlock/>
+            <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;">
+              INSERISCI LE ORE FORECAST
+            </center>
+          </v:roundrect>
+          <![endif]-->
+          <!--[if !mso]><!-->
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td bgcolor="#A100FF" style="background-color:#A100FF;border-radius:5px;text-align:center;">
+                <a href="${siteUrl}"
+                   style="display:inline-block;padding:13px 32px;font-family:Arial,Helvetica,sans-serif;
+                          font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:5px;">
+                  INSERISCI LE ORE FORECAST
+                </a>
+              </td>
+            </tr>
+          </table>
+          <!--<![endif]-->
+          <p style="margin:28px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;" class="dm-text">Grazie.</p>
+        </td>
+      </tr>
+      <!-- FOOTER -->
+      <tr>
+        <td class="dm-foot" style="background-color:#f8f8f8;padding:16px 40px;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#9ca3af;text-align:center;">
+            Messaggio automatico generato da Team Hours Tracker.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
 // ── email log: ultime N righe, filtrabili per tipo/stato ──
 async function getEmailLog(p){
   const limit = Math.min(+p.limit || 100, 500);
@@ -700,7 +902,7 @@ const ACTIONS = {
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
-  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder
+  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast
 };
 
 export async function handler(event){

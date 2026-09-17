@@ -127,6 +127,8 @@
             <div class="field" style="max-width:170px"><label>Mese</label><select id="oreMonth"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="oreYear"></select></div>
             <div><button class="btn btn-ghost2" onclick="loadOreForm()"><i class="fa-solid fa-rotate"></i> Carica</button></div>
+            <div id="sollecitaForecastBtn" style="display:none"><button class="btn btn-amber" onclick="sollecitaForecast()"><i class="fa-solid fa-paper-plane"></i> Sollecita Forecast</button></div>
+            <div id="sollecitaMsg" class="msg"></div>
           </div>
           <div id="oreInfoBox" class="info-box"></div>
           <div class="q-row" style="margin-bottom:14px">
@@ -476,6 +478,7 @@
                   <option value="">Tutti</option>
                   <option value="daily_reminder">Reminder ore</option>
                   <option value="assenza">Notifica assenza</option>
+                  <option value="sollecito_forecast">Sollecito Forecast</option>
                 </select>
               </div>
               <div class="field" style="max-width:150px"><label>Stato</label>
