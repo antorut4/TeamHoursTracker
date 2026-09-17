@@ -127,8 +127,6 @@
             <div class="field" style="max-width:170px"><label>Mese</label><select id="oreMonth"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="oreYear"></select></div>
             <div><button class="btn btn-ghost2" onclick="loadOreForm()"><i class="fa-solid fa-rotate"></i> Carica</button></div>
-            <div id="sollecitaForecastBtn" style="display:none"><button class="btn btn-amber" onclick="sollecitaForecast()"><i class="fa-solid fa-paper-plane"></i> Sollecita Forecast</button></div>
-            <div id="sollecitaMsg" class="msg"></div>
           </div>
           <div id="oreInfoBox" class="info-box"></div>
           <div class="q-row" style="margin-bottom:14px">
@@ -181,6 +179,8 @@
             <div class="field" style="max-width:100px"><label>Anno</label><select id="riepilogoYear"></select></div>
             <div class="field" style="max-width:190px"><label>Team Lead</label><select id="riepilogoLead" onchange="loadRiepilogo()"><option value="">Tutti</option></select></div>
             <div><button class="btn btn-ghost2" onclick="loadRiepilogo()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+            <div id="sollecitaForecastBtn" style="display:none"><button class="btn btn-amber" onclick="sollecitaForecast()"><i class="fa-solid fa-paper-plane"></i> Sollecita Forecast</button></div>
+            <div id="sollecitaMsg" class="msg"></div>
           </div>
           <div class="table-wrap" id="riepilogoTable"></div>
           <div style="margin-top:13px;display:flex;align-items:center;gap:12px"><button class="btn btn-amber" onclick="exportExcel()"><i class="fa-solid fa-file-excel"></i> Esporta Excel</button><span id="exportMsg" class="msg"></span></div>
