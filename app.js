@@ -9,7 +9,7 @@ async function call(action,payload){
   return j.data;
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
-let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{}};
+let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};
 let _prjIdByName={},_prjNameById={},_prjTLsByName={},_prjWbsByName={};
 function _read(key,fallback){switch(key){case K_RES:return _cache.res;case K_PRJ:return _cache.prj;case K_HRS:return _cache.hrs;case K_FER:return _cache.fer;case K_REP:return _cache.rep;default:return fallback;}}
 function _write(){}
@@ -32,7 +32,8 @@ async function reloadAll(){
   _cache.wbs=d.wbs||{};
   _cache.repTipi=d.repTipi||{};
   _cache.aree=(d.aree||[]).map(a=>({id:+a.id,progettoId:+a.progetto_id,nome:a.nome,teamLeadId:a.team_lead_id?+a.team_lead_id:null,attiva:a.attiva!==false}));
-  _cache.soglie={};(d.soglie||[]).forEach(s=>{_cache.soglie[s.progetto_id]={soglia:+s.soglia,attiva:s.attiva!==false,destinatari:s.destinatari||''};});
+  // Soglie: area_id nullo = soglia di progetto, altrimenti soglia della singola area
+  _cache.soglie={};_cache.soglieArea={};(d.soglie||[]).forEach(s=>{const v={soglia:s.soglia!=null?+s.soglia:null,sogliaEe:s.soglia_ee!=null?+s.soglia_ee:null,attiva:s.attiva!==false,destinatari:s.destinatari||''};if(s.area_id)_cache.soglieArea[s.area_id]=v;else _cache.soglie[s.progetto_id]=v;});
 }
 async function reloadAll2(){return reloadAll();}
 async function getProjects(){return _cache.prj.slice();}
@@ -127,8 +128,9 @@ async function launchApp(){
   navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
   if(isAdmin||isTeamLead)showTab('dashboard');else showTab('ore');
-  // Deep link dalle email (es. alert soglia → ?tab=andamento)
-  const qTab=new URLSearchParams(location.search).get('tab');
+  // Deep link dalle email (es. alert soglia → ?tab=andamento&prj=ID&area=ID)
+  const qs=new URLSearchParams(location.search),qTab=qs.get('tab');
+  if(qTab==='andamento'&&+qs.get('prj'))_andSel={pid:+qs.get('prj'),areaId:+qs.get('area')||null};
   if(qTab&&NAV_MAP[qTab]&&document.getElementById(NAV_MAP[qTab])?.style.display!=='none')showTab(qTab);
 }
 // INIT
@@ -1617,23 +1619,41 @@ function _renderConsuntivoTeam(rows,month,year){
 }
 
 // ANDAMENTO PROGETTO
-// Serie L1/L2/L3: colori validati (dataviz) + forma del marker come codifica secondaria
+// Serie L1/L2/L3: colori validati (dataviz) + forma del marker come codifica secondaria.
+// Il Totale è una somma, non una categoria: linea neutra in inchiostro con marker a rombo.
 const TK_LV=[{k:'l1',l:'L1',c:'#A100FF',m:'circle'},{k:'l2',l:'L2',c:'#1f6fc9',m:'square'},{k:'l3',l:'L3',c:'#d95926',m:'triangle'}];
+const TK_TOT={k:'totale',l:'Totale',c:'#3D3D3D',m:'diamond',tot:true};
+const EE_C='#A100FF',EE_C_HOVER='#7500C0',THR_C='#C9003C';
 function _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function _fmtNum(n){return Number(n).toLocaleString('it-IT');}
+function _r2(n){return Math.round(Number(n)*100)/100;}
+function _fmtOre(n){return _r2(n).toLocaleString('it-IT',{maximumFractionDigits:2})+' h';}
+function _fmtPct(v){return v==null?'—':v.toLocaleString('it-IT',{maximumFractionDigits:1})+'%';}
 function _me(){return isAdmin?null:(RESOURCES.find(r=>r.fullName===currentUser)||null);}
 function _myAree(){const me=_me();return me?_cache.aree.filter(a=>a.teamLeadId===me.id&&a.attiva):[];}
-// Progetti visibili: admin tutti; altrimenti allocazioni + aree di cui è TL + progetti di cui è TL + progetti del team (manager)
-function _andProjects(){
-  if(isAdmin)return(_cache.prj||[]).slice().sort();
-  const me=_me();if(!me)return[];
-  const s=new Set(me.progetti||[]);
-  _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>{const n=_prjNameById[a.progettoId];if(n)s.add(n);});
-  Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))s.add(p);});
-  if(isTeamLead)_getManagerProjects().forEach(p=>s.add(p));
-  return(_cache.prj||[]).filter(p=>s.has(p)).sort();
+function _prjAree(pid){return _cache.aree.filter(a=>a.progettoId===pid);}
+// Progetto con più aree: soglie e dati gestiti a livello di area
+function _isMultiArea(pid){return _prjAree(pid).length>1;}
+// Visibilità: admin tutti i progetti; manager i progetti delle proprie risorse; Team Lead solo i progetti
+// di cui è TL (tutte le aree) oppure, se TL d'area, le sole aree di cui è responsabile.
+// Map progettoId → null (progetto intero) | Set di areaId
+function _andScope(){
+  const sc=new Map(),full=pid=>{if(pid)sc.set(pid,null);};
+  if(isAdmin){(_cache.prj||[]).forEach(p=>full(_prjIdByName[p]));return sc;}
+  const me=_me();if(!me)return sc;
+  Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))full(_prjIdByName[p]);});
+  if(isTeamLead)_getManagerProjects().forEach(p=>full(_prjIdByName[p]));
+  _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>{
+    if(sc.has(a.progettoId)&&sc.get(a.progettoId)===null)return;
+    if(!sc.has(a.progettoId))sc.set(a.progettoId,new Set());
+    sc.get(a.progettoId).add(a.id);
+  });
+  // TL di tutte le aree del progetto = visibilità sull'intero progetto
+  sc.forEach((s,pid)=>{if(s&&_prjAree(pid).every(a=>s.has(a.id)))sc.set(pid,null);});
+  return sc;
 }
-// Soglia modificabile da: admin, TL del progetto, TL di un'area del progetto, manager con risorse sul progetto
+function _andProjects(){return[..._andScope().keys()].map(pid=>_prjNameById[pid]).filter(Boolean).sort();}
+// Soglia di progetto modificabile da: admin, TL del progetto, TL di un'area del progetto, manager con risorse sul progetto
 function _canEditSoglia(prj){
   if(isAdmin)return true;
   const me=_me();if(!me)return false;
@@ -1642,7 +1662,39 @@ function _canEditSoglia(prj){
   if(_cache.aree.some(a=>a.progettoId===pid&&a.teamLeadId===me.id))return true;
   return isTeamLead&&_getManagerProjects().includes(prj);
 }
-let _andCharts=[],_andTkInit=false;
+// Soglia d'area modificabile da: admin, TL dell'area, TL del progetto, manager con risorse sul progetto
+function _canEditAreaSoglia(a){
+  if(isAdmin)return true;
+  const me=_me();if(!me)return false;
+  const prj=_prjNameById[a.progettoId];
+  return a.teamLeadId===me.id||(_prjTLsByName[prj]||[]).includes(currentUser)||(isTeamLead&&_getManagerProjects().includes(prj));
+}
+let _andSel={pid:null,areaId:null},_andData=null,_andAutoOpen=true,_andCharts=[],_andTkInit=false,_andEeMode=S.get('andEeMode')==='n'?'n':'ore';
+const _AND_EMPTY=Object.freeze({l1:0,l2:0,l3:0,totale:0,giorni:0,ultimo:null,ee:0,een:0,tk:false});
+// Riga dati visibile nello scope dell'utente
+function _andVis(sc,r){const pid=+r.progetto_id;if(!sc.has(pid))return false;const s=sc.get(pid);return!s||s.has(+r.area_id);}
+// Indice dei dati per progetto|area|mese ('*' = somma delle aree visibili del progetto)
+function _andBuild(d,sc){
+  const m={};
+  const add=(r,f)=>{const key=r.anno+'-'+r.mese;[r.area_id,'*'].forEach(a=>{const k=`${r.progetto_id}|${a}|${key}`;f(m[k]||(m[k]={..._AND_EMPTY}));});};
+  d.tickets.filter(r=>_andVis(sc,r)).forEach(r=>add(r,z=>{TK_LV.forEach(s=>{z[s.k]+=r[s.k];});z.totale+=r.totale;z.giorni+=r.giorni;z.tk=true;if(!z.ultimo||r.ultimo>z.ultimo)z.ultimo=r.ultimo;}));
+  d.ee.filter(r=>_andVis(sc,r)).forEach(r=>add(r,z=>{z.ee=_r2(z.ee+r.ore);z.een+=r.n;}));
+  return(pid,aid,y,mo)=>m[`${pid}|${aid==null?'*':aid}|${y}-${mo}`]||_AND_EMPTY;
+}
+// % L1/L2/L3 sul totale del mese, a 1 decimale con il metodo del resto maggiore: la somma è sempre 100
+function _lvPct(r){
+  if(!r.totale)return null;
+  const raw=TK_LV.map(s=>r[s.k]*1000/r.totale),fl=raw.map(Math.floor);
+  let rest=1000-fl.reduce((a,b)=>a+b,0);
+  raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]).forEach(([,i])=>{if(rest>0){fl[i]++;rest--;}});
+  return fl.map(v=>v/10);
+}
+// Aree mostrate: nello scope dell'utente, attive o con dati nel mese selezionato
+function _andAree(pid){
+  const D=_andData,s=D.sc.get(pid);
+  return _prjAree(pid).filter(a=>{if(s&&!s.has(a.id))return false;const r=D.get(pid,a.id,D.year,D.month);return a.attiva||r.tk||r.een;}).sort((a,b)=>a.nome.localeCompare(b.nome,'it'));
+}
+function _andRestricted(pid){return!!(_andData&&_andData.sc.get(pid));}
 async function renderAndamento(){
   const el=document.getElementById('andamentoContent');if(!el)return;
   const month=+document.getElementById('andMonth').value,year=+document.getElementById('andYear').value,n=+document.getElementById('andMesi').value;
@@ -1656,47 +1708,252 @@ async function renderAndamento(){
       loadTicketDay().catch(console.error);
     }
   }
-  const prjs=_andProjects();
-  if(!prjs.length){el.innerHTML='<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Nessun progetto associato.</p></div>';return;}
+  const sc=_andScope();
+  const prjs=[...sc.keys()].filter(pid=>_prjNameById[pid]).sort((a,b)=>_prjNameById[a].localeCompare(_prjNameById[b],'it'));
+  if(!prjs.length){_andData=null;_andNavOpts();el.innerHTML='<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Nessun progetto di cui sei Team Lead.</p></div>';return;}
   showSpinner();let d;
-  try{d=await call('getAndamento',{progettoIds:prjs.map(p=>_prjIdByName[p]),anno:year,mese:month,mesi:n});}
+  try{d=await call('getAndamento',{scope:prjs.map(pid=>({progettoId:pid,areaIds:sc.get(pid)?[...sc.get(pid)]:null})),anno:year,mese:month,mesi:n});}
   catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
-  const periods=[];for(let i=n-1;i>=0;i--){let m=month-i,y=year;while(m<0){m+=12;y--;}periods.push({m,y});}
-  const byPrj={};d.mensili.forEach(r=>{(byPrj[r.progetto_id]=byPrj[r.progetto_id]||{})[r.anno+'-'+r.mese]=r;});
-  const byArea={};d.perArea.forEach(r=>{byArea[r.area_id]=r;});
-  const alertBy={};d.alert.forEach(a=>{(alertBy[a.progetto_id]=alertBy[a.progetto_id]||[]).push(a);});
-  _andCharts=[];
-  el.innerHTML=prjs.map(p=>{
-    const pid=_prjIdByName[p],recs=byPrj[pid]||{};
-    const pts=periods.map(({m,y})=>recs[y+'-'+m]||null);
-    const chart={id:'andCv-'+pid,labels:periods.map(({m,y})=>MONTHS[m].slice(0,3)+' '+String(y).slice(2)),full:periods.map(({m,y})=>MONTHS[m]+' '+y),has:pts.map(Boolean),
-      series:TK_LV.map(s=>({...s,data:pts.map(r=>r?r[s.k]:0)}))};
-    _andCharts.push(chart);
-    const cur=recs[year+'-'+month]||{l1:0,l2:0,l3:0,totale:0,registrazioni:0};
-    const lbl=MONTHS[month]+' '+year;
-    const sumHtml=`<div class="and-sum"><div class="and-sum-title">Ticket ${lbl}</div>
-      <div class="and-lv">${TK_LV.map(s=>`<div><small>${_mkSvg(s,10)}${s.l}</small><b>${_fmtNum(cur[s.k])}</b></div>`).join('')}</div>
-      <div class="and-tot"><span style="font-size:.78rem;color:var(--ink-3);font-weight:600">Totale</span><b>${_fmtNum(cur.totale)}</b></div>
-      ${cur.registrazioni?'':'<div style="font-size:.72rem;color:var(--ink-3);margin-top:6px"><i class="fa-regular fa-circle-question" style="margin-right:4px"></i>Nessun dato registrato nel mese</div>'}
-      ${_thrHtml(p,pid,cur.totale,lbl,alertBy[pid]||[])}</div>`;
-    const tableRows=periods.map(({m,y},i)=>`<tr><td>${MONTHS[m]} ${y}</td>${pts[i]?TK_LV.map(s=>`<td class="and-num">${_fmtNum(pts[i][s.k])}</td>`).join('')+`<td class="and-num"><b>${_fmtNum(pts[i].totale)}</b></td>`:'<td colspan="4" style="color:var(--ink-3);text-align:center">nessun dato</td>'}</tr>`).join('');
-    const aree=_cache.aree.filter(a=>a.progettoId===pid&&(a.attiva||byArea[a.id]));
-    const areeHtml=aree.length?`<div class="and-areas"><div class="and-sum-title">Dettaglio per area — ${lbl}</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Team Lead</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">Giorni inseriti</th><th>Ultimo</th></tr></thead><tbody>${aree.map(a=>{const r=byArea[a.id];const tl=a.teamLeadId?(RESOURCES.find(x=>x.id===a.teamLeadId)?.fullName||'—'):'—';return `<tr><td><b>${_esc(a.nome)}</b>${a.attiva?'':' <span class="badge badge-warn" style="font-size:.65rem">non attiva</span>'}</td><td style="color:var(--ink-3)">${_esc(tl)}</td>${r?TK_LV.map(s=>`<td class="and-num">${_fmtNum(r[s.k])}</td>`).join('')+`<td class="and-num"><b>${_fmtNum(r.totale)}</b></td><td class="and-num">${r.giorni}</td><td style="color:var(--ink-3)">${fmt(r.ultimo)}</td>`:`<td colspan="5" style="color:var(--ink-3);text-align:center">nessun dato</td><td>—</td>`}</tr>`;}).join('')}</tbody></table></div></div>`
-      :'<p style="font-size:.78rem;color:var(--ink-3);margin-top:14px"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessuna area configurata per questo progetto.</p>';
+  _andData={d,sc,prjs,year,month,n,get:_andBuild(d,sc),lbl:MONTHS[month]+' '+year};
+  if(_andSel.pid&&!sc.has(_andSel.pid))_andSel={pid:null,areaId:null};
+  if(_andSel.areaId&&!_andAree(_andSel.pid).some(a=>a.id===_andSel.areaId))_andSel.areaId=null;
+  // Con un solo progetto visibile si apre direttamente il dettaglio (solo al primo accesso)
+  if(_andAutoOpen&&!_andSel.pid&&prjs.length===1)_andSel={pid:prjs[0],areaId:null};
+  _andAutoOpen=false;
+  _andDraw();
+}
+function _andDraw(){
+  const el=document.getElementById('andamentoContent');if(!el||!_andData)return;
+  _andNavOpts();_andCharts=[];
+  el.innerHTML=_andSel.pid?_andDetailHtml(_andSel.pid,_andSel.areaId):_andOverviewHtml();
+  requestAnimationFrame(()=>_andCharts.forEach(c=>c.init(c)));
+}
+// ── navigazione: panoramica → progetto → area ──
+function _andNavOpts(){
+  const D=_andData,o=[{v:'',l:'Panoramica — tutti i progetti'}];
+  if(D)D.prjs.forEach(pid=>{o.push({v:'p:'+pid,l:_prjNameById[pid]});if(_isMultiArea(pid))_andAree(pid).forEach(a=>o.push({v:`a:${pid}:${a.id}`,l:' ↳ '+a.nome}));});
+  popSel('andNav',o,_andSel.pid?(_andSel.areaId?`a:${_andSel.pid}:${_andSel.areaId}`:'p:'+_andSel.pid):'');
+}
+function andNavChange(v){const[t,p,a]=String(v||'').split(':');andGo(t?+p:null,t==='a'?+a:null);}
+function andGo(pid,aid){
+  _andSel={pid:pid||null,areaId:aid||null};_andDraw();
+  document.getElementById('andamentoContent')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+// ── soglie ──
+function _thrCfg(pid,aid){return aid?_cache.soglieArea[aid]:_cache.soglie[pid];}
+// Stato soglia: 'none' | 'off' | 'ok' | 'near' | 'hit' | 'over'
+function _thrEval(cfg,kind,tot){
+  const v=cfg?(kind==='ee'?cfg.sogliaEe:cfg.soglia):null;
+  if(!v)return{st:'none'};
+  if(!cfg.attiva)return{st:'off',soglia:v};
+  const t=_r2(tot),pct=t/v*100;
+  return{st:t>v?'over':t===v?'hit':pct>=80?'near':'ok',soglia:v,pct};
+}
+function _thrActive(ev){return['ok','near','hit','over'].includes(ev.st);}
+const _THR_KIND={ticket:{l:'ticket',u:v=>_fmtNum(v)+' ticket',n:v=>_fmtNum(v)},ee:{l:'Extra Effort',u:_fmtOre,n:_fmtOre}};
+function _andAlert(kind,pid,aid,soglia){
+  return(_andData?.d.alert||[]).find(a=>a.kind===kind&&+a.progetto_id===pid&&(a.area_id==null?null:+a.area_id)===(aid||null)&&+a.soglia===+soglia&&a.stato==='sent')||null;
+}
+function _thrBadge(ev,kind){
+  const K=_THR_KIND[kind].l;
+  if(ev.st==='over')return `<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>Soglia ${K} superata</span>`;
+  if(ev.st==='hit')return `<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>Soglia ${K} raggiunta</span>`;
+  if(ev.st==='near')return `<span class="badge badge-warn"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px"></i>Vicino alla soglia ${K}</span>`;
+  return '';
+}
+// Badge di stato di uno scope (progetto o area); le soglie di progetto non valgono per chi vede solo alcune aree
+function _andBadges(pid,aid,r){
+  if(!aid&&_andRestricted(pid))return '';
+  const cfg=_thrCfg(pid,aid);
+  return _thrBadge(_thrEval(cfg,'ticket',r.totale),'ticket')+_thrBadge(_thrEval(cfg,'ee',r.ee),'ee');
+}
+function _thrMeter(ev,kind,tot,lbl,alert){
+  const K=_THR_KIND[kind];
+  if(ev.st==='none')return `<div class="thr thr-none"><i class="fa-solid fa-gauge" style="margin-right:5px"></i>Nessuna soglia ${K.l} configurata</div>`;
+  if(ev.st==='off')return `<div class="thr thr-none"><i class="fa-solid fa-pause" style="margin-right:5px"></i>Soglia ${K.l} di ${K.u(ev.soglia)} disattivata</div>`;
+  const cls=ev.st==='ok'?'thr-ok':ev.st==='near'?'thr-warn':'thr-danger';
+  const icon=ev.st==='ok'?'fa-circle-check':ev.st==='near'?'fa-circle-exclamation':'fa-triangle-exclamation';
+  const msg=ev.st==='over'?`Soglia ${K.l} superata di ${K.u(_r2(tot-ev.soglia))}`:ev.st==='hit'?`Soglia ${K.l} raggiunta`:`${ev.pct.toFixed(1).replace('.',',').replace(',0','')}% della soglia ${K.l}`;
+  return `<div class="thr ${cls}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px"><span style="font-weight:600"><i class="fa-solid ${icon}" style="margin-right:5px"></i>${msg}</span><b style="font-variant-numeric:tabular-nums;white-space:nowrap">${K.n(tot)} / ${K.n(ev.soglia)}</b></div>
+    <div class="thr-bar"><i style="width:${Math.min(100,ev.pct)}%"></i></div>
+    <div style="font-size:.7rem;opacity:.85">Soglia mensile ${lbl}${alert?` · <i class="fa-solid fa-envelope" style="margin:0 3px"></i>alert inviato il ${alert.quando}`:''}</div></div>`;
+}
+function _andThrMeters(pid,aid,r){
+  const cfg=_thrCfg(pid,aid),D=_andData;
+  if(!aid&&_isMultiArea(pid)&&!cfg)return `<div class="thr thr-none"><i class="fa-solid fa-sitemap" style="margin-right:5px"></i>Progetto con più aree: le soglie si gestiscono per singola area</div>`;
+  return['ticket','ee'].map(k=>{const tot=k==='ee'?r.ee:r.totale,ev=_thrEval(cfg,k,tot);return _thrMeter(ev,k,tot,D.lbl,ev.soglia!=null?_andAlert(k,pid,aid,ev.soglia):null);}).join('');
+}
+// Indicatore compatto per le tabelle (icona + testo: lo stato non è affidato al solo colore)
+function _thrPill(cfg,kind,tot){
+  const ev=_thrEval(cfg,kind,tot);if(ev.st==='none')return '';
+  const K=_THR_KIND[kind],cls=ev.st==='off'?'':ev.st==='ok'?'badge-ok':ev.st==='near'?'badge-warn':'badge-danger';
+  const ic=ev.st==='over'||ev.st==='hit'?'<i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>':'';
+  return `<span class="badge ${cls} and-pill" title="Soglia ${K.l}${ev.st==='off'?' (disattivata)':''}">${ic}${kind==='ee'?'EE':'Ticket'} ${K.n(tot)} / ${K.n(ev.soglia)}</span>`;
+}
+function _thrEditor(pid,aid){
+  const cfg=_thrCfg(pid,aid),id=`${pid}-${aid||0}`;
+  return `<div class="thr-edit">
+      <label class="thr-f"><span>Soglia ticket / mese</span><input type="number" min="1" step="1" id="thrTk-${id}" value="${cfg&&cfg.soglia!=null?cfg.soglia:''}" placeholder="es. 40"/></label>
+      <label class="thr-f"><span>Soglia Extra Effort (h)</span><input type="number" min="0.25" step="0.25" id="thrEe-${id}" value="${cfg&&cfg.sogliaEe!=null?cfg.sogliaEe:''}" placeholder="es. 40"/></label>
+    </div>
+    <div class="thr-edit"><button class="btn btn-ink btn-sm" onclick="saveThr(${pid},${aid||0})"><i class="fa-solid fa-floppy-disk"></i> Salva soglie</button>
+      ${cfg?`<button class="btn btn-ghost2 btn-sm" onclick="saveThr(${pid},${aid||0},${!cfg.attiva})">${cfg.attiva?'Disattiva':'Riattiva'}</button><button class="btn-icon danger" title="Rimuovi soglie" onclick="removeThr(${pid},${aid||0})"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button>`:''}
+    </div><div id="thrMsg-${id}" class="msg" style="margin-top:8px"></div>`;
+}
+function _thrInput(raw,int){
+  const v=String(raw??'').trim().replace(',','.');if(!v)return{v:null};
+  const n=Number(v);if(!Number.isFinite(n)||n<=0||(int&&!Number.isInteger(n)))return{bad:true};
+  return{v:int?n:_r2(n)};
+}
+function _sogliaCheckMsg(res){
+  const cs=(res&&res.checks)||[],nm=l=>l.map(c=>_THR_KIND[c.kind]?.l||'ticket').join(' e ');
+  const sent=cs.filter(c=>c.status==='alert_sent'),already=cs.filter(c=>c.status==='already_sent'),failed=cs.filter(c=>c.status==='alert_failed');
+  let m='Soglie salvate.';
+  if(sent.length)m+=` Il mese corrente supera già la soglia ${nm(sent)}: alert email inviato.`;
+  if(already.length)m+=` Soglia ${nm(already)} già superata: alert per questo valore già inviato in precedenza.`;
+  if(failed.length)m+=` Soglia ${nm(failed)} superata, ma invio alert non riuscito (${failed[0].reason||'errore'}): verrà ritentato al prossimo inserimento.`;
+  return m;
+}
+async function saveThr(pid,aid,attiva){
+  aid=aid||null;
+  const id=`${pid}-${aid||0}`,me=_me(),cur=_thrCfg(pid,aid);
+  const payload={progettoId:pid,areaId:aid,risorsaId:me?me.id:null};
+  if(attiva===undefined){
+    const tk=_thrInput(document.getElementById('thrTk-'+id)?.value,true),ee=_thrInput(document.getElementById('thrEe-'+id)?.value,false);
+    if(tk.bad){showMsg('thrMsg-'+id,'La soglia ticket deve essere un numero intero maggiore di zero.','err');return;}
+    if(ee.bad){showMsg('thrMsg-'+id,'La soglia Extra Effort deve essere un numero di ore maggiore di zero.','err');return;}
+    if(tk.v==null&&ee.v==null){showMsg('thrMsg-'+id,'Inserisci almeno una soglia (ticket o Extra Effort).','err');return;}
+    Object.assign(payload,{soglia:tk.v,sogliaEe:ee.v,attiva:cur?cur.attiva:true});
+  }else payload.attiva=attiva;
+  showSpinner();let res;
+  try{res=await call('saveSoglia',payload);await reloadAll();}
+  catch(e){hideSpinner();showMsg('thrMsg-'+id,'Errore: '+e.message,'err');return;}
+  hideSpinner();await renderAndamento();if(isAdmin)renderSoglieList();
+  showMsg('thrMsg-'+id,attiva===false?'Soglie disattivate.':_sogliaCheckMsg(res),(res?.checks||[]).some(c=>c.status==='alert_failed')?'err':'ok');
+}
+function removeThr(pid,aid){
+  aid=aid||null;
+  const a=aid?_cache.aree.find(x=>x.id===aid):null,nome=(_prjNameById[pid]||'')+(a?' / '+a.nome:'');
+  openModal('Rimuovi soglie','Rimuovere le soglie mensili (ticket ed Extra Effort) di "'+nome+'"?',async()=>{
+    showSpinner();try{await call('saveSoglia',{progettoId:pid,areaId:aid,soglia:null,sogliaEe:null});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}
+    hideSpinner();if(document.getElementById('panel-andamento').classList.contains('active'))await renderAndamento();if(isAdmin)renderSoglieList();
+  },'Rimuovi');
+}
+// ── viste ──
+function _andKpis(r){
+  const pc=_lvPct(r);
+  return `<div class="and-kpis">
+    ${TK_LV.map((s,i)=>`<div class="and-kpi"><small>${_mkSvg(s,10)}${s.l}</small><b>${_fmtNum(r[s.k])}</b><span>${_fmtPct(pc&&pc[i])}</span></div>`).join('')}
+    <div class="and-kpi and-kpi-tot"><small>Totale ticket</small><b>${_fmtNum(r.totale)}</b><span>${r.totale?'100%':'—'}</span></div>
+    <div class="and-kpi and-kpi-ee"><small><i class="fa-solid fa-stopwatch"></i> Extra Effort</small><b>${_fmtOre(r.ee)}</b><span>${_fmtNum(r.een)} attività</span></div>
+  </div>`;
+}
+function _andAreaTable(pid,aree){
+  const D=_andData;
+  return `<div class="and-areas"><div class="and-sum-title">Dettaglio per area — ${D.lbl}</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Team Lead</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">Extra Effort</th><th>Soglie</th><th class="and-num">Giorni inseriti</th><th>Ultimo</th><th></th></tr></thead><tbody>${aree.map(a=>{
+    const r=D.get(pid,a.id,D.year,D.month),pc=_lvPct(r),cfg=_thrCfg(pid,a.id);
+    const tl=a.teamLeadId?(RESOURCES.find(x=>x.id===a.teamLeadId)?.fullName||'—'):'—';
+    const pills=_thrPill(cfg,'ticket',r.totale)+_thrPill(cfg,'ee',r.ee);
+    return `<tr class="and-row-link" tabindex="0" onclick="andGo(${pid},${a.id})" onkeydown="if(event.key==='Enter')andGo(${pid},${a.id})" title="Apri il dettaglio dell'area">
+      <td><b>${_esc(a.nome)}</b>${a.attiva?'':' <span class="badge badge-warn" style="font-size:.65rem">non attiva</span>'}</td>
+      <td style="color:var(--ink-3)">${_esc(tl)}</td>
+      ${TK_LV.map((s,i)=>`<td class="and-num">${_fmtNum(r[s.k])}<small class="and-pct">${_fmtPct(pc&&pc[i])}</small></td>`).join('')}
+      <td class="and-num"><b>${_fmtNum(r.totale)}</b></td>
+      <td class="and-num">${_fmtOre(r.ee)}<small class="and-pct">${_fmtNum(r.een)} att.</small></td>
+      <td><div class="and-pills">${pills||'<span style="color:var(--ink-3)">—</span>'}</div></td>
+      <td class="and-num">${r.giorni}</td>
+      <td style="color:var(--ink-3);white-space:nowrap">${r.ultimo?fmt(r.ultimo):'—'}</td>
+      <td style="white-space:nowrap"><span class="and-go">Dettaglio <i class="fa-solid fa-chevron-right"></i></span></td>
+    </tr>`;}).join('')}</tbody></table></div></div>`;
+}
+function _andOverviewHtml(){
+  const D=_andData;
+  return D.prjs.map(pid=>{
+    const p=_prjNameById[pid],r=D.get(pid,null,D.year,D.month),multi=_isMultiArea(pid),restr=_andRestricted(pid),aree=_andAree(pid);
+    const overAree=multi?aree.filter(a=>{const ar=D.get(pid,a.id,D.year,D.month),cfg=_thrCfg(pid,a.id);return['hit','over'].includes(_thrEval(cfg,'ticket',ar.totale).st)||['hit','over'].includes(_thrEval(cfg,'ee',ar.ee).st);}).length:0;
     return `<div class="card">
-      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}</div>${_thrBadge(pid,cur.totale)}</div>
-      <div class="and-grid">
-        <div class="and-chart-wrap"><canvas id="${chart.id}" role="img" aria-label="Andamento ticket L1, L2, L3 di ${_esc(p)}"></canvas><div class="and-tip" id="${chart.id}-tip"></div>
-          <div class="and-legend">${TK_LV.map(s=>`<span>${_mkSvg(s,12,true)}${s.l}</span>`).join('')}<span style="color:var(--ink-3)">${_mkSvg({c:'#8C8C8C',m:'circle'},10,false,true)}mese senza dati</span></div>
-          <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th></tr></thead><tbody>${tableRows}</tbody></table></div></details>
-        </div>
-        ${sumHtml}
+      <div class="and-head">
+        <button class="and-title-link" onclick="andGo(${pid})" title="Apri il dettaglio del progetto"><i class="fa-solid fa-folder-open"></i> ${_esc(p)} <i class="fa-solid fa-chevron-right" style="font-size:.7rem;color:var(--ink-3)"></i></button>
+        <div class="and-badges">${restr?'<span class="badge badge-info">Solo le tue aree</span>':''}${_andBadges(pid,null,r)}${overAree?`<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>${overAree} ${overAree>1?'aree':'area'} oltre soglia</span>`:''}</div>
       </div>
-      ${areeHtml}
+      <div class="and-sum-title">${restr?'Le tue aree':multi?'Totale progetto (tutte le aree)':'Totale progetto'} — ${D.lbl}</div>
+      ${_andKpis(r)}
+      ${restr?'':`<div class="and-thr-row">${_andThrMeters(pid,null,r)}</div>`}
+      ${multi&&aree.length?_andAreaTable(pid,aree):''}
+      <div class="and-card-foot"><button class="btn btn-ghost2 btn-sm" onclick="andGo(${pid})">Apri dettaglio progetto <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button></div>
     </div>`;
   }).join('');
-  requestAnimationFrame(()=>_andCharts.forEach(c=>_initTicketChart(c)));
+}
+function _andDetailHtml(pid,aid){
+  const D=_andData,p=_prjNameById[pid],multi=_isMultiArea(pid),restr=_andRestricted(pid),aree=_andAree(pid);
+  const area=aid?_cache.aree.find(a=>a.id===aid):null;
+  const scopeName=area?area.nome:restr?'Le tue aree':multi?'Tutto il progetto':'';
+  const periods=[];for(let i=D.n-1;i>=0;i--){let m=D.month-i,y=D.year;while(m<0){m+=12;y--;}periods.push({m,y});}
+  const recs=periods.map(({m,y})=>D.get(pid,aid,y,m)),r=D.get(pid,aid,D.year,D.month);
+  // Le soglie di progetto non si applicano a chi vede solo alcune aree (il totale non è quello del progetto)
+  const thrOn=!!aid||!restr,cfg=_thrCfg(pid,aid);
+  const evTk=thrOn?_thrEval(cfg,'ticket',r.totale):{st:'none'},evEe=thrOn?_thrEval(cfg,'ee',r.ee):{st:'none'};
+  const labels=periods.map(({m,y})=>MONTHS[m].slice(0,3)+' '+String(y).slice(2)),full=periods.map(({m,y})=>MONTHS[m]+' '+y);
+  const sfx=`${pid}-${aid||0}`;
+  const tk={id:'andCv-'+sfx,init:_initTicketChart,draw:_drawTicketChart,labels,full,has:recs.map(x=>x.tk),
+    series:[...TK_LV,TK_TOT].map(s=>({...s,data:recs.map(x=>x[s.k])})),thr:_thrActive(evTk)?evTk.soglia:null};
+  const ee={id:'andEe-'+sfx,ee:true,init:_initEeChart,draw:_drawEeChart,labels,full,ore:recs.map(x=>x.ee),cnt:recs.map(x=>x.een),thr:_thrActive(evEe)?evEe.soglia:null,mode:_andEeMode};
+  _andCharts.push(tk,ee);
+  const crumb=`<nav class="and-crumb" aria-label="Percorso"><a href="#" onclick="andGo();return false"><i class="fa-solid fa-table-cells-large"></i> Panoramica progetti</a><span aria-hidden="true">›</span>${area?`<a href="#" onclick="andGo(${pid});return false">${_esc(p)}</a><span aria-hidden="true">›</span><b>${_esc(area.nome)}</b>`:`<b>${_esc(p)}</b>`}</nav>`;
+  const tabs=multi&&aree.length?`<div class="and-tabs" role="tablist" aria-label="Aree del progetto"><button role="tab" aria-selected="${!aid}" class="${aid?'':'on'}" onclick="andGo(${pid})">${restr?'Le tue aree':'Tutto il progetto'}</button>${aree.map(a=>`<button role="tab" aria-selected="${a.id===aid}" class="${a.id===aid?'on':''}" onclick="andGo(${pid},${a.id})">${_esc(a.nome)}</button>`).join('')}</div>`:'';
+  const canEdit=thrOn&&(area?_canEditAreaSoglia(area):_canEditSoglia(p));
+  let editor='';
+  if(canEdit)editor=!aid&&multi
+    ?`<details class="thr-more"><summary>Soglia complessiva di progetto (facoltativa)</summary>${_thrEditor(pid,null)}</details>`
+    :`<div class="and-sum-title" style="margin:14px 0 0">Configura soglie${area?' dell\'area':''}</div>${_thrEditor(pid,aid)}`;
+  const sum=`<div class="and-sum">
+      <div class="and-sum-title">${scopeName?_esc(scopeName)+' — ':''}${D.lbl}</div>
+      ${_andKpis(r)}
+      ${r.tk||r.een?'':'<div style="font-size:.72rem;color:var(--ink-3);margin-top:6px"><i class="fa-regular fa-circle-question" style="margin-right:4px"></i>Nessun dato registrato nel mese</div>'}
+      ${thrOn?_andThrMeters(pid,aid,r):'<div class="thr thr-none"><i class="fa-solid fa-sitemap" style="margin-right:5px"></i>Soglie disponibili nel dettaglio di ciascuna area</div>'}
+      ${editor}
+    </div>`;
+  const tableRows=periods.map(({m,y},i)=>{const x=recs[i],pc=_lvPct(x);return `<tr><td>${MONTHS[m]} ${y}</td>${x.tk?TK_LV.map(s=>`<td class="and-num">${_fmtNum(x[s.k])}</td>`).join('')+`<td class="and-num"><b>${_fmtNum(x.totale)}</b></td><td class="and-num">${pc?pc.map(_fmtPct).join(' · '):'—'}</td>`:'<td colspan="5" style="color:var(--ink-3);text-align:center">nessun dato</td>'}</tr>`;}).join('');
+  const eeRows=periods.map(({m,y},i)=>`<tr><td>${MONTHS[m]} ${y}</td><td class="and-num">${_fmtNum(recs[i].een)}</td><td class="and-num">${_fmtOre(recs[i].ee)}</td></tr>`).join('');
+  // Attività Extra Effort del mese selezionato
+  const acts=D.d.eeDettaglio.filter(e=>+e.progetto_id===pid&&_andVis(D.sc,e)&&(!aid||+e.area_id===aid));
+  const areaName=id=>_cache.aree.find(a=>a.id===+id)?.nome||'—',showArea=!aid&&multi;
+  const actsHtml=acts.length
+    ?`<div class="table-wrap"><table><thead><tr><th>Data</th>${showArea?'<th>Area</th>':''}<th>Tipologia attività / Dettaglio</th><th class="and-num">Extra Effort (ore)</th><th>Inserito da</th></tr></thead><tbody>${acts.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.data)}</td>${showArea?`<td>${_esc(areaName(e.area_id))}</td>`:''}<td>${_esc(e.attivita)}</td><td class="and-num">${_fmtOre(e.ore)}</td><td style="color:var(--ink-3)">${_esc(e.inserito_da||'—')}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="${showArea?3:2}"><b>Totale Extra Effort ${_esc(scopeName||p)}</b></td><td class="and-num"><b>${_fmtOre(r.ee)}</b></td><td></td></tr></tfoot></table></div>`
+    :`<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessuna attività di Extra Effort registrata in ${D.lbl}.</p>`;
+  const seg=m=>`<button type="button" data-m="${m}" class="${_andEeMode===m?'on':''}" aria-pressed="${_andEeMode===m}" onclick="andEeMode('${m}')">${m==='n'?'Numero attività':'Ore'}</button>`;
+  return `${crumb}
+    <div class="card">
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${restr&&!aid?'<span class="badge badge-info">Solo le tue aree</span>':''}${_andBadges(pid,aid,r)}</div></div>
+      ${tabs}
+      <div class="and-grid">
+        <div class="and-chart-wrap">
+          <div class="and-sum-title">Andamento ticket — ultimi ${D.n} mesi</div>
+          <canvas id="${tk.id}" role="img" aria-label="Andamento ticket L1, L2, L3 e totale di ${_esc(p)}${area?' / '+_esc(area.nome):''}"></canvas><div class="and-tip" id="${tk.id}-tip"></div>
+          <div class="and-legend">${[...TK_LV,TK_TOT].map(s=>`<span>${_mkSvg(s,12,true)}${s.l}</span>`).join('')}${tk.thr?`<span>${_thrSwatch()}Soglia ${_fmtNum(tk.thr)}</span>`:''}<span style="color:var(--ink-3)">${_mkSvg({c:'#8C8C8C',m:'circle'},10,false,true)}mese senza dati</span></div>
+          <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">% L1 · L2 · L3</th></tr></thead><tbody>${tableRows}</tbody></table></div></details>
+        </div>
+        ${sum}
+      </div>
+    </div>
+    <div class="card">
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-stopwatch"></i> Extra Effort${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''}</div>
+        <div class="and-seg" role="group" aria-label="Metrica del grafico Extra Effort">${seg('n')}${seg('ore')}</div></div>
+      <div class="and-chart-wrap">
+        <canvas id="${ee.id}" class="and-ee-cv" role="img" aria-label="Extra Effort mensile di ${_esc(p)}${area?' / '+_esc(area.nome):''}"></canvas><div class="and-tip" id="${ee.id}-tip"></div>
+        ${ee.thr?`<div class="and-legend"><span>${_thrSwatch()}Soglia ${_fmtOre(ee.thr)} (visibile in modalità Ore)</span></div>`:''}
+        <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">Attività</th><th class="and-num">Ore</th></tr></thead><tbody>${eeRows}</tbody></table></div></details>
+      </div>
+      <div class="and-sum-title" style="margin-top:18px">Attività di Extra Effort — ${D.lbl}</div>
+      ${actsHtml}
+    </div>
+    ${!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
+}
+function andEeMode(m){
+  _andEeMode=m==='n'?'n':'ore';S.set('andEeMode',_andEeMode);
+  document.querySelectorAll('.and-seg button').forEach(b=>{const on=b.dataset.m===_andEeMode;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on);});
+  _andCharts.filter(c=>c.ee).forEach(c=>{c.mode=_andEeMode;c.hover=null;_drawEeChart(c);});
 }
 // Marker SVG per legenda/box (stessa forma del grafico)
 function _mkSvg(s,size,withLine,hollow){
@@ -1704,72 +1961,12 @@ function _mkSvg(s,size,withLine,hollow){
   const fill=hollow?'#fff':s.c,stroke=s.c;
   const shape=s.m==='square'?`<rect x="${cx-r}" y="${cy-r}" width="${r*2}" height="${r*2}" rx="1" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`
     :s.m==='triangle'?`<polygon points="${cx},${cy-r*1.15} ${cx+r*1.1},${cy+r*0.85} ${cx-r*1.1},${cy+r*0.85}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`
+    :s.m==='diamond'?`<polygon points="${cx},${cy-r*1.25} ${cx+r*1.25},${cy} ${cx},${cy+r*1.25} ${cx-r*1.25},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`
     :`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
   return `<svg width="${w}" height="${size}" aria-hidden="true">${withLine?`<line x1="0" y1="${cy}" x2="${w}" y2="${cy}" stroke="${s.c}" stroke-width="2"/>`:''}${shape}</svg>`;
 }
-// Stato soglia: 'none' | 'off' | 'ok' | 'near' | 'hit' | 'over'
-function _thrState(pid,tot){
-  const s=_cache.soglie[pid];
-  if(!s)return{st:'none'};
-  if(!s.attiva)return{st:'off',soglia:s.soglia};
-  const pct=tot/s.soglia*100;
-  return{st:tot>s.soglia?'over':tot===s.soglia?'hit':pct>=80?'near':'ok',soglia:s.soglia,pct};
-}
-function _thrBadge(pid,tot){
-  const t=_thrState(pid,tot);
-  if(t.st==='over')return `<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>Soglia superata</span>`;
-  if(t.st==='hit')return `<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>Soglia raggiunta</span>`;
-  if(t.st==='near')return `<span class="badge badge-warn"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px"></i>Vicino alla soglia</span>`;
-  return '';
-}
-function _thrHtml(prj,pid,tot,lbl,alerts){
-  const t=_thrState(pid,tot),s=_cache.soglie[pid];
-  let h='';
-  if(t.st==='none')h=`<div class="thr thr-none"><i class="fa-solid fa-gauge" style="margin-right:5px"></i>Nessuna soglia configurata</div>`;
-  else if(t.st==='off')h=`<div class="thr thr-none"><i class="fa-solid fa-pause" style="margin-right:5px"></i>Soglia di ${_fmtNum(t.soglia)} ticket disattivata</div>`;
-  else{
-    const cls=t.st==='ok'?'thr-ok':t.st==='near'?'thr-warn':'thr-danger';
-    const icon=t.st==='ok'?'fa-circle-check':t.st==='near'?'fa-circle-exclamation':'fa-triangle-exclamation';
-    const msg=t.st==='over'?`Soglia superata di ${_fmtNum(tot-t.soglia)} ticket`:t.st==='hit'?'Soglia raggiunta':`${t.pct.toFixed(1).replace('.',',').replace(',0','')}% della soglia`;
-    const al=alerts.find(a=>a.soglia===t.soglia&&a.stato==='sent');
-    h=`<div class="thr ${cls}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px"><span style="font-weight:600"><i class="fa-solid ${icon}" style="margin-right:5px"></i>${msg}</span><b style="font-variant-numeric:tabular-nums;white-space:nowrap">${_fmtNum(tot)} / ${_fmtNum(t.soglia)}</b></div>
-      <div class="thr-bar"><i style="width:${Math.min(100,t.pct)}%"></i></div>
-      <div style="font-size:.7rem;opacity:.85">Soglia mensile ${lbl}${al?` · <i class="fa-solid fa-envelope" style="margin:0 3px"></i>alert inviato il ${al.quando}`:''}</div></div>`;
-  }
-  if(_canEditSoglia(prj)){
-    h+=`<div class="thr-edit"><input type="number" min="1" step="1" id="thrIn-${pid}" value="${s?s.soglia:''}" placeholder="es. 40" aria-label="Soglia mensile ticket"/><span style="font-size:.76rem;color:var(--ink-3)">ticket</span>
-      <button class="btn btn-ink btn-sm" onclick="saveSogliaBlock(${pid})"><i class="fa-solid fa-floppy-disk"></i> Salva soglia</button>
-      ${s?`<button class="btn btn-ghost2 btn-sm" onclick="saveSogliaBlock(${pid},${!s.attiva})">${s.attiva?'Disattiva':'Riattiva'}</button><button class="btn-icon danger" title="Rimuovi soglia" onclick="removeSoglia(${pid})"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button>`:''}
-    </div><div id="thrMsg-${pid}" class="msg" style="margin-top:8px"></div>`;
-  }
-  return h;
-}
-function _sogliaCheckMsg(res){
-  const c=res&&res.check;if(!c)return'Soglia salvata.';
-  if(c.status==='alert_sent')return'Soglia salvata. Il totale del mese corrente la supera già: alert email inviato.';
-  if(c.status==='already_sent')return'Soglia salvata. Soglia già superata: alert per questo valore già inviato in precedenza.';
-  if(c.status==='alert_failed')return'Soglia salvata. Soglia superata, ma invio alert non riuscito ('+(c.reason||'errore')+'): verrà ritentato al prossimo inserimento.';
-  return'Soglia salvata.';
-}
-async function saveSogliaBlock(pid,attiva){
-  const me=_me(),inp=document.getElementById('thrIn-'+pid);
-  const cur=_cache.soglie[pid];
-  const val=attiva===undefined?(inp?.value||'').trim():String(cur?.soglia||'');
-  const n=Number(val);
-  if(!val||!Number.isInteger(n)||n<=0){showMsg('thrMsg-'+pid,'Inserisci un numero intero maggiore di zero.','err');return;}
-  showSpinner();let res;
-  try{res=await call('saveSoglia',{progettoId:pid,soglia:n,attiva:attiva===undefined?(cur?cur.attiva:true):attiva,risorsaId:me?me.id:null});await reloadAll();}
-  catch(e){hideSpinner();showMsg('thrMsg-'+pid,'Errore: '+e.message,'err');return;}
-  hideSpinner();await renderAndamento();if(isAdmin)renderSoglieList();
-  showMsg('thrMsg-'+pid,attiva===false?'Soglia disattivata.':_sogliaCheckMsg(res),res?.check?.status==='alert_failed'?'err':'ok');
-}
-async function removeSoglia(pid){
-  openModal('Rimuovi soglia','Rimuovere la soglia mensile di "'+(_prjNameById[pid]||'')+'"?',async()=>{
-    showSpinner();try{await call('saveSoglia',{progettoId:pid,soglia:null});await reloadAll();}catch(e){hideSpinner();alert('Errore: '+e.message);return;}
-    hideSpinner();if(document.getElementById('panel-andamento').classList.contains('active'))await renderAndamento();if(isAdmin)renderSoglieList();
-  },'Rimuovi');
-}
-// ── grafico a linee (canvas, stesso approccio del Trend) con crosshair + tooltip ──
+function _thrSwatch(){return `<svg width="22" height="12" aria-hidden="true"><line x1="0" y1="6" x2="22" y2="6" stroke="${THR_C}" stroke-width="1.5" stroke-dasharray="4 3"/></svg>`;}
+// ── grafico a linee ticket (canvas, stesso approccio del Trend) con crosshair + tooltip ──
 function _niceMax(v){if(v<=5)return 5;const p=Math.pow(10,Math.floor(Math.log10(v))),f=v/p;return(f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*p;}
 function _initTicketChart(c){
   const cv=document.getElementById(c.id);if(!cv)return;
@@ -1777,12 +1974,19 @@ function _initTicketChart(c){
   cv.onmousemove=e=>{const g=c.geo;if(!g)return;const r=cv.getBoundingClientRect(),x=e.clientX-r.left;const i=Math.max(0,Math.min(c.labels.length-1,Math.round((x-g.l)/(g.step||1))));if(i!==c.hover){c.hover=i;_drawTicketChart(c);}_showTicketTip(c,i);};
   cv.onmouseleave=()=>{c.hover=null;_drawTicketChart(c);const t=document.getElementById(c.id+'-tip');if(t)t.style.display='none';};
 }
+// Linea di soglia tratteggiata con etichetta in inchiostro (il colore di stato resta sulla linea)
+function _drawThrLine(ctx,P,pw,y,label){
+  ctx.strokeStyle=THR_C;ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.setLineDash([]);
+  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='left';ctx.textBaseline='bottom';
+  const w=ctx.measureText(label).width;ctx.fillStyle='rgba(255,255,255,.85)';ctx.fillRect(P.l+4,y-15,w+6,13);
+  ctx.fillStyle='#3D3D3D';ctx.fillText(label,P.l+7,y-3);
+}
 function _drawTicketChart(c){
   const cv=document.getElementById(c.id);if(!cv)return;
   const dpr=window.devicePixelRatio||1,W=cv.clientWidth||600,H=260;
   cv.width=W*dpr;cv.height=H*dpr;const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
-  const P={t:14,r:40,b:30,l:40},pw=W-P.l-P.r,ph=H-P.t-P.b,n=c.labels.length,step=n>1?pw/(n-1):0;
-  const mx=_niceMax(Math.max(1,...c.series.flatMap(s=>s.data)));
+  const P={t:14,r:52,b:30,l:40},pw=W-P.l-P.r,ph=H-P.t-P.b,n=c.labels.length,step=n>1?pw/(n-1):0;
+  const mx=_niceMax(Math.max(1,...c.series.flatMap(s=>s.data),c.thr||0));
   c.geo={l:P.l,step};
   const X=i=>P.l+(n>1?step*i:pw/2),Y=v=>P.t+ph*(1-v/mx);
   // griglia recessiva + asse Y
@@ -1792,9 +1996,10 @@ function _drawTicketChart(c){
   // asse X (salta etichette se lo spazio è poco)
   const every=step&&step<44?2:1;ctx.textAlign='center';ctx.textBaseline='alphabetic';
   c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#3D3D3D':'#8C8C8C';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,X(i),H-8);});
+  if(c.thr)_drawThrLine(ctx,P,pw,Y(c.thr),'Soglia '+_fmtNum(c.thr));
   if(c.hover!=null){ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(Math.round(X(c.hover))+.5,P.t);ctx.lineTo(Math.round(X(c.hover))+.5,P.t+ph);ctx.stroke();ctx.setLineDash([]);}
   c.series.forEach(s=>{
-    ctx.strokeStyle=s.c;ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
+    ctx.strokeStyle=s.c;ctx.lineWidth=s.tot?2.5:2;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
     s.data.forEach((v,i)=>{i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v));});ctx.stroke();
   });
   // marker: pieni con dati, vuoti nei mesi senza registrazioni; anello bianco per le sovrapposizioni
@@ -1803,6 +2008,7 @@ function _drawTicketChart(c){
     ctx.beginPath();
     if(s.m==='square')ctx.rect(x-r*.9,y-r*.9,r*1.8,r*1.8);
     else if(s.m==='triangle'){ctx.moveTo(x,y-r*1.15);ctx.lineTo(x+r*1.1,y+r*.85);ctx.lineTo(x-r*1.1,y+r*.85);ctx.closePath();}
+    else if(s.m==='diamond'){ctx.moveTo(x,y-r*1.2);ctx.lineTo(x+r*1.2,y);ctx.lineTo(x,y+r*1.2);ctx.lineTo(x-r*1.2,y);ctx.closePath();}
     else ctx.arc(x,y,r,0,Math.PI*2);
     ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();
     ctx.fillStyle=c.has[i]?s.c:'#fff';ctx.fill();
@@ -1811,20 +2017,101 @@ function _drawTicketChart(c){
   // etichette dirette a fine linea (testo in inchiostro, non nel colore della serie), senza collisioni
   const ends=c.series.map(s=>({l:s.l,y:Y(s.data[n-1])})).sort((a,b)=>a.y-b.y);
   for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<13)ends[i].y=ends[i-1].y+13;
+  // se le etichette sforano in basso, risalgono mantenendo la spaziatura
+  const yMax=P.t+ph+4;for(let i=ends.length-1;i>=0;i--)ends[i].y=Math.min(ends[i].y,yMax-(ends.length-1-i)*13);
   ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#3D3D3D';
-  ends.forEach(e=>ctx.fillText(e.l,X(n-1)+10,Math.min(e.y,P.t+ph+4)));
+  ends.forEach(e=>ctx.fillText(e.l,X(n-1)+10,e.y));
 }
 function _showTicketTip(c,i){
   const t=document.getElementById(c.id+'-tip'),cv=document.getElementById(c.id);if(!t||!cv)return;
-  const tot=c.series.reduce((a,s)=>a+s.data[i],0);
-  t.innerHTML=`<div class="and-tip-t">${c.full[i]}</div>`+(c.has[i]?c.series.map(s=>`<div class="and-tip-r"><span>${_mkSvg(s,10)} ${s.l}</span><span>${_fmtNum(s.data[i])}</span></div>`).join('')+`<div class="and-tip-r" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px"><span>Totale</span><span>${_fmtNum(tot)}</span></div>`:'<div style="color:var(--ink-3)">Nessun dato registrato</div>');
+  const tot=c.series.find(s=>s.tot);
+  t.innerHTML=`<div class="and-tip-t">${c.full[i]}</div>`+(c.has[i]?c.series.filter(s=>!s.tot).map(s=>`<div class="and-tip-r"><span>${_mkSvg(s,10)} ${s.l}</span><span>${_fmtNum(s.data[i])}</span></div>`).join('')+`<div class="and-tip-r" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px"><span>${_mkSvg(TK_TOT,10)} Totale</span><span>${_fmtNum(tot?tot.data[i]:0)}</span></div>`:'<div style="color:var(--ink-3)">Nessun dato registrato</div>')
+    +(c.thr?`<div class="and-tip-r" style="color:var(--ink-3)"><span>Soglia</span><span>${_fmtNum(c.thr)}</span></div>`:'');
   t.style.display='block';
   const x=c.geo.l+c.geo.step*i,w=t.offsetWidth;
   t.style.left=Math.max(0,Math.min(cv.clientWidth-w,x+12>cv.clientWidth-w?x-w-12:x+12))+'px';t.style.top='10px';
 }
+// ── grafico a barre Extra Effort: numero attività oppure ore, per mese ──
+function _initEeChart(c){
+  const cv=document.getElementById(c.id);if(!cv)return;
+  c.hover=null;_drawEeChart(c);
+  const hide=()=>{const t=document.getElementById(c.id+'-tip');if(t)t.style.display='none';};
+  cv.onmousemove=e=>{const g=c.geo;if(!g)return;const r=cv.getBoundingClientRect(),i=Math.floor((e.clientX-r.left-g.l)/g.band);
+    if(i<0||i>=c.labels.length){if(c.hover!=null){c.hover=null;_drawEeChart(c);}hide();return;}
+    if(i!==c.hover){c.hover=i;_drawEeChart(c);}_showEeTip(c,i);};
+  cv.onmouseleave=()=>{c.hover=null;_drawEeChart(c);hide();};
+}
+function _barPath(ctx,x,y,w,h,r){r=Math.min(r,w/2,h);ctx.beginPath();ctx.moveTo(x,y+h);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h);ctx.closePath();}
+function _drawEeChart(c){
+  const cv=document.getElementById(c.id);if(!cv)return;
+  const dpr=window.devicePixelRatio||1,W=cv.clientWidth||600,H=240;
+  cv.width=W*dpr;cv.height=H*dpr;const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  const isOre=c.mode!=='n',vals=isOre?c.ore:c.cnt,thr=isOre?c.thr:null,fv=v=>isOre?_fmtOre(v):_fmtNum(v);
+  const P={t:20,r:16,b:30,l:48},pw=W-P.l-P.r,ph=H-P.t-P.b,n=vals.length,band=pw/n,bw=Math.max(6,Math.min(36,band*.62));
+  const mx=_niceMax(Math.max(1,...vals,thr||0));
+  c.geo={l:P.l,band};
+  const Y=v=>P.t+ph*(1-v/mx),BX=i=>P.l+band*i+(band-bw)/2;
+  ctx.font='11px DM Sans,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
+  const div=mx%4===0?4:5;
+  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#8C8C8C';ctx.fillText(_fmtNum(_r2(v))+(isOre?' h':''),P.l-8,y);}
+  const every=band<44?2:1;ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#3D3D3D':'#8C8C8C';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,BX(i)+bw/2,H-8);});
+  if(c.hover!=null){ctx.fillStyle='rgba(0,0,0,.04)';ctx.fillRect(P.l+band*c.hover,P.t,band,ph);}
+  // barre sottili ancorate alla base, angoli superiori arrotondati
+  vals.forEach((v,i)=>{if(!v)return;const y=Y(v);_barPath(ctx,BX(i),y,bw,P.t+ph-y,4);ctx.fillStyle=c.hover===i?EE_C_HOVER:EE_C;ctx.fill();});
+  if(thr)_drawThrLine(ctx,P,pw,Y(thr),'Soglia '+_fmtOre(thr));
+  // etichetta diretta solo sul mese selezionato (ultima barra)
+  const last=vals[n-1];
+  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#3D3D3D';
+  ctx.fillText(last?fv(last):(isOre?'0 h':'0'),BX(n-1)+bw/2,(last?Y(last):P.t+ph)-4);
+}
+function _showEeTip(c,i){
+  const t=document.getElementById(c.id+'-tip'),cv=document.getElementById(c.id);if(!t||!cv)return;
+  t.innerHTML=`<div class="and-tip-t">${c.full[i]}</div>`+(c.cnt[i]
+    ?`<div class="and-tip-r"><span>Attività</span><span>${_fmtNum(c.cnt[i])}</span></div><div class="and-tip-r"><span>Ore Extra Effort</span><span>${_fmtOre(c.ore[i])}</span></div>`
+    :'<div style="color:var(--ink-3)">Nessuna attività registrata</div>')
+    +(c.thr?`<div class="and-tip-r" style="color:var(--ink-3)"><span>Soglia</span><span>${_fmtOre(c.thr)}</span></div>`:'');
+  t.style.display='block';
+  const x=c.geo.l+c.geo.band*(i+.5),w=t.offsetWidth;
+  t.style.left=Math.max(0,Math.min(cv.clientWidth-w,x+14>cv.clientWidth-w?x-w-14:x+14))+'px';t.style.top='10px';
+}
 let _andResizeT=null;
-window.addEventListener('resize',()=>{clearTimeout(_andResizeT);_andResizeT=setTimeout(()=>{if(document.getElementById('panel-andamento')?.classList.contains('active'))_andCharts.forEach(_drawTicketChart);},150);});
-// ── inserimento ticket dall'app (Team Lead delle aree) ──
+window.addEventListener('resize',()=>{clearTimeout(_andResizeT);_andResizeT=setTimeout(()=>{if(document.getElementById('panel-andamento')?.classList.contains('active'))_andCharts.forEach(c=>c.draw(c));},150);});
+// ── Extra Effort: tabella compilabile (una riga per attività), usata nell'inserimento dall'app ──
+function _eeRowHtml(r){
+  return `<div class="ee-row"><input type="text" class="ee-att" maxlength="300" placeholder="Tipologia attività / dettaglio" value="${_esc(r?r.attivita:'')}" oninput="_eeRecalc(this)" aria-label="Tipologia attività / dettaglio"/><input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="ore" value="${r?r.ore:''}" oninput="_eeRecalc(this)" aria-label="Extra Effort (ore)"/><button type="button" class="btn-icon danger" title="Rimuovi riga" onclick="_eeDel(this)"><i class="fa-solid fa-xmark" style="font-size:.75rem"></i></button></div>`;
+}
+function _eeBlockHtml(rows){
+  return `<div class="ee"><div class="ee-row ee-head"><span>Extra Effort — tipologia attività / dettaglio</span><span style="text-align:right">Ore</span><span></span></div>
+    <div class="ee-rows">${(rows.length?rows:[null]).map(_eeRowHtml).join('')}</div>
+    <div class="ee-foot"><button type="button" class="btn btn-ghost2 btn-sm" onclick="_eeAdd(this)"><i class="fa-solid fa-plus"></i> Aggiungi attività</button><span class="ee-tot">Totale Extra Effort: <b>${_fmtOre(rows.reduce((s,r)=>s+r.ore,0))}</b></span></div></div>`;
+}
+function _eeAdd(btn){const l=btn.closest('.ee').querySelector('.ee-rows');l.insertAdjacentHTML('beforeend',_eeRowHtml(null));l.lastElementChild.querySelector('.ee-att').focus();}
+function _eeDel(btn){
+  const box=btn.closest('.ee'),row=btn.closest('.ee-row');
+  if(box.querySelectorAll('.ee-rows .ee-row').length>1)row.remove();
+  else row.querySelectorAll('input').forEach(i=>{i.value='';i.classList.remove('bad');});
+  _eeRecalc(box);
+}
+function _eeRecalc(el){
+  const box=el.closest('.ee');let tot=0;
+  box.querySelectorAll('.ee-ore').forEach(i=>{const n=Number(i.value),ok=i.value===''||(Number.isFinite(n)&&n>0);i.classList.toggle('bad',!ok);if(ok&&i.value!=='')tot+=n;});
+  box.querySelector('.ee-tot b').textContent=_fmtOre(tot);
+}
+// Righe compilate: le righe completamente vuote sono ignorate, quelle a metà sono un errore
+function _eeCollect(box){
+  const rows=[];let bad=false;
+  box.querySelectorAll('.ee-rows .ee-row').forEach(row=>{
+    const att=row.querySelector('.ee-att'),ore=row.querySelector('.ee-ore'),a=att.value.trim(),o=ore.value.trim();
+    if(!a&&!o)return;
+    const n=Number(o),okA=!!a,okO=o!==''&&Number.isFinite(n)&&n>0;
+    att.classList.toggle('bad',!okA);ore.classList.toggle('bad',!okO);
+    if(!okA||!okO){bad=true;return;}
+    rows.push({attivita:a,ore:_r2(n)});
+  });
+  return{rows,bad};
+}
+// ── inserimento ticket ed Extra Effort dall'app (Team Lead delle aree) ──
 async function loadTicketDay(){
   const me=_me(),inp=document.getElementById('andTicketDate'),form=document.getElementById('andTicketForm');
   if(!me||!inp||!inp.value||!form)return;
@@ -1832,9 +2119,9 @@ async function loadTicketDay(){
   try{d=await call('getTicketDay',{risorsaId:me.id,data:inp.value});}
   catch(e){hideSpinner();form.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
-  const ent=d.entries[inp.value]||{};
+  const ent=d.entries[inp.value]||{},ee=(d.ee||{})[inp.value]||{};
   if(!d.aree.length){form.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna area attiva assegnata.</p>';return;}
-  form.innerHTML=`<div class="tk-row" style="padding-top:0"><div class="tk-head" style="text-align:left">Progetto / Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-row" data-area="${a.id}"><div><div style="font-size:.7rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">${_esc(a.progetto)}</div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>`;}).join('');
+  form.innerHTML=`<div class="tk-row tk-header" style="padding-top:0"><div class="tk-head" style="text-align:left">Progetto / Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-area" data-area="${a.id}"><div class="tk-row"><div><div style="font-size:.7rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">${_esc(a.progetto)}</div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>${_eeBlockHtml(ee[a.id]||[])}</div>`;}).join('');
 }
 function _tkRecalc(inp){
   const row=inp.closest('.tk-row');let tot=0;
@@ -1844,21 +2131,23 @@ function _tkRecalc(inp){
 async function saveTicketDay(){
   const me=_me(),data=document.getElementById('andTicketDate')?.value;
   if(!me||!data){showMsg('andTicketMsg','Seleziona una data.','err');return;}
-  const entries=[];let bad=false;
-  document.querySelectorAll('#andTicketForm .tk-row[data-area]').forEach(row=>{
-    const e={areaId:+row.dataset.area};
-    row.querySelectorAll('input').forEach(i=>{const raw=i.value.trim(),n=raw===''?0:Number(raw);if(!Number.isInteger(n)||n<0){bad=true;i.classList.add('bad');}e[i.dataset.k]=n;});
+  const entries=[];let bad=false,badEe=false;
+  document.querySelectorAll('#andTicketForm .tk-area[data-area]').forEach(box=>{
+    const e={areaId:+box.dataset.area};
+    box.querySelectorAll('.tk-row input').forEach(i=>{const raw=i.value.trim(),n=raw===''?0:Number(raw);if(!Number.isInteger(n)||n<0){bad=true;i.classList.add('bad');}e[i.dataset.k]=n;});
+    const x=_eeCollect(box.querySelector('.ee'));if(x.bad)badEe=true;e.ee=x.rows;
     entries.push(e);
   });
   if(bad){showMsg('andTicketMsg','Inserisci solo numeri interi non negativi.','err');return;}
+  if(badEe){showMsg('andTicketMsg','Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero.','err');return;}
   if(!entries.length)return;
   showSpinner();let res;
   try{res=await call('saveTickets',{risorsaId:me.id,data,entries});}
   catch(e){hideSpinner();showMsg('andTicketMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
-  const hit=(res.soglie||[]).filter(s=>s.status==='alert_sent');
+  const hit=(res.soglie||[]).filter(s=>s.status==='alert_sent'),kinds=[...new Set(hit.map(s=>_THR_KIND[s.kind]?.l||'ticket'))];
   await loadTicketDay();await renderAndamento();
-  showMsg('andTicketMsg',`Ticket del ${fmt(data)} salvati.`+(hit.length?' Soglia mensile raggiunta: alert email inviato.':''),'ok');
+  showMsg('andTicketMsg',`Ticket ed Extra Effort del ${fmt(data)} salvati.`+(hit.length?` Soglia mensile ${kinds.join(' e ')} raggiunta: alert email inviato.`:''),'ok');
 }
 // ── ADMIN: gestione aree ──
 function renderAreaList(){
@@ -1887,45 +2176,53 @@ async function addArea(){
   const progettoId=+document.getElementById('newAreaPrj').value,nome=document.getElementById('newAreaNome').value.trim(),tl=document.getElementById('newAreaTL').value;
   if(!progettoId||!nome){showMsg('areaMsg','Progetto e nome area obbligatori.','err');return;}
   showSpinner();try{await call('saveArea',{progettoId,nome,teamLeadId:tl?+tl:null,attiva:true});await reloadAll();}catch(e){hideSpinner();showMsg('areaMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  document.getElementById('newAreaNome').value='';renderAreaList();showMsg('areaMsg','Area "'+nome+'" aggiunta.','ok');
+  document.getElementById('newAreaNome').value='';renderAreaList();renderSoglieList();showMsg('areaMsg','Area "'+nome+'" aggiunta.','ok');
 }
 async function updateArea(id,changes){
   const a=_cache.aree.find(x=>x.id===id);if(!a)return;
   const next={...a,...changes};
   if(!String(next.nome||'').trim()){renderAreaList();showMsg('areaMsg','Il nome area non può essere vuoto.','err');return;}
   showSpinner();try{await call('saveArea',{id,progettoId:next.progettoId,nome:next.nome,teamLeadId:next.teamLeadId,attiva:next.attiva});await reloadAll();}catch(e){hideSpinner();renderAreaList();showMsg('areaMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  renderAreaList();showMsg('areaMsg','Area aggiornata.','ok');
+  renderAreaList();renderSoglieList();showMsg('areaMsg','Area aggiornata.','ok');
 }
 function deleteAreaUI(id){
   const a=_cache.aree.find(x=>x.id===id);if(!a)return;
-  openModal('Elimina area','Eliminare l\'area "'+a.nome+'"? Se ha già ticket registrati non potrà essere eliminata: disattivala per conservarne lo storico.',async()=>{
+  openModal('Elimina area','Eliminare l\'area "'+a.nome+'"? Se ha già ticket o Extra Effort registrati non potrà essere eliminata: disattivala per conservarne lo storico.',async()=>{
     showSpinner();try{await call('deleteArea',{id});await reloadAll();}catch(e){hideSpinner();showMsg('areaMsg',e.message,'err');return;}hideSpinner();
-    renderAreaList();showMsg('areaMsg','Area eliminata.','ok');
+    renderAreaList();renderSoglieList();showMsg('areaMsg','Area eliminata.','ok');
   },'Elimina');
 }
-// ── ADMIN: soglie ticket ──
+// ── ADMIN: soglie ticket ed Extra Effort (progetto, oppure per area se il progetto ha più aree) ──
 function renderSoglieList(){
   const el=document.getElementById('soglieList');if(!el)return;
   const prjs=(_cache.prj||[]).slice().sort();
   if(!prjs.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
-  el.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Progetto</th><th>Soglia mensile</th><th>Attiva</th><th>Destinatari aggiuntivi (CC)</th><th></th></tr></thead><tbody>${prjs.map(p=>{const pid=_prjIdByName[p],s=_cache.soglie[pid];return `<tr>
-    <td><b>${_esc(p)}</b></td>
-    <td><input type="number" min="1" step="1" id="sgIn-${pid}" value="${s?s.soglia:''}" placeholder="—" style="max-width:100px;padding:5px 8px"/></td>
-    <td><input type="checkbox" id="sgOn-${pid}" ${!s||s.attiva?'checked':''} style="accent-color:var(--amber);width:15px;height:15px" aria-label="Soglia attiva"/></td>
-    <td><input type="text" id="sgTo-${pid}" value="${_esc(s?s.destinatari:'')}" placeholder="email1@..., email2@..." style="min-width:220px;padding:5px 8px"/></td>
-    <td style="white-space:nowrap"><button class="btn btn-ink btn-sm" onclick="saveSogliaAdmin(${pid})"><i class="fa-solid fa-floppy-disk"></i> Salva</button> ${s?`<button class="btn-icon danger" title="Rimuovi soglia" onclick="removeSoglia(${pid})"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button>`:''}</td>
-  </tr>`;}).join('')}</tbody></table></div>`;
+  const row=(pid,aid,label,sub)=>{const s=_thrCfg(pid,aid),id=`${pid}-${aid||0}`;return `<tr>
+    <td>${sub?`<span style="padding-left:14px;color:var(--ink-2)">↳ ${_esc(label)}</span>`:`<b>${_esc(label)}</b>`}</td>
+    <td><input type="number" min="1" step="1" id="sgIn-${id}" value="${s&&s.soglia!=null?s.soglia:''}" placeholder="—" style="max-width:90px;padding:5px 8px" aria-label="Soglia ticket ${_esc(label)}"/></td>
+    <td><input type="number" min="0.25" step="0.25" id="sgEe-${id}" value="${s&&s.sogliaEe!=null?s.sogliaEe:''}" placeholder="—" style="max-width:90px;padding:5px 8px" aria-label="Soglia Extra Effort ${_esc(label)}"/></td>
+    <td><input type="checkbox" id="sgOn-${id}" ${!s||s.attiva?'checked':''} style="accent-color:var(--amber);width:15px;height:15px" aria-label="Soglie attive"/></td>
+    <td><input type="text" id="sgTo-${id}" value="${_esc(s?s.destinatari:'')}" placeholder="email1@..., email2@..." style="min-width:220px;padding:5px 8px"/></td>
+    <td style="white-space:nowrap"><button class="btn btn-ink btn-sm" onclick="saveSogliaAdmin(${pid},${aid||0})"><i class="fa-solid fa-floppy-disk"></i> Salva</button> ${s?`<button class="btn-icon danger" title="Rimuovi soglie" onclick="removeThr(${pid},${aid||0})"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button>`:''}</td>
+  </tr>`;};
+  el.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Progetto / Area</th><th>Soglia ticket</th><th>Soglia Extra Effort (h)</th><th>Attiva</th><th>Destinatari aggiuntivi (CC)</th><th></th></tr></thead><tbody>${prjs.map(p=>{
+    const pid=_prjIdByName[p],multi=_isMultiArea(pid);
+    return row(pid,null,multi?p+' — complessiva (facoltativa)':p)+(multi?_prjAree(pid).sort((a,b)=>a.nome.localeCompare(b.nome,'it')).map(a=>row(pid,a.id,a.nome+(a.attiva?'':' (non attiva)'),true)).join(''):'');
+  }).join('')}</tbody></table></div>`;
 }
-async function saveSogliaAdmin(pid){
-  const val=(document.getElementById('sgIn-'+pid)?.value||'').trim(),n=Number(val);
-  if(!val||!Number.isInteger(n)||n<=0){showMsg('soglieMsg','La soglia deve essere un numero intero maggiore di zero.','err');return;}
-  const attiva=!!document.getElementById('sgOn-'+pid)?.checked,destinatari=document.getElementById('sgTo-'+pid)?.value||'';
+async function saveSogliaAdmin(pid,aid){
+  aid=aid||null;
+  const id=`${pid}-${aid||0}`,a=aid?_cache.aree.find(x=>x.id===aid):null,nome=(_prjNameById[pid]||'')+(a?' / '+a.nome:'');
+  const tk=_thrInput(document.getElementById('sgIn-'+id)?.value,true),ee=_thrInput(document.getElementById('sgEe-'+id)?.value,false);
+  if(tk.bad){showMsg('soglieMsg','La soglia ticket deve essere un numero intero maggiore di zero.','err');return;}
+  if(ee.bad){showMsg('soglieMsg','La soglia Extra Effort deve essere un numero di ore maggiore di zero.','err');return;}
+  if(tk.v==null&&ee.v==null){showMsg('soglieMsg',nome+': inserisci almeno una soglia oppure usa il cestino per rimuoverle.','err');return;}
+  const attiva=!!document.getElementById('sgOn-'+id)?.checked,destinatari=document.getElementById('sgTo-'+id)?.value||'';
   const bad=destinatari.split(/[,;\s]+/).filter(Boolean).filter(e=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
   if(bad.length){showMsg('soglieMsg','Email non valide: '+bad.join(', '),'err');return;}
-  showSpinner();let res;try{res=await call('saveSoglia',{progettoId:pid,soglia:n,attiva,destinatari});await reloadAll();}catch(e){hideSpinner();showMsg('soglieMsg','Errore: '+e.message,'err');return;}hideSpinner();
-  renderSoglieList();showMsg('soglieMsg',(_prjNameById[pid]||'')+': '+(attiva?_sogliaCheckMsg(res):'soglia salvata (disattivata).'),res?.check?.status==='alert_failed'?'err':'ok');
+  showSpinner();let res;try{res=await call('saveSoglia',{progettoId:pid,areaId:aid,soglia:tk.v,sogliaEe:ee.v,attiva,destinatari});await reloadAll();}catch(e){hideSpinner();showMsg('soglieMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  renderSoglieList();showMsg('soglieMsg',nome+': '+(attiva?_sogliaCheckMsg(res):'soglie salvate (disattivate).'),(res?.checks||[]).some(c=>c.status==='alert_failed')?'err':'ok');
 }
-
 // LOG EMAIL (admin)
 async function loadEmailLog(){
   const el=document.getElementById('emailLogContent');if(!el)return;
@@ -1938,7 +2235,7 @@ async function loadEmailLog(){
   catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
   hideSpinner();
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.82rem;padding:14px 0">Nessun invio registrato.</p>';return;}
-  const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza',sollecito_forecast:'Sollecito Forecast',ticket_reminder:'Reminder ticket',alert_soglia_ticket:'Alert soglia ticket'};
+  const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza',sollecito_forecast:'Sollecito Forecast',ticket_reminder:'Reminder ticket',alert_soglia_ticket:'Alert soglia ticket',alert_soglia_ee:'Alert soglia Extra Effort'};
   const _bg=(bg,c,t)=>`<span style="background:${bg};color:${c};border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700;white-space:nowrap">${t}</span>`;
   const badge=s=>{
     if(s==='sent')     return _bg('var(--ok-bg)','var(--ok)','INVIATA');
@@ -1960,7 +2257,8 @@ async function loadEmailLog(){
     else if(r.stato==='run_error')det=`<span style="color:var(--danger)">Crash: ${r.errore||''}</span>`;
     else if(r.stato==='error')det=`<span style="color:var(--danger)">${r.errore||''}${m.responseCode?` (SMTP ${m.responseCode})`:''}</span>`;
     else if(r.stato==='skipped')det=`<span style="color:var(--ink-3)">${r.errore||''}</span>`;
-    else if(r.tipo==='alert_soglia_ticket')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')} — ${m.mese!=null?MONTHS[m.mese]:''} ${m.anno||''}: <strong style="color:var(--danger)">${m.totale}/${m.soglia}</strong> (L1 ${m.l1} · L2 ${m.l2} · L3 ${m.l3})${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
+    else if(r.tipo==='alert_soglia_ee')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?MONTHS[m.mese]:''} ${m.anno||''}: <strong style="color:var(--danger)">${_fmtOre(m.totale||0)} / ${_fmtOre(m.soglia||0)}</strong> (${m.attivita||0} attività)${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
+    else if(r.tipo==='alert_soglia_ticket')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?MONTHS[m.mese]:''} ${m.anno||''}: <strong style="color:var(--danger)">${m.totale}/${m.soglia}</strong> (L1 ${m.l1} · L2 ${m.l2} · L3 ${m.l3})${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
     else if(r.tipo==='ticket_reminder')det=`<span style="color:var(--ink-3)">giorni ${(m.giorni||[]).join(', ')}${m.aree?` · ${_esc(m.aree.join(', '))}`:''}</span>`;
     else if(r.tipo==='assenza')det=`<span style="color:var(--ink-3)">${m.risorsa||''} — ${m.tipo||''} ${m.dal||''}${m.al&&m.al!==m.dal?'→'+m.al:''}${m.overlap?' <strong style="color:var(--amber)">⚠ overlap</strong>':''}</span>`;
     else det=`<span style="color:var(--ink-3)">giorno ${m.giorno||''}${m.response?` · <span title="${String(m.response).replace(/"/g,'&quot;')}">${String(m.response).slice(0,28)}</span>`:''}</span>`;

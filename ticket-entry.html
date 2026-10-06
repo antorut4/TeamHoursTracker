@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Inserisci ticket — Team Hours Tracker</title>
+<title>Inserisci ticket ed Extra Effort — Team Hours Tracker</title>
 <style>
 :root{
   --accent:#A100FF;--accent2:#7b00cc;--accent-bg:#f3e8ff;
@@ -43,6 +43,20 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
 .lv input.bad{border-color:#dc2626}
 .tot{padding:10px 4px;font-size:20px;font-weight:700;color:var(--accent2);text-align:center;
      background:var(--accent-bg);border-radius:8px;border:2px solid transparent}
+.ee{margin-top:12px;border-top:1px dashed var(--border);padding-top:10px}
+.ee-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px}
+.ee-row{display:grid;grid-template-columns:1fr 76px 30px;gap:6px;margin-bottom:6px}
+.ee-row.ee-head{margin-bottom:2px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.ee-row input{width:100%;padding:8px;font-size:14px;color:var(--text);border:2px solid var(--border);border-radius:8px;outline:none;background:var(--card)}
+.ee-row input:focus{border-color:var(--accent)}
+.ee-row input.bad{border-color:#dc2626}
+.ee-row .ee-ore{text-align:right}
+.ee-del{border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer;border-radius:6px}
+.ee-del:hover{color:#dc2626;background:#fee2e2}
+.ee-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px}
+.ee-add{border:1.5px dashed var(--accent);background:none;color:var(--accent2);font-size:12px;font-weight:700;padding:6px 10px;border-radius:8px;cursor:pointer}
+.ee-tot{font-size:13px;color:var(--muted)}
+.ee-tot b{color:var(--accent2);font-size:15px}
 .hint{text-align:center;font-size:12px;color:var(--muted);margin:4px 0 16px}
 .btn-save{width:100%;padding:15px;background:var(--accent);color:#fff;border:none;
           border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:background .2s}
@@ -65,7 +79,7 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
 <body>
 <div class="card">
   <div class="card-hd">
-    <h1>Inserimento Ticket</h1>
+    <h1>Inserimento Ticket ed Extra Effort</h1>
     <small>Team Hours Tracker · Andamento progetto</small>
   </div>
   <div class="card-bd" id="app">
@@ -129,6 +143,7 @@ function render() {
           <input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${k}" value="${val(k)}" oninput="recalc(this)"></div>`).join('')}
         <div><label>Totale</label><div class="tot">${v ? v.totale : 0}</div></div>
       </div>
+      ${eeBlock(((_d.ee || {})[_date] || {})[a.id] || [])}
     </div>`;
   }).join('');
   document.getElementById('app').innerHTML = `
@@ -136,11 +151,69 @@ function render() {
     <div class="u-date">📅 ${fmtDate(_date)}</div>
     ${tabs}
     ${aree}
-    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.</div>
+    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.<br>Extra Effort: una riga per attività (facoltativo).</div>
     <button class="btn-save" id="save" onclick="doSave()">Salva</button>
     <div class="alert" id="alert"></div>`;
   const first = document.querySelector('.lv input');
   if (first) first.focus();
+}
+
+function fmtOre(n) { return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 }); }
+
+// ── Extra Effort: tabella compilabile, una riga per attività ──
+function eeRowHtml(r) {
+  return `<div class="ee-row">
+    <input type="text" class="ee-att" maxlength="300" placeholder="Tipologia attività / dettaglio" value="${esc(r ? r.attivita : '')}" oninput="eeRecalc(this)" aria-label="Tipologia attività / dettaglio">
+    <input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="ore" value="${r ? r.ore : ''}" oninput="eeRecalc(this)" aria-label="Extra Effort (ore)">
+    <button type="button" class="ee-del" title="Rimuovi riga" onclick="eeDel(this)">×</button>
+  </div>`;
+}
+function eeBlock(rows) {
+  const tot = rows.reduce((s, r) => s + r.ore, 0);
+  return `<div class="ee">
+    <div class="ee-title">Extra Effort</div>
+    <div class="ee-row ee-head"><span>Tipologia attività / Dettaglio</span><span style="text-align:right">Ore</span><span></span></div>
+    <div class="ee-rows">${(rows.length ? rows : [null]).map(eeRowHtml).join('')}</div>
+    <div class="ee-foot"><button type="button" class="ee-add" onclick="eeAdd(this)">+ Aggiungi attività</button>
+      <span class="ee-tot">Totale Extra Effort: <b>${fmtOre(tot)} h</b></span></div>
+  </div>`;
+}
+function eeAdd(btn) {
+  const list = btn.closest('.ee').querySelector('.ee-rows');
+  list.insertAdjacentHTML('beforeend', eeRowHtml(null));
+  list.lastElementChild.querySelector('.ee-att').focus();
+}
+function eeDel(btn) {
+  const box = btn.closest('.ee'), row = btn.closest('.ee-row');
+  if (box.querySelectorAll('.ee-rows .ee-row').length > 1) row.remove();
+  else row.querySelectorAll('input').forEach(i => { i.value = ''; i.classList.remove('bad'); });
+  eeRecalc(box);
+}
+function eeRecalc(el) {
+  const box = el.closest('.ee');
+  let tot = 0;
+  box.querySelectorAll('.ee-ore').forEach(i => {
+    const n = Number(i.value);
+    const ok = i.value === '' || (Number.isFinite(n) && n > 0);
+    i.classList.toggle('bad', !ok);
+    if (ok && i.value !== '') tot += n;
+  });
+  box.querySelector('.ee-tot b').textContent = `${fmtOre(tot)} h`;
+}
+// Righe compilate dell'area; righe completamente vuote ignorate, righe a metà segnalate come errore
+function eeCollect(box) {
+  const rows = []; let bad = false;
+  box.querySelectorAll('.ee-rows .ee-row').forEach(row => {
+    const att = row.querySelector('.ee-att'), ore = row.querySelector('.ee-ore');
+    const a = att.value.trim(), o = ore.value.trim();
+    if (!a && !o) return;
+    const n = Number(o);
+    const okA = !!a, okO = o !== '' && Number.isFinite(n) && n > 0;
+    att.classList.toggle('bad', !okA); ore.classList.toggle('bad', !okO);
+    if (!okA || !okO) { bad = true; return; }
+    rows.push({ attivita: a, ore: Math.round(n * 100) / 100 });
+  });
+  return { rows, bad };
 }
 
 function pick(ds) { _date = ds; render(); }
@@ -148,7 +221,7 @@ function pick(ds) { _date = ds; render(); }
 function recalc(inp) {
   const box = inp.closest('.area');
   let tot = 0;
-  box.querySelectorAll('input').forEach(i => {
+  box.querySelectorAll('.lv input').forEach(i => {
     const n = Number(i.value);
     const ok = i.value === '' || (Number.isInteger(n) && n >= 0);
     i.classList.toggle('bad', !ok);
@@ -160,31 +233,40 @@ function recalc(inp) {
 async function doSave() {
   const btn = document.getElementById('save'), alrt = document.getElementById('alert');
   const entries = [];
-  let bad = false;
+  let bad = false, badEe = false;
   document.querySelectorAll('.area').forEach(box => {
     const row = { areaId: +box.dataset.area };
-    box.querySelectorAll('input').forEach(i => {
+    box.querySelectorAll('.lv input').forEach(i => {
       const raw = i.value.trim();
       const n = raw === '' ? 0 : Number(raw);   // campo vuoto = 0 ticket
       if (!Number.isInteger(n) || n < 0) { bad = true; i.classList.add('bad'); }
       row[i.dataset.k] = n;
     });
+    const ee = eeCollect(box.querySelector('.ee'));
+    if (ee.bad) badEe = true;
+    row.ee = ee.rows;
     entries.push(row);
   });
   if (bad) { alrt.className = 'alert err'; alrt.textContent = '⚠ Inserisci solo numeri interi non negativi'; return; }
+  if (badEe) { alrt.className = 'alert err'; alrt.textContent = '⚠ Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero'; return; }
   btn.disabled = true; btn.textContent = 'Salvataggio...'; alrt.className = 'alert';
   try {
     const res = await callApi('saveTicketsByToken', { token: _token, data: _date, entries });
     // Aggiorna lo stato locale per le spunte "già inserito"
     _d.entries[_date] = _d.entries[_date] || {};
-    entries.forEach(r => { _d.entries[_date][r.areaId] = { ...r, totale: r.l1 + r.l2 + r.l3 }; });
+    _d.ee = _d.ee || {};
+    _d.ee[_date] = _d.ee[_date] || {};
+    entries.forEach(r => {
+      _d.entries[_date][r.areaId] = { l1: r.l1, l2: r.l2, l3: r.l3, totale: r.l1 + r.l2 + r.l3 };
+      _d.ee[_date][r.areaId] = r.ee;
+    });
     const next = _d.dates.find(ds => !dayDone(ds));
     const alerted = (res.soglie || []).filter(s => s.status === 'alert_sent' || s.status === 'already_sent');
     render();
     const a = document.getElementById('alert');
     a.className = alerted.length ? 'alert warn' : 'alert ok';
     a.textContent = `✓ Ticket salvati per ${fmtDate(_date)}.`
-      + (alerted.length ? ' ⚠ Soglia mensile raggiunta: i responsabili sono stati avvisati.' : '')
+      + (alerted.length ? ` ⚠ Soglia mensile ${alerted.some(s => s.kind === 'ee') ? (alerted.some(s => s.kind !== 'ee') ? 'ticket ed Extra Effort' : 'Extra Effort') : 'ticket'} raggiunta: i responsabili sono stati avvisati.` : '')
       + (next ? ` Restano da compilare: ${fmtDate(next)}.` : '');
   } catch (e) {
     alrt.className = 'alert err';

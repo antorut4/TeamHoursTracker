@@ -340,9 +340,10 @@
       </div>
       <!-- ANDAMENTO PROGETTO -->
       <div class="panel" id="panel-andamento">
-        <div class="page-header"><h1>Andamento progetto</h1><p>Ticket aperti per livello L1, L2, L3 — aggregati per mese su tutte le aree del progetto</p></div>
+        <div class="page-header"><h1>Andamento progetto</h1><p>Ticket L1, L2, L3 ed Extra Effort per progetto e area — valori riferiti al mese selezionato</p></div>
         <div class="card">
           <div class="field-row" style="margin-bottom:0">
+            <div class="field" style="min-width:220px;max-width:300px"><label>Progetto / area</label><select id="andNav" onchange="andNavChange(this.value)"></select></div>
             <div class="field" style="max-width:170px"><label>Mese</label><select id="andMonth" onchange="renderAndamento().catch(console.error)"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="andYear" onchange="renderAndamento().catch(console.error)"></select></div>
             <div class="field" style="max-width:140px"><label>Periodo grafico</label>
@@ -352,13 +353,13 @@
           </div>
         </div>
         <div class="card" id="andTicketCard" style="display:none">
-          <div class="card-title"><i class="fa-solid fa-ticket"></i> Inserisci ticket delle tue aree</div>
+          <div class="card-title"><i class="fa-solid fa-ticket"></i> Inserisci ticket ed Extra Effort delle tue aree</div>
           <div class="field-row">
             <div class="field" style="max-width:170px"><label>Data di riferimento</label><input type="date" id="andTicketDate" onchange="loadTicketDay().catch(console.error)"/></div>
           </div>
           <div id="andTicketForm"></div>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-            <button class="btn btn-ink" onclick="saveTicketDay()"><i class="fa-solid fa-floppy-disk"></i> Salva ticket</button>
+            <button class="btn btn-ink" onclick="saveTicketDay()"><i class="fa-solid fa-floppy-disk"></i> Salva ticket ed Extra Effort</button>
             <div id="andTicketMsg" class="msg"></div>
           </div>
         </div>
@@ -497,11 +498,11 @@
         </div>
         <div class="card" id="adminSoglieCard" style="display:none">
           <div class="acc-header">
-            <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-gauge-high"></i> Soglie ticket</div>
+            <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-gauge-high"></i> Soglie ticket ed Extra Effort</div>
             <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
           </div>
           <div class="acc-body">
-            <p style="font-size:.78rem;color:var(--ink-3);margin:12px 0">Soglia mensile sul totale ticket (L1+L2+L3). Al primo raggiungimento nel mese l'alert va ai Team Lead del progetto e delle aree, con in CC i loro manager e gli eventuali destinatari aggiuntivi.</p>
+            <p style="font-size:.78rem;color:var(--ink-3);margin:12px 0">Soglie mensili sul totale ticket (L1+L2+L3) e sulle ore di Extra Effort. Progetto senza aree multiple: soglia a livello di progetto. Progetto con più aree: soglia per singola area (la soglia complessiva di progetto resta facoltativa). Al primo raggiungimento nel mese l'alert va ai Team Lead dell'area e del progetto, con in CC i loro manager e gli eventuali destinatari aggiuntivi.</p>
             <div id="soglieMsg" class="msg"></div>
             <div id="soglieList"></div>
           </div>
@@ -535,6 +536,7 @@
                   <option value="sollecito_forecast">Sollecito Forecast</option>
                   <option value="ticket_reminder">Reminder ticket</option>
                   <option value="alert_soglia_ticket">Alert soglia ticket</option>
+                  <option value="alert_soglia_ee">Alert soglia Extra Effort</option>
                 </select>
               </div>
               <div class="field" style="max-width:150px"><label>Stato</label>

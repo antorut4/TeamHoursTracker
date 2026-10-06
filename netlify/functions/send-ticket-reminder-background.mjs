@@ -93,18 +93,29 @@ export const handler = async () => {
     const rows = await sql`
       SELECT r.id AS tl_id, r.full_name, r.email, a.id AS area_id, a.nome AS area, p.nome AS progetto,
              (SELECT COUNT(*)::int FROM ticket_giornalieri t
-               WHERE t.area_id = a.id AND t.data = ANY(${dates}::date[])) AS inseriti
+               WHERE t.area_id = a.id AND t.data = ANY(${dates}::date[])) AS inseriti,
+             (SELECT COUNT(*)::int FROM aree a2 WHERE a2.progetto_id = a.progetto_id) AS n_aree
       FROM aree a
       JOIN progetti p ON p.id = a.progetto_id
       JOIN risorse r  ON r.id = a.team_lead_id
       WHERE a.attiva AND r.email IS NOT NULL AND r.email <> ''
       ORDER BY r.cognome, r.nome, p.nome, a.nome`;
 
-    // Raggruppa per TL; salta chi ha già inserito tutte le date per tutte le aree
+    // Extra Effort già registrato per le date di riferimento: precompila la tabella nell'email
+    const [eeReg] = await sql`SELECT to_regclass('public.extra_effort') IS NOT NULL AS ok`;
+    const eeRows = eeReg.ok && rows.length ? await sql`
+      SELECT area_id, attivita, ore::float AS ore FROM extra_effort
+      WHERE area_id = ANY(${rows.map(r => r.area_id)}::int[]) AND data = ANY(${dates}::date[])
+      ORDER BY data, id` : [];
+    const eeByArea = {};
+    eeRows.forEach(e => { (eeByArea[e.area_id] = eeByArea[e.area_id] || []).push({ attivita: e.attivita, ore: e.ore }); });
+
+    // Raggruppa per TL; salta chi ha già inserito tutte le date per tutte le aree.
+    // L'Extra Effort è facoltativo: non conta fra gli inserimenti mancanti.
     const byTL = {};
     rows.forEach(r => {
       if (!byTL[r.tl_id]) byTL[r.tl_id] = { id: +r.tl_id, full_name: r.full_name, email: r.email, aree: [], mancanti: 0 };
-      byTL[r.tl_id].aree.push({ progetto: r.progetto, area: r.area });
+      byTL[r.tl_id].aree.push({ progetto: r.progetto, area: r.area, multi: r.n_aree > 1, ee: eeByArea[r.area_id] || [] });
       byTL[r.tl_id].mancanti += dates.length - r.inseriti;
     });
     const tls = Object.values(byTL);
@@ -113,8 +124,8 @@ export const handler = async () => {
     const results = { sent: 0, errors: [], skipped: tls.length - toSend.length };
     for (const tl of toSend) {
       const subject = dates.length > 1
-        ? `Ticket aperti — da ${formatDateIT(dates[0])} a ${formatDateIT(dates[dates.length - 1])}`
-        : `Ticket aperti ieri — ${formatDateIT(dates[0])}`;
+        ? `Ticket ed Extra Effort — da ${formatDateIT(dates[0])} a ${formatDateIT(dates[dates.length - 1])}`
+        : `Ticket ed Extra Effort di ieri — ${formatDateIT(dates[0])}`;
       const meta = { giorni: dates, aree: tl.aree.map(a => `${a.progetto} / ${a.area}`) };
       try {
         const token = generateToken(tl.id, dates);
@@ -158,18 +169,49 @@ export const handler = async () => {
   }
 };
 
+function fmtOre(n) {
+  return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+}
+
+// [[progetto, [aree...]], ...] mantenendo l'ordine della query
+function groupByProject(aree) {
+  const m = new Map();
+  aree.forEach(a => { if (!m.has(a.progetto)) m.set(a.progetto, []); m.get(a.progetto).push(a); });
+  return [...m.entries()];
+}
+
+// Area da mostrare come sottotitolo solo se il progetto è suddiviso in più aree
+const showArea = (list) => list.length > 1 || list[0].multi;
+
+function buildEeText(aree) {
+  return groupByProject(aree).map(([progetto, list]) => {
+    let t = `${progetto}\n`;
+    let tot = 0;
+    list.forEach(a => {
+      if (showArea(list)) t += `  Area: ${a.area}\n`;
+      t += `  Tipologia attività / Dettaglio | Extra Effort (ore)\n`;
+      if (a.ee.length) a.ee.forEach(e => { t += `  - ${e.attivita} | ${fmtOre(e.ore)}\n`; tot += e.ore; });
+      else t += `  - (da compilare) | —\n`;
+    });
+    t += `  Totale Extra Effort ${progetto}: ${tot ? fmtOre(tot) + ' ore' : '—'}\n`;
+    return t;
+  }).join('\n');
+}
+
 function buildEmailText(firstName, fullName, aree, dates, link) {
-  return `Team Hours Tracker — Inserimento ticket
+  return `Team Hours Tracker — Inserimento ticket ed Extra Effort
 
 Buongiorno ${firstName},
-inserisci i ticket aperti ${dates.length > 1 ? 'nei giorni indicati' : 'ieri'} per le tue aree.
+inserisci i ticket aperti ${dates.length > 1 ? 'nei giorni indicati' : 'ieri'} per le tue aree e l'eventuale Extra Effort.
 
 Data di riferimento: ${dates.map(formatDateIT).join(', ')}
 
 Aree:
 ${aree.map(a => `- Progetto: ${a.progetto} — Area: ${a.area}`).join('\n')}
 
-Inserisci il numero di ticket aperti suddividendoli per livello (L1, L2, L3):
+Extra Effort per progetto (una riga per attività):
+${buildEeText(aree)}
+Inserisci il numero di ticket aperti suddividendoli per livello (L1, L2, L3) e compila la tabella Extra Effort:
 ${link}
 
 Link valido ${TOKEN_HOURS} ore.
@@ -192,6 +234,37 @@ function buildEmailHtml(firstName, fullName, aree, dates, link) {
                 </td>
               </tr>
               <tr><td style="height:6px;line-height:6px;font-size:6px;">&nbsp;</td></tr>`).join('');
+  // Tabella Extra Effort per progetto: righe già registrate, oppure righe vuote da compilare dal link
+  const cell = 'padding:7px 12px;font-family:Arial,Helvetica,sans-serif;font-size:13px;border-bottom:1px solid #eeeeee;text-align:left;';
+  const head = 'padding:7px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;background-color:#f8f9fc;text-align:left;';
+  const eeHtml = groupByProject(aree).map(([progetto, list]) => {
+    let tot = 0;
+    const body = list.map(a => {
+      const sub = showArea(list) ? `
+                <tr><td colspan="2" style="${cell}font-size:12px;font-weight:700;color:#7b00cc;" class="dm-name">Area: ${_esc(a.area)}</td></tr>` : '';
+      const rowsHtml = a.ee.length
+        ? a.ee.map(e => { tot += e.ore; return `
+                <tr>
+                  <td style="${cell}color:#111827;" class="dm-name">${_esc(e.attivita)}</td>
+                  <td style="${cell}color:#111827;font-weight:700;text-align:right;white-space:nowrap;" class="dm-name">${fmtOre(e.ore)}</td>
+                </tr>`; }).join('')
+        : [1, 2, 3].map(() => `
+                <tr>
+                  <td style="${cell}color:#9ca3af;" class="dm-valid">Attività / dettaglio</td>
+                  <td style="${cell}color:#9ca3af;text-align:right;" class="dm-valid">—</td>
+                </tr>`).join('');
+      return `${sub}
+                <tr><td style="${head}">Tipologia attività / Dettaglio</td><td style="${head}text-align:right;white-space:nowrap;">Extra Effort (ore)</td></tr>${rowsHtml}`;
+    }).join('');
+    return `
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px;border:1px solid #eeeeee;border-radius:6px;">
+              <tr><td colspan="2" bgcolor="#f3e8ff" class="dm-badge" style="padding:9px 12px;background-color:#f3e8ff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#7b00cc;text-align:left;"><span class="dm-badge-text">${_esc(progetto)}</span></td></tr>${body}
+              <tr>
+                <td style="${cell}border-bottom:none;font-weight:700;color:#111827;" class="dm-name">Totale Extra Effort ${_esc(progetto)}</td>
+                <td style="${cell}border-bottom:none;font-weight:700;color:#111827;text-align:right;white-space:nowrap;" class="dm-name">${tot ? `${fmtOre(tot)} ore` : '—'}</td>
+              </tr>
+            </table>`;
+  }).join('');
   return `<!DOCTYPE html>
 <html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -232,7 +305,7 @@ table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
         <tr>
           <td align="center" valign="top" bgcolor="#A100FF" style="background-color:#A100FF;padding:32px 40px;">
             <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;line-height:1.3;">Team Hours Tracker</p>
-            <p style="margin:8px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;line-height:1.4;">Inserimento ticket</p>
+            <p style="margin:8px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;line-height:1.4;">Inserimento ticket ed Extra Effort</p>
           </td>
         </tr>
 
@@ -241,7 +314,7 @@ table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
           <td align="center" valign="top" bgcolor="#ffffff" class="dm-body" style="background-color:#ffffff;padding:40px 40px 20px;">
             <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;line-height:1.3;" class="dm-name">Buongiorno ${_esc(firstName)},</p>
             <p style="margin:0 0 24px;font-size:15px;color:#555555;font-family:Arial,Helvetica,sans-serif;line-height:1.5;" class="dm-intro">
-              inserisci i ticket aperti ${dates.length > 1 ? 'nei giorni indicati' : 'ieri'} per ${aree.length > 1 ? 'le tue aree' : 'la tua area'}, suddividendoli per livello L1, L2 e L3.
+              inserisci i ticket aperti ${dates.length > 1 ? 'nei giorni indicati' : 'ieri'} per ${aree.length > 1 ? 'le tue aree' : 'la tua area'}, suddividendoli per livello L1, L2 e L3, e l'eventuale Extra Effort.
             </p>
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 18px;">
               ${datesHtml}
@@ -254,19 +327,26 @@ table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
               ${areeHtml}
             </table>
 
+            <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#111827;font-family:Arial,Helvetica,sans-serif;text-align:left;" class="dm-name">Extra Effort</p>
+            <p style="margin:0 0 14px;font-size:13px;color:#555555;font-family:Arial,Helvetica,sans-serif;line-height:1.5;text-align:left;" class="dm-intro">
+              Per ogni progetto indica le attività di Extra Effort svolte: una riga per attività, con tipologia/dettaglio e ore. La tabella si compila dal pulsante qui sotto (puoi aggiungere tutte le righe necessarie).
+            </p>
+            ${eeHtml}
+            <div style="height:14px;line-height:14px;font-size:14px;">&nbsp;</div>
+
             <!--[if mso]>
             <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
-                         href="${link}" style="height:52px;v-text-anchor:middle;width:280px;" arcsize="7%"
+                         href="${link}" style="height:52px;v-text-anchor:middle;width:360px;" arcsize="7%"
                          strokecolor="#A100FF" fillcolor="#A100FF">
               <w:anchorlock/>
-              <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;letter-spacing:0.5px;">INSERISCI I TICKET</center>
+              <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;letter-spacing:0.5px;">INSERISCI TICKET ED EXTRA EFFORT</center>
             </v:roundrect>
             <![endif]-->
             <!--[if !mso]><!-->
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
               <tr>
                 <td align="center" bgcolor="#A100FF" style="background-color:#A100FF;border-radius:6px;">
-                  <a href="${link}" style="display:inline-block;padding:16px 44px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.3px;border-radius:6px;mso-hide:all;">INSERISCI I TICKET</a>
+                  <a href="${link}" style="display:inline-block;padding:16px 44px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:0.3px;border-radius:6px;mso-hide:all;">INSERISCI TICKET ED EXTRA EFFORT</a>
                 </td>
               </tr>
             </table>
@@ -280,7 +360,7 @@ table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
             <p style="margin:0 0 14px;font-size:13px;color:#888888;font-family:Arial,Helvetica,sans-serif;line-height:1.5;" class="dm-valid">Link valido ${TOKEN_HOURS} ore.</p>
             <p style="margin:0;font-size:13px;color:#888888;font-family:Arial,Helvetica,sans-serif;line-height:1.6;" class="dm-valid">
               Problemi con il pulsante?<br>
-              <a href="${link}" style="color:#A100FF;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;" class="dm-link-text">Apri inserimento ticket</a>
+              <a href="${link}" style="color:#A100FF;text-decoration:underline;font-family:Arial,Helvetica,sans-serif;" class="dm-link-text">Apri inserimento ticket ed Extra Effort</a>
             </p>
           </td>
         </tr>

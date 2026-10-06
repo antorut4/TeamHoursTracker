@@ -78,7 +78,7 @@ async function bootstrap(){
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`,
     sql`SELECT id, progetto_id, nome, team_lead_id, attiva FROM aree ORDER BY nome`,
-    sql`SELECT progetto_id, soglia, attiva, destinatari FROM soglie_ticket`
+    sql`SELECT progetto_id, area_id, soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket`
   ]);
   const wbs = {};
   wbsRows.forEach(r => {
@@ -146,6 +146,49 @@ async function ensureTicketSchema(){
     created_at  TIMESTAMP DEFAULT NOW(),
     UNIQUE (progetto_id, anno, mese, soglia)
   )`;
+
+  // ── Soglie per area + soglia Extra Effort ──
+  // soglie_ticket diventa la tabella unica delle soglie: area_id NULL = soglia di progetto,
+  // area_id valorizzato = soglia della singola area (progetti con più aree).
+  // soglia (ticket) e soglia_ee (ore Extra Effort) sono entrambe facoltative, una delle due è richiesta.
+  await sql`ALTER TABLE soglie_ticket ADD COLUMN IF NOT EXISTS area_id INTEGER REFERENCES aree(id) ON DELETE CASCADE`;
+  await sql`ALTER TABLE soglie_ticket ADD COLUMN IF NOT EXISTS soglia_ee NUMERIC(8,2) CHECK (soglia_ee > 0)`;
+  await sql`ALTER TABLE soglie_ticket ALTER COLUMN soglia DROP NOT NULL`;
+  await sql`ALTER TABLE soglie_ticket DROP CONSTRAINT IF EXISTS soglie_ticket_pkey`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS soglie_ticket_scope_uq ON soglie_ticket (progetto_id, (COALESCE(area_id, 0)))`;
+  // Alert ticket anche per area: la deduplicazione include l'area (0 = livello progetto)
+  await sql`ALTER TABLE ticket_alert_log ADD COLUMN IF NOT EXISTS area_id INTEGER REFERENCES aree(id) ON DELETE CASCADE`;
+  await sql`ALTER TABLE ticket_alert_log DROP CONSTRAINT IF EXISTS ticket_alert_log_progetto_id_anno_mese_soglia_key`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS ticket_alert_log_scope_uq ON ticket_alert_log (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia)`;
+
+  // Extra Effort: più attività per area e giorno, ognuna con descrizione e ore.
+  // Come per i ticket, progetto_id è denormalizzato per conservare lo storico.
+  await sql`CREATE TABLE IF NOT EXISTS extra_effort (
+    id          BIGSERIAL PRIMARY KEY,
+    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    data        DATE    NOT NULL,
+    attivita    TEXT    NOT NULL,
+    ore         NUMERIC(6,2) NOT NULL CHECK (ore > 0),
+    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
+    created_at  TIMESTAMP DEFAULT NOW()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS extra_effort_prj_data_idx ON extra_effort (progetto_id, data)`;
+  await sql`CREATE INDEX IF NOT EXISTS extra_effort_area_data_idx ON extra_effort (area_id, data)`;
+  // Registro alert Extra Effort: un solo invio per scope + mese + soglia
+  await sql`CREATE TABLE IF NOT EXISTS ee_alert_log (
+    id          BIGSERIAL PRIMARY KEY,
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    area_id     INTEGER REFERENCES aree(id) ON DELETE CASCADE,
+    anno        INTEGER NOT NULL,
+    mese        INTEGER NOT NULL,
+    soglia      NUMERIC(8,2) NOT NULL,
+    totale      NUMERIC(8,2) NOT NULL,
+    attivita    INTEGER NOT NULL,
+    stato       TEXT    NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMP DEFAULT NOW()
+  )`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS ee_alert_log_scope_uq ON ee_alert_log (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia)`;
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -1011,6 +1054,8 @@ async function saveArea(p){
     if (p.id) {
       await sql`UPDATE aree SET nome=${nome}, progetto_id=${p.progettoId}, team_lead_id=${tlId}, attiva=${attiva}
                 WHERE id=${p.id}`;
+      // La soglia d'area segue l'area se viene spostata su un altro progetto
+      await sql`UPDATE soglie_ticket SET progetto_id=${p.progettoId} WHERE area_id=${p.id}`;
     } else {
       await sql`INSERT INTO aree (progetto_id, nome, team_lead_id, attiva)
                 VALUES (${p.progettoId}, ${nome}, ${tlId}, ${attiva})`;
@@ -1020,72 +1065,114 @@ async function saveArea(p){
     throw e;
   }
 }
-// Eliminazione consentita solo se l'area non ha dati: lo storico ticket non va perso
+// Eliminazione consentita solo se l'area non ha dati: lo storico ticket ed Extra Effort non va perso
 async function deleteArea(p){
   const [r] = await sql`SELECT COUNT(*)::int AS n FROM ticket_giornalieri WHERE area_id=${p.id}`;
   if (r.n > 0) throw new Error(`L'area ha ${r.n} registrazioni ticket: disattivala invece di eliminarla`);
+  const [e] = await sql`SELECT COUNT(*)::int AS n FROM extra_effort WHERE area_id=${p.id}`;
+  if (e.n > 0) throw new Error(`L'area ha ${e.n} attività di Extra Effort registrate: disattivala invece di eliminarla`);
   await sql`DELETE FROM aree WHERE id=${p.id}`;
 }
 
-// ── lettura andamento: aggregati mensili per progetto + dettaglio per area del mese selezionato ──
+// Primo e ultimo giorno di un mese (0-based) come 'YYYY-MM-DD'
+function _monthRange(anno, mese) {
+  return [new Date(Date.UTC(anno, mese, 1)).toISOString().slice(0, 10),
+          new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10)];
+}
+
+// ── lettura andamento: aggregati mensili per progetto+area (ticket ed Extra Effort),
+//    dettaglio attività Extra Effort e alert del mese selezionato ──
+// scope: [{ progettoId, areaIds }] — areaIds null = progetto intero, array = solo quelle aree (Team Lead d'area).
+// progettoIds (formato precedente) equivale a scope con progetti interi.
 async function getAndamento(p){
-  const ids  = (p.progettoIds || []).map(Number).filter(Boolean);
-  if (!ids.length) return { mensili: [], perArea: [], alert: [] };
+  const scope = Array.isArray(p.scope) ? p.scope : (p.progettoIds || []).map(id => ({ progettoId: id, areaIds: null }));
+  const full = [], areas = [];
+  scope.forEach(s => {
+    const pid = +s.progettoId;
+    if (!pid) return;
+    if (Array.isArray(s.areaIds)) s.areaIds.map(Number).filter(Boolean).forEach(a => areas.push(a));
+    else full.push(pid);
+  });
+  if (!full.length && !areas.length) return { tickets: [], ee: [], eeDettaglio: [], alert: [] };
   const anno = +p.anno, mese = +p.mese;               // mese 0-based
   const mesi = Math.min(Math.max(+p.mesi || 12, 1), 24);
   const from = new Date(Date.UTC(anno, mese - mesi + 1, 1)).toISOString().slice(0, 10);
-  const to   = new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10);
-  const mFrom = new Date(Date.UTC(anno, mese, 1)).toISOString().slice(0, 10);
-  const [mensili, perArea, alert] = await Promise.all([
-    sql`SELECT progetto_id,
+  const [mFrom, to] = _monthRange(anno, mese);
+  const [tickets, ee, eeDettaglio, alertTk, alertEe] = await Promise.all([
+    sql`SELECT progetto_id, area_id,
                EXTRACT(YEAR FROM data)::int      AS anno,
                EXTRACT(MONTH FROM data)::int - 1 AS mese,
                SUM(l1)::int AS l1, SUM(l2)::int AS l2, SUM(l3)::int AS l3, SUM(totale)::int AS totale,
-               COUNT(*)::int AS registrazioni
-        FROM ticket_giornalieri
-        WHERE progetto_id = ANY(${ids}::int[]) AND data BETWEEN ${from}::date AND ${to}::date
-        GROUP BY 1, 2, 3`,
-    sql`SELECT area_id, progetto_id,
-               SUM(l1)::int AS l1, SUM(l2)::int AS l2, SUM(l3)::int AS l3, SUM(totale)::int AS totale,
                COUNT(*)::int AS giorni, MAX(data)::text AS ultimo
         FROM ticket_giornalieri
-        WHERE progetto_id = ANY(${ids}::int[]) AND data BETWEEN ${mFrom}::date AND ${to}::date
-        GROUP BY 1, 2`,
-    sql`SELECT progetto_id, soglia, totale, stato, to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
+          AND data BETWEEN ${from}::date AND ${to}::date
+        GROUP BY 1, 2, 3, 4`,
+    sql`SELECT progetto_id, area_id,
+               EXTRACT(YEAR FROM data)::int      AS anno,
+               EXTRACT(MONTH FROM data)::int - 1 AS mese,
+               SUM(ore)::float AS ore, COUNT(*)::int AS n
+        FROM extra_effort
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
+          AND data BETWEEN ${from}::date AND ${to}::date
+        GROUP BY 1, 2, 3, 4`,
+    sql`SELECT e.id, e.progetto_id, e.area_id, e.data::text AS data, e.attivita, e.ore::float AS ore,
+               r.full_name AS inserito_da
+        FROM extra_effort e LEFT JOIN risorse r ON r.id = e.inserito_da
+        WHERE (e.progetto_id = ANY(${full}::int[]) OR e.area_id = ANY(${areas}::int[]))
+          AND e.data BETWEEN ${mFrom}::date AND ${to}::date
+        ORDER BY e.data DESC, e.id`,
+    sql`SELECT 'ticket' AS kind, progetto_id, area_id, soglia::float AS soglia, totale::float AS totale, stato,
+               to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
         FROM ticket_alert_log
-        WHERE progetto_id = ANY(${ids}::int[]) AND anno=${anno} AND mese=${mese}`
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[])) AND anno=${anno} AND mese=${mese}`,
+    sql`SELECT 'ee' AS kind, progetto_id, area_id, soglia::float AS soglia, totale::float AS totale, stato,
+               to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
+        FROM ee_alert_log
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[])) AND anno=${anno} AND mese=${mese}`
   ]);
-  return { mensili, perArea, alert };
+  return { tickets, ee, eeDettaglio, alert: [...alertTk, ...alertEe] };
 }
 
-// ── soglia mensile: inserimento/modifica/rimozione + ricalcolo immediato del mese corrente ──
+// Valore di soglia facoltativo: vuoto = non impostata
+function _optThreshold(v, intOnly, label) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0 || n > 1000000 || (intOnly && !Number.isInteger(n)))
+    throw new Error(`La soglia ${label} deve essere un numero ${intOnly ? 'intero ' : ''}maggiore di zero`);
+  return intOnly ? n : Math.round(n * 100) / 100;
+}
+
+// ── soglie mensili (ticket + Extra Effort) di progetto o di area: inserimento/modifica/rimozione
+//    + ricalcolo immediato del mese corrente. I campi non inviati restano invariati. ──
 async function saveSoglia(p){
   if (!p.progettoId) throw new Error('Progetto obbligatorio');
-  if (p.soglia === null || p.soglia === '' || p.soglia === undefined) {
-    await sql`DELETE FROM soglie_ticket WHERE progetto_id=${p.progettoId}`;
+  const pid = +p.progettoId;
+  const areaId = p.areaId ? +p.areaId : null;
+  if (areaId) {
+    const [a] = await sql`SELECT progetto_id FROM aree WHERE id=${areaId}`;
+    if (!a || +a.progetto_id !== pid) throw new Error('L\'area non appartiene al progetto indicato');
+  }
+  const [cur] = await sql`SELECT soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket
+                          WHERE progetto_id=${pid} AND COALESCE(area_id, 0)=${areaId || 0}`;
+  const soglia   = p.soglia   !== undefined ? _optThreshold(p.soglia, true, 'ticket')          : (cur ? cur.soglia : null);
+  const sogliaEe = p.sogliaEe !== undefined ? _optThreshold(p.sogliaEe, false, 'Extra Effort') : (cur ? cur.soglia_ee : null);
+  if (soglia === null && sogliaEe === null) {
+    await sql`DELETE FROM soglie_ticket WHERE progetto_id=${pid} AND COALESCE(area_id, 0)=${areaId || 0}`;
     return { status: 'removed' };
   }
-  const soglia = Number(p.soglia);
-  if (!Number.isInteger(soglia) || soglia <= 0) throw new Error('La soglia deve essere un numero intero maggiore di zero');
-  const attiva = p.attiva !== false;
-  const destinatari = p.destinatari !== undefined ? ((p.destinatari || '').trim() || null) : undefined;
-  if (destinatari === undefined) {
-    await sql`INSERT INTO soglie_ticket (progetto_id, soglia, attiva, updated_by, updated_at)
-              VALUES (${p.progettoId}, ${soglia}, ${attiva}, ${p.risorsaId || null}, NOW())
-              ON CONFLICT (progetto_id) DO UPDATE SET soglia=EXCLUDED.soglia, attiva=EXCLUDED.attiva,
-                updated_by=EXCLUDED.updated_by, updated_at=NOW()`;
-  } else {
-    await sql`INSERT INTO soglie_ticket (progetto_id, soglia, attiva, destinatari, updated_by, updated_at)
-              VALUES (${p.progettoId}, ${soglia}, ${attiva}, ${destinatari}, ${p.risorsaId || null}, NOW())
-              ON CONFLICT (progetto_id) DO UPDATE SET soglia=EXCLUDED.soglia, attiva=EXCLUDED.attiva,
-                destinatari=EXCLUDED.destinatari, updated_by=EXCLUDED.updated_by, updated_at=NOW()`;
-  }
+  const attiva = p.attiva !== undefined ? p.attiva !== false : (cur ? cur.attiva : true);
+  const destinatari = p.destinatari !== undefined ? ((p.destinatari || '').trim() || null) : (cur ? cur.destinatari : null);
+  await sql`INSERT INTO soglie_ticket (progetto_id, area_id, soglia, soglia_ee, attiva, destinatari, updated_by, updated_at)
+            VALUES (${pid}, ${areaId}, ${soglia}, ${sogliaEe}, ${attiva}, ${destinatari}, ${p.risorsaId || null}, NOW())
+            ON CONFLICT (progetto_id, (COALESCE(area_id, 0))) DO UPDATE SET soglia=EXCLUDED.soglia, soglia_ee=EXCLUDED.soglia_ee,
+              attiva=EXCLUDED.attiva, destinatari=EXCLUDED.destinatari, updated_by=EXCLUDED.updated_by, updated_at=NOW()`;
   // Una nuova soglia già superata nel mese corrente va gestita subito
   const [y, m] = _todayRome().split('-').map(Number);
-  let check;
-  try { check = await _checkTicketThreshold(+p.progettoId, y, m - 1); }
-  catch (err) { console.error('[ticket-alert]', err.message); check = { status: 'error', error: err.message }; }
-  return { status: 'saved', check };
+  let checks;
+  try { checks = await _checkThresholds(pid, areaId, y, m - 1); }
+  catch (err) { console.error('[threshold-alert]', err.message); checks = [{ kind: 'ticket', status: 'error', error: err.message }]; }
+  return { status: 'saved', checks, check: checks.find(c => c.kind === 'ticket') || null };
 }
 
 // ── giornata ticket di un Team Lead: aree attive + valori già inseriti per le date richieste ──
@@ -1097,19 +1184,46 @@ async function _ticketDayForTL(tlId, dates){
     FROM aree a JOIN progetti p ON p.id = a.progetto_id
     WHERE a.team_lead_id=${tlId} AND a.attiva
     ORDER BY p.nome, a.nome`;
-  const rows = aree.length ? await sql`
-    SELECT area_id, data::text AS data, l1, l2, l3, totale
-    FROM ticket_giornalieri
-    WHERE area_id = ANY(${aree.map(a => a.id)}::int[]) AND data = ANY(${dates}::date[])` : [];
-  const entries = {};
+  const areaIds = aree.map(a => a.id);
+  const [rows, eeRows] = aree.length ? await Promise.all([
+    sql`SELECT area_id, data::text AS data, l1, l2, l3, totale
+        FROM ticket_giornalieri
+        WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])`,
+    sql`SELECT area_id, data::text AS data, attivita, ore::float AS ore
+        FROM extra_effort
+        WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
+        ORDER BY id`
+  ]) : [[], []];
+  const entries = {}, ee = {};
   rows.forEach(r => {
     if (!entries[r.data]) entries[r.data] = {};
     entries[r.data][r.area_id] = { l1: r.l1, l2: r.l2, l3: r.l3, totale: r.totale };
   });
-  return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries };
+  eeRows.forEach(r => {
+    if (!ee[r.data]) ee[r.data] = {};
+    (ee[r.data][r.area_id] = ee[r.data][r.area_id] || []).push({ attivita: r.attivita, ore: r.ore });
+  });
+  return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries, ee };
 }
 
-// Upsert dei ticket di una giornata per le aree del TL, poi controllo soglie dei progetti coinvolti
+// Righe Extra Effort di un'area per una giornata. undefined = non inviate (Extra Effort invariato).
+function _eeRows(list) {
+  if (list === undefined) return undefined;
+  if (!Array.isArray(list)) throw new Error('Formato Extra Effort non valido');
+  if (list.length > 50) throw new Error('Extra Effort: massimo 50 attività per area e giorno');
+  return list.map(r => {
+    const attivita = String(r?.attivita ?? '').trim();
+    if (!attivita) throw new Error('Extra Effort: indica la tipologia attività / dettaglio per ogni riga');
+    if (attivita.length > 300) throw new Error('Extra Effort: descrizione troppo lunga (massimo 300 caratteri)');
+    const ore = Number(r?.ore);
+    if (r?.ore === '' || r?.ore === null || !Number.isFinite(ore) || ore <= 0 || ore > 999)
+      throw new Error(`Extra Effort "${attivita}": inserisci un numero di ore maggiore di zero`);
+    return { attivita, ore: Math.round(ore * 100) / 100 };
+  });
+}
+
+// Upsert dei ticket (e sostituzione delle attività Extra Effort) di una giornata per le aree del TL,
+// in un'unica transazione; poi controllo soglie di progetti e aree coinvolti
 async function _saveTicketEntries(tlId, data, entries){
   if (!_isIsoDate(data)) throw new Error('Data non valida');
   if (data > _todayRome()) throw new Error('Non è possibile inserire ticket per date future');
@@ -1122,19 +1236,31 @@ async function _saveTicketEntries(tlId, data, entries){
     const areaId = +e.areaId;
     if (!prjByArea[areaId]) throw new Error('Area non assegnata a questo Team Lead o non attiva');
     return { areaId, progettoId: prjByArea[areaId],
-             l1: _ticketInt(e.l1, 'L1'), l2: _ticketInt(e.l2, 'L2'), l3: _ticketInt(e.l3, 'L3') };
+             l1: _ticketInt(e.l1, 'L1'), l2: _ticketInt(e.l2, 'L2'), l3: _ticketInt(e.l3, 'L3'),
+             ee: _eeRows(e.ee) };
   });
+  const queries = [];
   for (const e of clean) {
-    await sql`INSERT INTO ticket_giornalieri (area_id, progetto_id, data, l1, l2, l3, inserito_da, updated_at)
+    queries.push(sql`INSERT INTO ticket_giornalieri (area_id, progetto_id, data, l1, l2, l3, inserito_da, updated_at)
               VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${e.l1}, ${e.l2}, ${e.l3}, ${tlId}, NOW())
               ON CONFLICT (area_id, data) DO UPDATE SET l1=EXCLUDED.l1, l2=EXCLUDED.l2, l3=EXCLUDED.l3,
-                inserito_da=EXCLUDED.inserito_da, updated_at=NOW()`;
+                inserito_da=EXCLUDED.inserito_da, updated_at=NOW()`);
+    if (e.ee === undefined) continue;
+    queries.push(sql`DELETE FROM extra_effort WHERE area_id=${e.areaId} AND data=${data}::date`);
+    for (const r of e.ee) {
+      queries.push(sql`INSERT INTO extra_effort (area_id, progetto_id, data, attivita, ore, inserito_da)
+                VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.attivita}, ${r.ore}, ${tlId})`);
+    }
   }
+  await sql.transaction(queries);
   const [y, m] = data.split('-').map(Number);
+  // Soglia di progetto per ogni progetto toccato + soglia d'area per ogni area toccata
+  const scopes = [...new Set(clean.map(e => e.progettoId))].map(pid => [pid, null])
+    .concat(clean.map(e => [e.progettoId, e.areaId]));
   const soglie = [];
-  for (const pid of [...new Set(clean.map(e => e.progettoId))]) {
-    try { soglie.push({ progettoId: pid, ...(await _checkTicketThreshold(pid, y, m - 1)) }); }
-    catch (err) { console.error('[ticket-alert]', err.message); soglie.push({ progettoId: pid, status: 'error', error: err.message }); }
+  for (const [pid, aid] of scopes) {
+    try { (await _checkThresholds(pid, aid, y, m - 1)).forEach(c => soglie.push(c)); }
+    catch (err) { console.error('[threshold-alert]', err.message); soglie.push({ progettoId: pid, areaId: aid, status: 'error', error: err.message }); }
   }
   return { saved: clean.length, soglie };
 }
@@ -1158,63 +1284,114 @@ async function saveTicketsByToken(p){
 }
 
 // ════════════════════════════════════════════════════════════════════════
-//  Controllo soglia + alert email (una sola volta per progetto + mese + soglia)
+//  Controllo soglie + alert email (una sola volta per scope + mese + soglia)
+//  Scope: progetto intero (areaId null) o singola area. Tipi: ticket (L1+L2+L3) ed Extra Effort (ore).
 // ════════════════════════════════════════════════════════════════════════
-async function _checkTicketThreshold(progettoId, anno, mese){
-  const [cfg] = await sql`SELECT soglia, attiva, destinatari FROM soglie_ticket WHERE progetto_id=${progettoId}`;
-  if (!cfg || !cfg.attiva) return { status: 'none' };
-  const from = new Date(Date.UTC(anno, mese, 1)).toISOString().slice(0, 10);
-  const to   = new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10);
-  const [tot] = await sql`
-    SELECT COALESCE(SUM(l1),0)::int AS l1, COALESCE(SUM(l2),0)::int AS l2,
-           COALESCE(SUM(l3),0)::int AS l3, COALESCE(SUM(totale),0)::int AS totale
-    FROM ticket_giornalieri
-    WHERE progetto_id=${progettoId} AND data BETWEEN ${from}::date AND ${to}::date`;
-  const soglia = +cfg.soglia;
-  if (tot.totale < soglia) return { status: 'below', soglia, totale: tot.totale };
+const _r2 = n => Math.round(Number(n) * 100) / 100;
+function _fmtOre(n) { return `${Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 })} h`; }
 
-  // "Prenota" l'invio: il vincolo UNIQUE fa vincere un solo chiamante anche in caso di salvataggi concorrenti
-  const [claim] = await sql`
-    INSERT INTO ticket_alert_log (progetto_id, anno, mese, soglia, totale, l1, l2, l3)
-    VALUES (${progettoId}, ${anno}, ${mese}, ${soglia}, ${tot.totale}, ${tot.l1}, ${tot.l2}, ${tot.l3})
-    ON CONFLICT (progetto_id, anno, mese, soglia) DO NOTHING
-    RETURNING id`;
-  if (!claim) return { status: 'already_sent', soglia, totale: tot.totale };
-
-  let res;
-  try { res = await _sendTicketAlert(progettoId, anno, mese, soglia, tot, cfg.destinatari); }
-  catch (err) { res = { sent: false, reason: 'error', error: err.message }; }
-  if (res.sent) {
-    await sql`UPDATE ticket_alert_log SET stato='sent' WHERE id=${claim.id}`;
-  } else {
-    // Invio non riuscito: rilascia la prenotazione così il prossimo salvataggio ritenta
-    await sql`DELETE FROM ticket_alert_log WHERE id=${claim.id}`;
-  }
-  return { status: res.sent ? 'alert_sent' : 'alert_failed', reason: res.reason, soglia, totale: tot.totale };
+// Totali del mese per lo scope: area → righe dell'area, progetto → tutte le righe del progetto
+async function _scopeMonthTotals(progettoId, areaId, anno, mese){
+  const [from, to] = _monthRange(anno, mese);
+  const aid = areaId || null;
+  const [[t], [e]] = await Promise.all([
+    sql`SELECT COALESCE(SUM(l1),0)::int AS l1, COALESCE(SUM(l2),0)::int AS l2,
+               COALESCE(SUM(l3),0)::int AS l3, COALESCE(SUM(totale),0)::int AS totale
+        FROM ticket_giornalieri
+        WHERE ((${aid}::int IS NULL AND progetto_id=${progettoId}) OR area_id=${aid})
+          AND data BETWEEN ${from}::date AND ${to}::date`,
+    sql`SELECT COALESCE(SUM(ore),0)::float AS ore, COUNT(*)::int AS n
+        FROM extra_effort
+        WHERE ((${aid}::int IS NULL AND progetto_id=${progettoId}) OR area_id=${aid})
+          AND data BETWEEN ${from}::date AND ${to}::date`
+  ]);
+  return { ...t, ee_ore: _r2(e.ore), ee_n: e.n };
 }
 
-async function _sendTicketAlert(progettoId, anno, mese, soglia, tot, extra){
+async function _checkThresholds(progettoId, areaId, anno, mese){
+  const aid = areaId || null;
+  const [cfg] = await sql`SELECT soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket
+                          WHERE progetto_id=${progettoId} AND COALESCE(area_id, 0)=${aid || 0}`;
+  if (!cfg || !cfg.attiva) return [];
+  const tot = await _scopeMonthTotals(progettoId, aid, anno, mese);
+  const scope = { progettoId, areaId: aid };
+  const out = [];
+  if (cfg.soglia)    out.push({ ...scope, kind: 'ticket', ...(await _claimAndAlert('ticket', scope, anno, mese, +cfg.soglia, tot, cfg.destinatari)) });
+  if (cfg.soglia_ee) out.push({ ...scope, kind: 'ee',     ...(await _claimAndAlert('ee', scope, anno, mese, _r2(cfg.soglia_ee), tot, cfg.destinatari)) });
+  return out;
+}
+
+async function _claimAndAlert(kind, scope, anno, mese, soglia, tot, extra){
+  const totale = kind === 'ee' ? tot.ee_ore : tot.totale;
+  if (totale < soglia) return { status: 'below', soglia, totale };
+  const { progettoId, areaId } = scope;
+
+  // "Prenota" l'invio: l'indice UNIQUE fa vincere un solo chiamante anche in caso di salvataggi concorrenti
+  const [claim] = kind === 'ee'
+    ? await sql`
+        INSERT INTO ee_alert_log (progetto_id, area_id, anno, mese, soglia, totale, attivita)
+        VALUES (${progettoId}, ${areaId}, ${anno}, ${mese}, ${soglia}, ${totale}, ${tot.ee_n})
+        ON CONFLICT (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia) DO NOTHING
+        RETURNING id`
+    : await sql`
+        INSERT INTO ticket_alert_log (progetto_id, area_id, anno, mese, soglia, totale, l1, l2, l3)
+        VALUES (${progettoId}, ${areaId}, ${anno}, ${mese}, ${soglia}, ${totale}, ${tot.l1}, ${tot.l2}, ${tot.l3})
+        ON CONFLICT (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia) DO NOTHING
+        RETURNING id`;
+  if (!claim) return { status: 'already_sent', soglia, totale };
+
+  let res;
+  try { res = await _sendThresholdAlert(kind, scope, anno, mese, soglia, tot, extra); }
+  catch (err) { res = { sent: false, reason: 'error', error: err.message }; }
+  if (res.sent) {
+    if (kind === 'ee') await sql`UPDATE ee_alert_log SET stato='sent' WHERE id=${claim.id}`;
+    else               await sql`UPDATE ticket_alert_log SET stato='sent' WHERE id=${claim.id}`;
+  } else {
+    // Invio non riuscito: rilascia la prenotazione così il prossimo salvataggio ritenta
+    if (kind === 'ee') await sql`DELETE FROM ee_alert_log WHERE id=${claim.id}`;
+    else               await sql`DELETE FROM ticket_alert_log WHERE id=${claim.id}`;
+  }
+  return { status: res.sent ? 'alert_sent' : 'alert_failed', reason: res.reason, soglia, totale };
+}
+
+async function _sendThresholdAlert(kind, scope, anno, mese, soglia, tot, extra){
   const GMAIL_USER = process.env.GMAIL_USER;
   const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
   const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
   const SITE_URL   = (process.env.SITE_URL || '').replace(/\/$/, '');
+  const { progettoId, areaId } = scope;
+  const isEe = kind === 'ee';
   const [prj] = await sql`SELECT nome FROM progetti WHERE id=${progettoId}`;
+  const [area] = areaId ? await sql`SELECT nome FROM aree WHERE id=${areaId}` : [null];
   const progetto = prj ? prj.nome : `#${progettoId}`;
+  const areaNome = area ? area.nome : null;
+  const scopeLabel = areaNome ? `${progetto} / ${areaNome}` : progetto;
   const meseLabel = `${_MESI_IT[mese]} ${anno}`;
-  const subject = `[Alert soglia ticket] ${progetto} — ${meseLabel}`;
-  const meta = { progetto, anno, mese, soglia, totale: tot.totale, l1: tot.l1, l2: tot.l2, l3: tot.l3 };
+  const tipoLog = isEe ? 'alert_soglia_ee' : 'alert_soglia_ticket';
+  const subject = `[Alert soglia ${isEe ? 'Extra Effort' : 'ticket'}] ${scopeLabel} — ${meseLabel}`;
+  const meta = isEe
+    ? { progetto, area: areaNome, anno, mese, soglia, totale: tot.ee_ore, attivita: tot.ee_n }
+    : { progetto, area: areaNome, anno, mese, soglia, totale: tot.totale, l1: tot.l1, l2: tot.l2, l3: tot.l3 };
   if (!GMAIL_USER || !GMAIL_PASS) {
-    await _logEmail('alert_soglia_ticket', '—', progetto, subject, 'skipped', 'SMTP non configurato', meta);
+    await _logEmail(tipoLog, '—', scopeLabel, subject, 'skipped', 'SMTP non configurato', meta);
     return { sent: false, reason: 'no_smtp' };
   }
 
-  // TO: Team Lead delle aree attive + Team Lead del progetto. CC: manager di questi TL + destinatari extra
-  const tls = await sql`
-    SELECT r.id, r.full_name, r.email, r.manager_id
-    FROM risorse r
-    WHERE r.id IN (SELECT team_lead_id FROM aree WHERE progetto_id=${progettoId} AND attiva AND team_lead_id IS NOT NULL
-                   UNION SELECT risorsa_id FROM progetto_team_leads WHERE progetto_id=${progettoId})
-      AND r.email IS NOT NULL AND r.email <> ''`;
+  // TO: Team Lead dell'area (o di tutte le aree attive, se soglia di progetto) + Team Lead del progetto.
+  // CC: manager di questi TL + destinatari extra configurati sulla soglia
+  const tls = areaId
+    ? await sql`
+        SELECT r.id, r.full_name, r.email, r.manager_id
+        FROM risorse r
+        WHERE r.id IN (SELECT team_lead_id FROM aree WHERE id=${areaId} AND team_lead_id IS NOT NULL
+                       UNION SELECT risorsa_id FROM progetto_team_leads WHERE progetto_id=${progettoId})
+          AND r.email IS NOT NULL AND r.email <> ''`
+    : await sql`
+        SELECT r.id, r.full_name, r.email, r.manager_id
+        FROM risorse r
+        WHERE r.id IN (SELECT team_lead_id FROM aree WHERE progetto_id=${progettoId} AND attiva AND team_lead_id IS NOT NULL
+                       UNION SELECT risorsa_id FROM progetto_team_leads WHERE progetto_id=${progettoId})
+          AND r.email IS NOT NULL AND r.email <> ''`;
   const mgrIds = [...new Set(tls.map(t => t.manager_id).filter(Boolean))];
   const mgrs = mgrIds.length ? await sql`
     SELECT email FROM risorse WHERE id = ANY(${mgrIds}::int[]) AND email IS NOT NULL AND email <> ''` : [];
@@ -1223,75 +1400,87 @@ async function _sendTicketAlert(progettoId, anno, mese, soglia, tot, extra){
   const extraList = String(extra || '').split(/[,;\s]+/).map(norm).filter(e => e.includes('@'));
   const cc = [...new Set([...mgrs.map(m => norm(m.email)), ...extraList])].filter(e => !to.includes(e));
   if (!to.length && !cc.length) {
-    await _logEmail('alert_soglia_ticket', '—', progetto, subject, 'skipped', 'Nessun destinatario con email configurato', meta);
+    await _logEmail(tipoLog, '—', scopeLabel, subject, 'skipped', 'Nessun destinatario con email configurato', meta);
     return { sent: false, reason: 'no_recipients' };
   }
   // Senza TL con email, i destinatari in CC diventano principali
   const toFinal = to.length ? to : cc;
   const ccFinal = to.length ? cc : [];
 
-  const link = `${SITE_URL}/?tab=andamento`;
-  const diff = tot.totale - soglia;
+  const link = `${SITE_URL}/?tab=andamento&prj=${progettoId}${areaId ? `&area=${areaId}` : ''}`;
+  const content = _thresholdAlertContent(isEe, progetto, areaNome, meseLabel, soglia, tot, link);
   const mailer = _absenceTransporter();
   const logTo = toFinal.join(', ');
   const fullMeta = { ...meta, to: toFinal, cc: ccFinal };
   try {
     const info = await mailer.sendMail({
       from: `${FROM_NAME} <${GMAIL_USER}>`, to: toFinal, cc: ccFinal.length ? ccFinal : undefined, subject,
-      html: _buildTicketAlertHtml(progetto, meseLabel, soglia, tot, diff, link),
-      text: _buildTicketAlertText(progetto, meseLabel, soglia, tot, diff, link)
+      html: _buildThresholdAlertHtml(content),
+      text: _buildThresholdAlertText(content)
     });
     const rejected = info?.rejected || [];
     const accepted = info?.accepted || [];
     if (!accepted.length) {
-      await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'error', 'Destinatari rifiutati da SMTP', { ...fullMeta, rejected });
+      await _logEmail(tipoLog, logTo, scopeLabel, subject, 'error', 'Destinatari rifiutati da SMTP', { ...fullMeta, rejected });
       return { sent: false, reason: 'error' };
     }
-    await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'sent', null,
+    await _logEmail(tipoLog, logTo, scopeLabel, subject, 'sent', null,
                     { ...fullMeta, rejected, messageId: info?.messageId || null });
     return { sent: true, reason: 'ok' };
   } catch (err) {
-    await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'error', err.message,
+    await _logEmail(tipoLog, logTo, scopeLabel, subject, 'error', err.message,
                     { ...fullMeta, code: err.code || null, responseCode: err.responseCode || null });
     return { sent: false, reason: 'error', error: err.message };
   }
 }
 
-function _diffSentence(diff) {
-  if (diff === 0) return 'La soglia è stata raggiunta.';
-  return `La soglia è stata superata di ${diff} ticket.`;
+// Contenuto dell'alert, condiviso fra versione HTML e testo
+function _thresholdAlertContent(isEe, progetto, areaNome, meseLabel, soglia, tot, link) {
+  const totale = isEe ? tot.ee_ore : tot.totale;
+  const diff = _r2(totale - soglia);
+  const unit = v => isEe ? _fmtOre(v) : `${v} ticket`;
+  const subjectText = areaNome ? `L'area ${areaNome} del progetto ${progetto}` : `Il progetto ${progetto}`;
+  const subjectHtml = areaNome ? `L'area <strong>${_esc(areaNome)}</strong> del progetto <strong>${_esc(progetto)}</strong>`
+                               : `Il progetto <strong>${_esc(progetto)}</strong>`;
+  const what = isEe ? 'la soglia mensile di Extra Effort configurata' : 'la soglia mensile configurata';
+  const rows = isEe
+    ? [['Mese', meseLabel], ['Soglia', unit(soglia)], ['Extra Effort registrato', unit(totale), true], ['Attività registrate', `${tot.ee_n}`]]
+    : [['Mese', meseLabel], ['Soglia', unit(soglia)], ['Ticket registrati', `${totale}`, true],
+       ['L1', `${tot.l1}`], ['L2', `${tot.l2}`], ['L3', `${tot.l3}`]];
+  return {
+    heading: isEe ? 'Alert – Soglia Extra Effort raggiunta' : 'Alert – Soglia ticket raggiunta',
+    introText: `${subjectText} ha raggiunto ${what}.`,
+    introHtml: `${subjectHtml} ha raggiunto ${what}.`,
+    title: areaNome ? `${progetto} / ${areaNome}` : progetto,
+    rows,
+    diffMsg: diff === 0 ? 'La soglia è stata raggiunta.' : `La soglia è stata superata di ${unit(diff)}.`,
+    link
+  };
 }
 
-function _buildTicketAlertText(progetto, meseLabel, soglia, tot, diff, link) {
+function _buildThresholdAlertText(c) {
   return [
-    'Alert – Soglia ticket raggiunta',
+    c.heading,
     '',
-    `Il progetto ${progetto} ha raggiunto la soglia mensile configurata.`,
+    c.introText,
     '',
-    `Mese: ${meseLabel}`,
-    `Soglia: ${soglia} ticket`,
-    `Ticket registrati: ${tot.totale}`,
+    ...c.rows.map(([label, value]) => `${label}: ${value}`),
     '',
-    `L1: ${tot.l1}`,
-    `L2: ${tot.l2}`,
-    `L3: ${tot.l3}`,
-    '',
-    _diffSentence(diff),
+    c.diffMsg,
     '',
     'Accedi alla sezione Andamento progetto per visualizzare il dettaglio:',
-    link,
+    c.link,
     '',
     '---',
     'Messaggio automatico generato da Team Hours Tracker.'
   ].join('\n');
 }
 
-function _buildTicketAlertHtml(progetto, meseLabel, soglia, tot, diff, link) {
-  const P = _esc(progetto);
+function _buildThresholdAlertHtml(c) {
   const row = (label, value, strong) => `
             <tr>
-              <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;" class="dm-label">${label}</td>
-              <td align="right" style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:${strong ? 700 : 600};" class="dm-value">${value}</td>
+              <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;" class="dm-label">${_esc(label)}</td>
+              <td align="right" style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:${strong ? 700 : 600};" class="dm-value">${_esc(value)}</td>
             </tr>`;
   return `<!DOCTYPE html>
 <html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -1300,7 +1489,7 @@ function _buildTicketAlertHtml(progetto, meseLabel, soglia, tot, diff, link) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<title>Alert soglia ticket — ${P}</title>
+<title>${_esc(c.heading)} — ${_esc(c.title)}</title>
 <!--[if mso]>
 <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
 <style>table{border-collapse:collapse;}</style>
@@ -1327,14 +1516,14 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
       <tr>
         <td align="center" bgcolor="#A100FF" style="background-color:#A100FF;padding:28px 40px;">
           <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">Team Hours Tracker</p>
-          <p style="margin:6px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;">Alert – Soglia ticket raggiunta</p>
+          <p style="margin:6px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;">${_esc(c.heading)}</p>
         </td>
       </tr>
       <!-- INTRO -->
       <tr>
         <td class="dm-body" style="background-color:#ffffff;padding:32px 40px 16px;">
           <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:600;color:#111827;" class="dm-title">
-            Il progetto <strong>${P}</strong> ha raggiunto la soglia mensile configurata.
+            ${c.introHtml}
           </p>
         </td>
       </tr>
@@ -1342,12 +1531,7 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
       <tr>
         <td class="dm-body" style="background-color:#ffffff;padding:0 40px 8px;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
-            ${row('Mese', _esc(meseLabel))}
-            ${row('Soglia', `${soglia} ticket`)}
-            ${row('Ticket registrati', `${tot.totale}`, true)}
-            ${row('L1', `${tot.l1}`)}
-            ${row('L2', `${tot.l2}`)}
-            ${row('L3', `${tot.l3}`)}
+            ${c.rows.map(([label, value, strong]) => row(label, value, strong)).join('')}
           </table>
         </td>
       </tr>
@@ -1356,7 +1540,7 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
         <td class="dm-body" style="background-color:#ffffff;padding:16px 40px 28px;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#fff1f2;border:1px solid #fecdd3;border-radius:6px;">
             <tr><td style="padding:12px 16px;">
-              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#be123c;">&#9888;&#65039; ${_diffSentence(diff)}</p>
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#be123c;">&#9888;&#65039; ${_esc(c.diffMsg)}</p>
             </td></tr>
           </table>
         </td>
@@ -1366,7 +1550,7 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
         <td align="center" class="dm-body" style="background-color:#ffffff;padding:0 40px 32px;">
           <!--[if mso]>
           <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
-            href="${link}" style="height:44px;v-text-anchor:middle;width:280px;" arcsize="11%" stroke="f" fillcolor="#A100FF">
+            href="${c.link}" style="height:44px;v-text-anchor:middle;width:280px;" arcsize="11%" stroke="f" fillcolor="#A100FF">
             <w:anchorlock/>
             <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;">APRI ANDAMENTO PROGETTO</center>
           </v:roundrect>
@@ -1375,7 +1559,7 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
             <tr>
               <td bgcolor="#A100FF" style="background-color:#A100FF;border-radius:5px;text-align:center;">
-                <a href="${link}" style="display:inline-block;padding:13px 32px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:5px;">APRI ANDAMENTO PROGETTO</a>
+                <a href="${c.link}" style="display:inline-block;padding:13px 32px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:5px;">APRI ANDAMENTO PROGETTO</a>
               </td>
             </tr>
           </table>
