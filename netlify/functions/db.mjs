@@ -8,6 +8,7 @@
 // ════════════════════════════════════════════════════════════════════════
 import { neon }    from '@neondatabase/serverless';
 import nodemailer   from 'nodemailer';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -55,8 +56,9 @@ async function bootstrap(){
   await sql`CREATE INDEX IF NOT EXISTS email_log_created_idx ON email_log (created_at DESC)`;
   // Reminder giornaliero: attivo di default per tutti (anche per le righe già esistenti)
   await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS daily_reminder BOOLEAN NOT NULL DEFAULT TRUE`;
+  await ensureTicketSchema();
 
-  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
           COALESCE(
             ARRAY_AGG(r.full_name ORDER BY r.cognome, r.nome)
@@ -74,7 +76,9 @@ async function bootstrap(){
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
     sql`SELECT id, risorsa_id, progetto_id, team_lead_id, anno, mese, giorni, etichetta FROM reperibilita`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
-    sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`,
+    sql`SELECT id, progetto_id, nome, team_lead_id, attiva FROM aree ORDER BY nome`,
+    sql`SELECT progetto_id, soglia, attiva, destinatari FROM soglie_ticket`
   ]);
   const wbs = {};
   wbsRows.forEach(r => {
@@ -86,7 +90,62 @@ async function bootstrap(){
     const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
     try { repTipi[pid] = JSON.parse(r.valore); } catch {}
   });
-  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi };
+  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie };
+}
+
+// ── schema Andamento progetto (idempotente, eseguito a ogni bootstrap) ──
+async function ensureTicketSchema(){
+  // Aree: ogni area appartiene a un solo progetto, con un Team Lead responsabile
+  await sql`CREATE TABLE IF NOT EXISTS aree (
+    id           SERIAL  PRIMARY KEY,
+    progetto_id  INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    nome         TEXT    NOT NULL,
+    team_lead_id INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
+    attiva       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP DEFAULT NOW(),
+    UNIQUE (progetto_id, nome)
+  )`;
+  // Ticket giornalieri: dato originale, mai sostituito dagli aggregati.
+  // progetto_id è denormalizzato: lo storico resta sul progetto anche se l'area viene spostata.
+  await sql`CREATE TABLE IF NOT EXISTS ticket_giornalieri (
+    id          BIGSERIAL PRIMARY KEY,
+    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    data        DATE    NOT NULL,
+    l1          INTEGER NOT NULL CHECK (l1 >= 0),
+    l2          INTEGER NOT NULL CHECK (l2 >= 0),
+    l3          INTEGER NOT NULL CHECK (l3 >= 0),
+    totale      INTEGER GENERATED ALWAYS AS (l1 + l2 + l3) STORED,
+    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
+    created_at  TIMESTAMP DEFAULT NOW(),
+    updated_at  TIMESTAMP DEFAULT NOW(),
+    UNIQUE (area_id, data)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS ticket_giornalieri_prj_data_idx ON ticket_giornalieri (progetto_id, data)`;
+  // Soglia mensile per progetto (sul totale L1+L2+L3). destinatari = email extra in CC, separate da virgola
+  await sql`CREATE TABLE IF NOT EXISTS soglie_ticket (
+    progetto_id INTEGER PRIMARY KEY REFERENCES progetti(id) ON DELETE CASCADE,
+    soglia      INTEGER NOT NULL CHECK (soglia > 0),
+    attiva      BOOLEAN NOT NULL DEFAULT TRUE,
+    destinatari TEXT,
+    updated_by  INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
+    updated_at  TIMESTAMP DEFAULT NOW()
+  )`;
+  // Registro alert: il vincolo UNIQUE garantisce un solo invio per progetto + mese + soglia
+  await sql`CREATE TABLE IF NOT EXISTS ticket_alert_log (
+    id          BIGSERIAL PRIMARY KEY,
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    anno        INTEGER NOT NULL,
+    mese        INTEGER NOT NULL,
+    soglia      INTEGER NOT NULL,
+    totale      INTEGER NOT NULL,
+    l1          INTEGER NOT NULL,
+    l2          INTEGER NOT NULL,
+    l3          INTEGER NOT NULL,
+    stato       TEXT    NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMP DEFAULT NOW(),
+    UNIQUE (progetto_id, anno, mese, soglia)
+  )`;
 }
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
@@ -894,6 +953,450 @@ async function getConsuntivo(p){
   return rows;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+//  Andamento progetto — aree, ticket giornalieri L1/L2/L3, soglie e alert
+//  Convenzione mese: 0-based (come ore_mensili/reperibilita).
+// ════════════════════════════════════════════════════════════════════════
+
+const _MESI_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
+                  'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+// Data odierna in Europe/Rome come 'YYYY-MM-DD'
+function _todayRome() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+}
+
+function _isIsoDate(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
+
+// Numero ticket: intero >= 0, altrimenti errore
+function _ticketInt(v, label) {
+  const n = Number(v);
+  if (v === '' || v === null || v === undefined || !Number.isInteger(n) || n < 0 || n > 100000)
+    throw new Error(`Valore ${label} non valido: inserisci un numero intero non negativo`);
+  return n;
+}
+
+// ── token link email (stesso segreto del reminder ore, tipo distinto 'tk') ──
+function verifyTicketToken(token) {
+  const SECRET = process.env.DAILY_TOKEN_SECRET;
+  if (!SECRET) throw new Error('DAILY_TOKEN_SECRET non configurato');
+  const dot = String(token || '').indexOf('.');
+  if (dot < 1) throw new Error('Token malformato');
+  const b64 = token.slice(0, dot), sig = token.slice(dot + 1);
+  const expected = createHmac('sha256', SECRET).update(b64).digest('hex');
+  let valid = false;
+  try { valid = timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex')); } catch {}
+  if (!valid) throw new Error('Firma token non valida');
+  let payload;
+  try { payload = JSON.parse(Buffer.from(b64, 'base64url').toString()); }
+  catch { throw new Error('Payload token non valido'); }
+  if (payload.k !== 'tk' || !payload.r || !Array.isArray(payload.ds) || !payload.ds.length || !payload.e)
+    throw new Error('Token campi mancanti');
+  if (Math.floor(Date.now() / 1000) > payload.e) throw new Error('Token scaduto');
+  return payload;
+}
+
+// ── aree (admin) ──
+async function saveArea(p){
+  const nome = (p.nome || '').trim();
+  if (!nome) throw new Error('Nome area obbligatorio');
+  if (!p.progettoId) throw new Error('Progetto obbligatorio');
+  const tlId = p.teamLeadId || null;
+  const attiva = p.attiva !== false;
+  try {
+    if (p.id) {
+      await sql`UPDATE aree SET nome=${nome}, progetto_id=${p.progettoId}, team_lead_id=${tlId}, attiva=${attiva}
+                WHERE id=${p.id}`;
+    } else {
+      await sql`INSERT INTO aree (progetto_id, nome, team_lead_id, attiva)
+                VALUES (${p.progettoId}, ${nome}, ${tlId}, ${attiva})`;
+    }
+  } catch (e) {
+    if (String(e.message).includes('aree_progetto_id_nome_key')) throw new Error('Esiste già un\'area con questo nome nel progetto');
+    throw e;
+  }
+}
+// Eliminazione consentita solo se l'area non ha dati: lo storico ticket non va perso
+async function deleteArea(p){
+  const [r] = await sql`SELECT COUNT(*)::int AS n FROM ticket_giornalieri WHERE area_id=${p.id}`;
+  if (r.n > 0) throw new Error(`L'area ha ${r.n} registrazioni ticket: disattivala invece di eliminarla`);
+  await sql`DELETE FROM aree WHERE id=${p.id}`;
+}
+
+// ── lettura andamento: aggregati mensili per progetto + dettaglio per area del mese selezionato ──
+async function getAndamento(p){
+  const ids  = (p.progettoIds || []).map(Number).filter(Boolean);
+  if (!ids.length) return { mensili: [], perArea: [], alert: [] };
+  const anno = +p.anno, mese = +p.mese;               // mese 0-based
+  const mesi = Math.min(Math.max(+p.mesi || 12, 1), 24);
+  const from = new Date(Date.UTC(anno, mese - mesi + 1, 1)).toISOString().slice(0, 10);
+  const to   = new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10);
+  const mFrom = new Date(Date.UTC(anno, mese, 1)).toISOString().slice(0, 10);
+  const [mensili, perArea, alert] = await Promise.all([
+    sql`SELECT progetto_id,
+               EXTRACT(YEAR FROM data)::int      AS anno,
+               EXTRACT(MONTH FROM data)::int - 1 AS mese,
+               SUM(l1)::int AS l1, SUM(l2)::int AS l2, SUM(l3)::int AS l3, SUM(totale)::int AS totale,
+               COUNT(*)::int AS registrazioni
+        FROM ticket_giornalieri
+        WHERE progetto_id = ANY(${ids}::int[]) AND data BETWEEN ${from}::date AND ${to}::date
+        GROUP BY 1, 2, 3`,
+    sql`SELECT area_id, progetto_id,
+               SUM(l1)::int AS l1, SUM(l2)::int AS l2, SUM(l3)::int AS l3, SUM(totale)::int AS totale,
+               COUNT(*)::int AS giorni, MAX(data)::text AS ultimo
+        FROM ticket_giornalieri
+        WHERE progetto_id = ANY(${ids}::int[]) AND data BETWEEN ${mFrom}::date AND ${to}::date
+        GROUP BY 1, 2`,
+    sql`SELECT progetto_id, soglia, totale, stato, to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
+        FROM ticket_alert_log
+        WHERE progetto_id = ANY(${ids}::int[]) AND anno=${anno} AND mese=${mese}`
+  ]);
+  return { mensili, perArea, alert };
+}
+
+// ── soglia mensile: inserimento/modifica/rimozione + ricalcolo immediato del mese corrente ──
+async function saveSoglia(p){
+  if (!p.progettoId) throw new Error('Progetto obbligatorio');
+  if (p.soglia === null || p.soglia === '' || p.soglia === undefined) {
+    await sql`DELETE FROM soglie_ticket WHERE progetto_id=${p.progettoId}`;
+    return { status: 'removed' };
+  }
+  const soglia = Number(p.soglia);
+  if (!Number.isInteger(soglia) || soglia <= 0) throw new Error('La soglia deve essere un numero intero maggiore di zero');
+  const attiva = p.attiva !== false;
+  const destinatari = p.destinatari !== undefined ? ((p.destinatari || '').trim() || null) : undefined;
+  if (destinatari === undefined) {
+    await sql`INSERT INTO soglie_ticket (progetto_id, soglia, attiva, updated_by, updated_at)
+              VALUES (${p.progettoId}, ${soglia}, ${attiva}, ${p.risorsaId || null}, NOW())
+              ON CONFLICT (progetto_id) DO UPDATE SET soglia=EXCLUDED.soglia, attiva=EXCLUDED.attiva,
+                updated_by=EXCLUDED.updated_by, updated_at=NOW()`;
+  } else {
+    await sql`INSERT INTO soglie_ticket (progetto_id, soglia, attiva, destinatari, updated_by, updated_at)
+              VALUES (${p.progettoId}, ${soglia}, ${attiva}, ${destinatari}, ${p.risorsaId || null}, NOW())
+              ON CONFLICT (progetto_id) DO UPDATE SET soglia=EXCLUDED.soglia, attiva=EXCLUDED.attiva,
+                destinatari=EXCLUDED.destinatari, updated_by=EXCLUDED.updated_by, updated_at=NOW()`;
+  }
+  // Una nuova soglia già superata nel mese corrente va gestita subito
+  const [y, m] = _todayRome().split('-').map(Number);
+  let check;
+  try { check = await _checkTicketThreshold(+p.progettoId, y, m - 1); }
+  catch (err) { console.error('[ticket-alert]', err.message); check = { status: 'error', error: err.message }; }
+  return { status: 'saved', check };
+}
+
+// ── giornata ticket di un Team Lead: aree attive + valori già inseriti per le date richieste ──
+async function _ticketDayForTL(tlId, dates){
+  const [tl] = await sql`SELECT id, full_name FROM risorse WHERE id=${tlId}`;
+  if (!tl) throw new Error('Risorsa non trovata');
+  const aree = await sql`
+    SELECT a.id, a.nome, a.progetto_id, p.nome AS progetto
+    FROM aree a JOIN progetti p ON p.id = a.progetto_id
+    WHERE a.team_lead_id=${tlId} AND a.attiva
+    ORDER BY p.nome, a.nome`;
+  const rows = aree.length ? await sql`
+    SELECT area_id, data::text AS data, l1, l2, l3, totale
+    FROM ticket_giornalieri
+    WHERE area_id = ANY(${aree.map(a => a.id)}::int[]) AND data = ANY(${dates}::date[])` : [];
+  const entries = {};
+  rows.forEach(r => {
+    if (!entries[r.data]) entries[r.data] = {};
+    entries[r.data][r.area_id] = { l1: r.l1, l2: r.l2, l3: r.l3, totale: r.totale };
+  });
+  return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries };
+}
+
+// Upsert dei ticket di una giornata per le aree del TL, poi controllo soglie dei progetti coinvolti
+async function _saveTicketEntries(tlId, data, entries){
+  if (!_isIsoDate(data)) throw new Error('Data non valida');
+  if (data > _todayRome()) throw new Error('Non è possibile inserire ticket per date future');
+  if (!Array.isArray(entries) || !entries.length) throw new Error('Nessun dato da salvare');
+  const own = await sql`SELECT id, progetto_id FROM aree WHERE team_lead_id=${tlId} AND attiva`;
+  const prjByArea = {};
+  own.forEach(a => { prjByArea[a.id] = a.progetto_id; });
+  // Validazione completa prima di scrivere: o tutto o niente
+  const clean = entries.map(e => {
+    const areaId = +e.areaId;
+    if (!prjByArea[areaId]) throw new Error('Area non assegnata a questo Team Lead o non attiva');
+    return { areaId, progettoId: prjByArea[areaId],
+             l1: _ticketInt(e.l1, 'L1'), l2: _ticketInt(e.l2, 'L2'), l3: _ticketInt(e.l3, 'L3') };
+  });
+  for (const e of clean) {
+    await sql`INSERT INTO ticket_giornalieri (area_id, progetto_id, data, l1, l2, l3, inserito_da, updated_at)
+              VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${e.l1}, ${e.l2}, ${e.l3}, ${tlId}, NOW())
+              ON CONFLICT (area_id, data) DO UPDATE SET l1=EXCLUDED.l1, l2=EXCLUDED.l2, l3=EXCLUDED.l3,
+                inserito_da=EXCLUDED.inserito_da, updated_at=NOW()`;
+  }
+  const [y, m] = data.split('-').map(Number);
+  const soglie = [];
+  for (const pid of [...new Set(clean.map(e => e.progettoId))]) {
+    try { soglie.push({ progettoId: pid, ...(await _checkTicketThreshold(pid, y, m - 1)) }); }
+    catch (err) { console.error('[ticket-alert]', err.message); soglie.push({ progettoId: pid, status: 'error', error: err.message }); }
+  }
+  return { saved: clean.length, soglie };
+}
+
+// ── inserimento dall'app (Team Lead loggato) ──
+async function getTicketDay(p){
+  if (!_isIsoDate(p.data)) throw new Error('Data non valida');
+  return _ticketDayForTL(+p.risorsaId, [p.data]);
+}
+async function saveTickets(p){ return _saveTicketEntries(+p.risorsaId, p.data, p.entries); }
+
+// ── inserimento dal link email (nessun login: il token identifica TL e date) ──
+async function getTicketsByToken(p){
+  const { r, ds } = verifyTicketToken(p.token);
+  return _ticketDayForTL(+r, ds);
+}
+async function saveTicketsByToken(p){
+  const { r, ds } = verifyTicketToken(p.token);
+  if (!ds.includes(p.data)) throw new Error('Data non coperta dal link ricevuto');
+  return _saveTicketEntries(+r, p.data, p.entries);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  Controllo soglia + alert email (una sola volta per progetto + mese + soglia)
+// ════════════════════════════════════════════════════════════════════════
+async function _checkTicketThreshold(progettoId, anno, mese){
+  const [cfg] = await sql`SELECT soglia, attiva, destinatari FROM soglie_ticket WHERE progetto_id=${progettoId}`;
+  if (!cfg || !cfg.attiva) return { status: 'none' };
+  const from = new Date(Date.UTC(anno, mese, 1)).toISOString().slice(0, 10);
+  const to   = new Date(Date.UTC(anno, mese + 1, 0)).toISOString().slice(0, 10);
+  const [tot] = await sql`
+    SELECT COALESCE(SUM(l1),0)::int AS l1, COALESCE(SUM(l2),0)::int AS l2,
+           COALESCE(SUM(l3),0)::int AS l3, COALESCE(SUM(totale),0)::int AS totale
+    FROM ticket_giornalieri
+    WHERE progetto_id=${progettoId} AND data BETWEEN ${from}::date AND ${to}::date`;
+  const soglia = +cfg.soglia;
+  if (tot.totale < soglia) return { status: 'below', soglia, totale: tot.totale };
+
+  // "Prenota" l'invio: il vincolo UNIQUE fa vincere un solo chiamante anche in caso di salvataggi concorrenti
+  const [claim] = await sql`
+    INSERT INTO ticket_alert_log (progetto_id, anno, mese, soglia, totale, l1, l2, l3)
+    VALUES (${progettoId}, ${anno}, ${mese}, ${soglia}, ${tot.totale}, ${tot.l1}, ${tot.l2}, ${tot.l3})
+    ON CONFLICT (progetto_id, anno, mese, soglia) DO NOTHING
+    RETURNING id`;
+  if (!claim) return { status: 'already_sent', soglia, totale: tot.totale };
+
+  let res;
+  try { res = await _sendTicketAlert(progettoId, anno, mese, soglia, tot, cfg.destinatari); }
+  catch (err) { res = { sent: false, reason: 'error', error: err.message }; }
+  if (res.sent) {
+    await sql`UPDATE ticket_alert_log SET stato='sent' WHERE id=${claim.id}`;
+  } else {
+    // Invio non riuscito: rilascia la prenotazione così il prossimo salvataggio ritenta
+    await sql`DELETE FROM ticket_alert_log WHERE id=${claim.id}`;
+  }
+  return { status: res.sent ? 'alert_sent' : 'alert_failed', reason: res.reason, soglia, totale: tot.totale };
+}
+
+async function _sendTicketAlert(progettoId, anno, mese, soglia, tot, extra){
+  const GMAIL_USER = process.env.GMAIL_USER;
+  const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
+  const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
+  const SITE_URL   = (process.env.SITE_URL || '').replace(/\/$/, '');
+  const [prj] = await sql`SELECT nome FROM progetti WHERE id=${progettoId}`;
+  const progetto = prj ? prj.nome : `#${progettoId}`;
+  const meseLabel = `${_MESI_IT[mese]} ${anno}`;
+  const subject = `[Alert soglia ticket] ${progetto} — ${meseLabel}`;
+  const meta = { progetto, anno, mese, soglia, totale: tot.totale, l1: tot.l1, l2: tot.l2, l3: tot.l3 };
+  if (!GMAIL_USER || !GMAIL_PASS) {
+    await _logEmail('alert_soglia_ticket', '—', progetto, subject, 'skipped', 'SMTP non configurato', meta);
+    return { sent: false, reason: 'no_smtp' };
+  }
+
+  // TO: Team Lead delle aree attive + Team Lead del progetto. CC: manager di questi TL + destinatari extra
+  const tls = await sql`
+    SELECT r.id, r.full_name, r.email, r.manager_id
+    FROM risorse r
+    WHERE r.id IN (SELECT team_lead_id FROM aree WHERE progetto_id=${progettoId} AND attiva AND team_lead_id IS NOT NULL
+                   UNION SELECT risorsa_id FROM progetto_team_leads WHERE progetto_id=${progettoId})
+      AND r.email IS NOT NULL AND r.email <> ''`;
+  const mgrIds = [...new Set(tls.map(t => t.manager_id).filter(Boolean))];
+  const mgrs = mgrIds.length ? await sql`
+    SELECT email FROM risorse WHERE id = ANY(${mgrIds}::int[]) AND email IS NOT NULL AND email <> ''` : [];
+  const norm = e => String(e).trim().toLowerCase();
+  const to = [...new Set(tls.map(t => norm(t.email)))];
+  const extraList = String(extra || '').split(/[,;\s]+/).map(norm).filter(e => e.includes('@'));
+  const cc = [...new Set([...mgrs.map(m => norm(m.email)), ...extraList])].filter(e => !to.includes(e));
+  if (!to.length && !cc.length) {
+    await _logEmail('alert_soglia_ticket', '—', progetto, subject, 'skipped', 'Nessun destinatario con email configurato', meta);
+    return { sent: false, reason: 'no_recipients' };
+  }
+  // Senza TL con email, i destinatari in CC diventano principali
+  const toFinal = to.length ? to : cc;
+  const ccFinal = to.length ? cc : [];
+
+  const link = `${SITE_URL}/?tab=andamento`;
+  const diff = tot.totale - soglia;
+  const mailer = _absenceTransporter();
+  const logTo = toFinal.join(', ');
+  const fullMeta = { ...meta, to: toFinal, cc: ccFinal };
+  try {
+    const info = await mailer.sendMail({
+      from: `${FROM_NAME} <${GMAIL_USER}>`, to: toFinal, cc: ccFinal.length ? ccFinal : undefined, subject,
+      html: _buildTicketAlertHtml(progetto, meseLabel, soglia, tot, diff, link),
+      text: _buildTicketAlertText(progetto, meseLabel, soglia, tot, diff, link)
+    });
+    const rejected = info?.rejected || [];
+    const accepted = info?.accepted || [];
+    if (!accepted.length) {
+      await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'error', 'Destinatari rifiutati da SMTP', { ...fullMeta, rejected });
+      return { sent: false, reason: 'error' };
+    }
+    await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'sent', null,
+                    { ...fullMeta, rejected, messageId: info?.messageId || null });
+    return { sent: true, reason: 'ok' };
+  } catch (err) {
+    await _logEmail('alert_soglia_ticket', logTo, progetto, subject, 'error', err.message,
+                    { ...fullMeta, code: err.code || null, responseCode: err.responseCode || null });
+    return { sent: false, reason: 'error', error: err.message };
+  }
+}
+
+function _diffSentence(diff) {
+  if (diff === 0) return 'La soglia è stata raggiunta.';
+  return `La soglia è stata superata di ${diff} ticket.`;
+}
+
+function _buildTicketAlertText(progetto, meseLabel, soglia, tot, diff, link) {
+  return [
+    'Alert – Soglia ticket raggiunta',
+    '',
+    `Il progetto ${progetto} ha raggiunto la soglia mensile configurata.`,
+    '',
+    `Mese: ${meseLabel}`,
+    `Soglia: ${soglia} ticket`,
+    `Ticket registrati: ${tot.totale}`,
+    '',
+    `L1: ${tot.l1}`,
+    `L2: ${tot.l2}`,
+    `L3: ${tot.l3}`,
+    '',
+    _diffSentence(diff),
+    '',
+    'Accedi alla sezione Andamento progetto per visualizzare il dettaglio:',
+    link,
+    '',
+    '---',
+    'Messaggio automatico generato da Team Hours Tracker.'
+  ].join('\n');
+}
+
+function _buildTicketAlertHtml(progetto, meseLabel, soglia, tot, diff, link) {
+  const P = _esc(progetto);
+  const row = (label, value, strong) => `
+            <tr>
+              <td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b7280;" class="dm-label">${label}</td>
+              <td align="right" style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;font-weight:${strong ? 700 : 600};" class="dm-value">${value}</td>
+            </tr>`;
+  return `<!DOCTYPE html>
+<html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Alert soglia ticket — ${P}</title>
+<!--[if mso]>
+<xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
+<style>table{border-collapse:collapse;}</style>
+<![endif]-->
+<style>
+body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+@media(prefers-color-scheme:dark){
+  .dm-outer{background-color:#1e1e2e!important;}
+  .dm-card{background-color:#2a2a3e!important;}
+  .dm-body{background-color:#2a2a3e!important;}
+  .dm-foot{background-color:#222230!important;}
+  .dm-title{color:#e8e8e8!important;}
+  .dm-label{color:#aaaaaa!important;}
+  .dm-value{color:#ffffff!important;}
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#f0f2f5;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="dm-outer" style="background-color:#f0f2f5;">
+  <tr><td align="center" valign="top" style="padding:40px 16px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="dm-card" style="max-width:600px;width:100%;background-color:#ffffff;">
+      <!-- HEADER -->
+      <tr>
+        <td align="center" bgcolor="#A100FF" style="background-color:#A100FF;padding:28px 40px;">
+          <p style="margin:0;font-size:20px;font-weight:700;color:#ffffff;font-family:Arial,Helvetica,sans-serif;">Team Hours Tracker</p>
+          <p style="margin:6px 0 0;font-size:13px;color:#e8c4ff;font-family:Arial,Helvetica,sans-serif;">Alert – Soglia ticket raggiunta</p>
+        </td>
+      </tr>
+      <!-- INTRO -->
+      <tr>
+        <td class="dm-body" style="background-color:#ffffff;padding:32px 40px 16px;">
+          <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:600;color:#111827;" class="dm-title">
+            Il progetto <strong>${P}</strong> ha raggiunto la soglia mensile configurata.
+          </p>
+        </td>
+      </tr>
+      <!-- DATI -->
+      <tr>
+        <td class="dm-body" style="background-color:#ffffff;padding:0 40px 8px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;">
+            ${row('Mese', _esc(meseLabel))}
+            ${row('Soglia', `${soglia} ticket`)}
+            ${row('Ticket registrati', `${tot.totale}`, true)}
+            ${row('L1', `${tot.l1}`)}
+            ${row('L2', `${tot.l2}`)}
+            ${row('L3', `${tot.l3}`)}
+          </table>
+        </td>
+      </tr>
+      <!-- DIFFERENZA -->
+      <tr>
+        <td class="dm-body" style="background-color:#ffffff;padding:16px 40px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#fff1f2;border:1px solid #fecdd3;border-radius:6px;">
+            <tr><td style="padding:12px 16px;">
+              <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#be123c;">&#9888;&#65039; ${_diffSentence(diff)}</p>
+            </td></tr>
+          </table>
+        </td>
+      </tr>
+      <!-- PULSANTE -->
+      <tr>
+        <td align="center" class="dm-body" style="background-color:#ffffff;padding:0 40px 32px;">
+          <!--[if mso]>
+          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+            href="${link}" style="height:44px;v-text-anchor:middle;width:280px;" arcsize="11%" stroke="f" fillcolor="#A100FF">
+            <w:anchorlock/>
+            <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;">APRI ANDAMENTO PROGETTO</center>
+          </v:roundrect>
+          <![endif]-->
+          <!--[if !mso]><!-->
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+            <tr>
+              <td bgcolor="#A100FF" style="background-color:#A100FF;border-radius:5px;text-align:center;">
+                <a href="${link}" style="display:inline-block;padding:13px 32px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:5px;">APRI ANDAMENTO PROGETTO</a>
+              </td>
+            </tr>
+          </table>
+          <!--<![endif]-->
+        </td>
+      </tr>
+      <!-- FOOTER -->
+      <tr>
+        <td align="center" class="dm-foot" style="background-color:#f8f9fc;padding:18px 40px;border-top:1px solid #eeeeee;">
+          <p style="margin:0;font-size:12px;color:#aaaaaa;font-family:Arial,Helvetica,sans-serif;">
+            Messaggio automatico generato da Team Hours Tracker.<br>Non rispondere a questa email.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
 // ── routing: whitelist esplicita delle action consentite ──
 const ACTIONS = {
   bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
@@ -902,7 +1405,9 @@ const ACTIONS = {
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
   saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
-  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast
+  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast,
+  saveArea, deleteArea, getAndamento, saveSoglia, getTicketDay, saveTickets,
+  getTicketsByToken, saveTicketsByToken
 };
 
 export async function handler(event){

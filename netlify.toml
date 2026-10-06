@@ -15,3 +15,6 @@
 
 [functions."send-daily-reminder-background"]
   schedule = "0 8 * * 1-5"
+
+[functions."send-ticket-reminder-background"]
+  schedule = "0 8 * * 1-5"

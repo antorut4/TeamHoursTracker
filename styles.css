@@ -222,4 +222,48 @@ tbody tr:hover td{background:var(--stone)}
 /* Manager checkbox */
 .mgr-check-label{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:.82rem;font-weight:500;color:var(--ink-2);padding:7px 11px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--stone);transition:border-color .15s,background .15s;white-space:nowrap}
 .mgr-check-label:has(input:checked){border-color:var(--amber);background:var(--amber-bg);color:var(--amber)}
-.mgr-check-label input{accent-color:var(--amber);width:14px;height:14px}
+.mgr-check-label input{accent-color:var(--amber);width:14px;height:14px}/* Andamento progetto */
+.and-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.and-head .card-title{margin-bottom:0}
+.and-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:20px;align-items:start}
+@media(max-width:900px){.and-grid{grid-template-columns:1fr}}
+.and-chart-wrap{position:relative;min-width:0}
+.and-chart-wrap canvas{display:block;width:100%;height:260px}
+.and-tip{position:absolute;pointer-events:none;background:var(--white);border:1px solid var(--line-s);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,.12);padding:8px 11px;font-size:.76rem;color:var(--ink);display:none;min-width:130px;z-index:5}
+.and-tip-t{font-weight:700;margin-bottom:4px}
+.and-tip-r{display:flex;align-items:center;gap:6px;justify-content:space-between}
+.and-tip-r span:last-child{font-weight:700;font-variant-numeric:tabular-nums}
+.and-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.78rem;color:var(--ink-2);margin-top:8px;align-items:center}
+.and-legend svg{vertical-align:middle;margin-right:5px}
+.and-sum{background:var(--stone);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px}
+.and-sum-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:10px}
+.and-lv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.and-lv div{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:8px 6px;text-align:center}
+.and-lv b{display:block;font-size:1.2rem;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.2}
+.and-lv small{font-size:.68rem;color:var(--ink-3);font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.and-tot{display:flex;align-items:baseline;justify-content:space-between;border-top:1px solid var(--stone-3);padding-top:10px}
+.and-tot b{font-size:1.9rem;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.thr{margin-top:14px;border-radius:var(--r);padding:10px 12px;font-size:.8rem;border:1px solid var(--line)}
+.thr-ok{background:var(--ok-bg);color:var(--ok);border-color:rgba(0,122,76,.2)}
+.thr-warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(125,78,0,.2)}
+.thr-danger{background:var(--danger-bg);color:var(--danger);border-color:rgba(201,0,60,.25)}
+.thr-none{background:var(--white);color:var(--ink-3)}
+.thr-bar{height:6px;border-radius:3px;background:rgba(0,0,0,.08);margin:8px 0 6px;overflow:hidden}
+.thr-bar i{display:block;height:100%;border-radius:3px;background:currentColor}
+.thr-edit{display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.thr-edit input{width:80px;padding:5px 8px;font-size:.82rem;background:var(--white)}
+.and-areas{margin-top:18px}
+.and-areas table{font-size:.8rem}
+.and-areas td,.and-areas th{padding:7px 10px}
+.and-num{text-align:right;font-variant-numeric:tabular-nums}
+.tk-row{display:grid;grid-template-columns:minmax(160px,1.6fr) repeat(4,minmax(64px,1fr));gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--stone-2)}
+.tk-row:last-child{border-bottom:none}
+.tk-row input{text-align:center;padding:7px 6px}
+.tk-row input.bad{border-color:var(--danger)}
+.tk-tot{text-align:center;font-weight:700;color:var(--amber);background:var(--amber-bg);border-radius:var(--r);padding:7px 6px}
+.tk-head{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);text-align:center}
+@media(max-width:600px){
+  .tk-row{grid-template-columns:repeat(4,1fr)}
+  .tk-row>div:first-child{grid-column:1/-1}
+  .tk-row:first-child>div:first-child{display:none}
+}

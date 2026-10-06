@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Inserisci ticket — Team Hours Tracker</title>
+<style>
+:root{
+  --accent:#A100FF;--accent2:#7b00cc;--accent-bg:#f3e8ff;
+  --bg:#f4f6f9;--card:#fff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+     min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--card);border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.1);
+      width:100%;max-width:480px;overflow:hidden}
+.card-hd{background:var(--accent);padding:26px 28px;text-align:center}
+.card-hd h1{color:#fff;font-size:17px;font-weight:700}
+.card-hd small{color:rgba(255,255,255,.75);font-size:12px;display:block;margin-top:3px}
+.card-bd{padding:26px 28px}
+.u-name{font-size:20px;font-weight:700;color:var(--text);text-align:center;margin-bottom:6px}
+.u-date{display:flex;align-items:center;justify-content:center;gap:6px;
+        background:var(--accent-bg);color:var(--accent2);padding:7px 16px;
+        border-radius:20px;font-size:14px;font-weight:700;width:fit-content;margin:0 auto 18px}
+.tabs{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
+.tab{padding:7px 12px;border:1.5px solid var(--border);border-radius:20px;background:var(--card);
+     font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+.tab.on{border-color:var(--accent);background:var(--accent-bg);color:var(--accent2)}
+.tab .ck{color:#047857;margin-left:4px}
+.area{border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.area-hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}
+.area-prj{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.area-name{font-size:15px;font-weight:700;color:var(--text)}
+.area-done{font-size:11px;font-weight:700;color:#047857;white-space:nowrap}
+.lv{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.lv label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+          color:var(--muted);margin-bottom:4px;text-align:center}
+.lv input{width:100%;padding:10px 4px;font-size:20px;font-weight:700;color:var(--text);
+          border:2px solid var(--border);border-radius:8px;text-align:center;outline:none;
+          -moz-appearance:textfield;background:var(--card)}
+.lv input::-webkit-inner-spin-button,.lv input::-webkit-outer-spin-button{-webkit-appearance:none}
+.lv input:focus{border-color:var(--accent)}
+.lv input.bad{border-color:#dc2626}
+.tot{padding:10px 4px;font-size:20px;font-weight:700;color:var(--accent2);text-align:center;
+     background:var(--accent-bg);border-radius:8px;border:2px solid transparent}
+.hint{text-align:center;font-size:12px;color:var(--muted);margin:4px 0 16px}
+.btn-save{width:100%;padding:15px;background:var(--accent);color:#fff;border:none;
+          border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:background .2s}
+.btn-save:hover:not(:disabled){background:var(--accent2)}
+.btn-save:disabled{background:#d1d5db;cursor:not-allowed}
+.alert{padding:12px 16px;border-radius:8px;font-size:14px;font-weight:500;
+       margin-top:14px;display:none;line-height:1.4}
+.alert.ok{background:#d1fae5;color:#065f46;display:block}
+.alert.err{background:#fee2e2;color:#7f1d1d;display:block}
+.alert.warn{background:#fef3c7;color:#92400e;display:block}
+.loading,.oops{text-align:center;padding:36px 20px}
+.spin{width:36px;height:36px;border:3px solid var(--accent-bg);border-top-color:var(--accent);
+      border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.oops .ico{font-size:44px;margin-bottom:14px}
+.oops h2{color:var(--text);font-size:17px;margin-bottom:8px}
+.oops p{color:var(--muted);font-size:14px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-hd">
+    <h1>Inserimento Ticket</h1>
+    <small>Team Hours Tracker · Andamento progetto</small>
+  </div>
+  <div class="card-bd" id="app">
+    <div class="loading"><div class="spin"></div><p style="color:var(--muted);font-size:14px">Caricamento...</p></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/db';
+let _token = null, _d = null, _date = null;
+
+async function callApi(action, payload) {
+  const r = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload })
+  });
+  let json = null; try { json = await r.json(); } catch {}
+  if (!json || !json.ok) throw new Error((json && json.error) || 'Errore sconosciuto');
+  return json.data;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function fmtDate(iso, short) {
+  const DAYS   = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
+                  'luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  const dt = new Date(iso + 'T12:00:00Z');
+  if (short) return `${DAYS[dt.getUTCDay()].slice(0,3)} ${dt.getUTCDate()}/${dt.getUTCMonth()+1}`;
+  return `${DAYS[dt.getUTCDay()]} ${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`;
+}
+
+function renderErr(msg, ico) {
+  document.getElementById('app').innerHTML = `
+    <div class="oops"><div class="ico">${ico || '🔐'}</div><h2>${ico ? 'Nessuna area' : 'Link non valido'}</h2><p>${msg}</p></div>`;
+}
+
+function dayDone(date) {
+  const e = _d.entries[date] || {};
+  return _d.aree.every(a => e[a.id]);
+}
+
+function render() {
+  const e = _d.entries[_date] || {};
+  const tabs = _d.dates.length > 1
+    ? `<div class="tabs">${_d.dates.map(ds => `<button class="tab${ds === _date ? ' on' : ''}" onclick="pick('${ds}')">${fmtDate(ds, true)}${dayDone(ds) ? '<span class="ck">✓</span>' : ''}</button>`).join('')}</div>`
+    : '';
+  const aree = _d.aree.map(a => {
+    const v = e[a.id];
+    const val = k => v ? v[k] : '';
+    return `<div class="area" data-area="${a.id}">
+      <div class="area-hd">
+        <div><div class="area-prj">${esc(a.progetto)}</div><div class="area-name">${esc(a.nome)}</div></div>
+        ${v ? '<span class="area-done">✓ già inserito</span>' : ''}
+      </div>
+      <div class="lv">
+        ${['l1','l2','l3'].map(k => `<div><label>${k.toUpperCase()}</label>
+          <input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${k}" value="${val(k)}" oninput="recalc(this)"></div>`).join('')}
+        <div><label>Totale</label><div class="tot">${v ? v.totale : 0}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('app').innerHTML = `
+    <div class="u-name">${esc(_d.fullName)}</div>
+    <div class="u-date">📅 ${fmtDate(_date)}</div>
+    ${tabs}
+    ${aree}
+    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.</div>
+    <button class="btn-save" id="save" onclick="doSave()">Salva</button>
+    <div class="alert" id="alert"></div>`;
+  const first = document.querySelector('.lv input');
+  if (first) first.focus();
+}
+
+function pick(ds) { _date = ds; render(); }
+
+function recalc(inp) {
+  const box = inp.closest('.area');
+  let tot = 0;
+  box.querySelectorAll('input').forEach(i => {
+    const n = Number(i.value);
+    const ok = i.value === '' || (Number.isInteger(n) && n >= 0);
+    i.classList.toggle('bad', !ok);
+    if (ok && i.value !== '') tot += n;
+  });
+  box.querySelector('.tot').textContent = tot;
+}
+
+async function doSave() {
+  const btn = document.getElementById('save'), alrt = document.getElementById('alert');
+  const entries = [];
+  let bad = false;
+  document.querySelectorAll('.area').forEach(box => {
+    const row = { areaId: +box.dataset.area };
+    box.querySelectorAll('input').forEach(i => {
+      const raw = i.value.trim();
+      const n = raw === '' ? 0 : Number(raw);   // campo vuoto = 0 ticket
+      if (!Number.isInteger(n) || n < 0) { bad = true; i.classList.add('bad'); }
+      row[i.dataset.k] = n;
+    });
+    entries.push(row);
+  });
+  if (bad) { alrt.className = 'alert err'; alrt.textContent = '⚠ Inserisci solo numeri interi non negativi'; return; }
+  btn.disabled = true; btn.textContent = 'Salvataggio...'; alrt.className = 'alert';
+  try {
+    const res = await callApi('saveTicketsByToken', { token: _token, data: _date, entries });
+    // Aggiorna lo stato locale per le spunte "già inserito"
+    _d.entries[_date] = _d.entries[_date] || {};
+    entries.forEach(r => { _d.entries[_date][r.areaId] = { ...r, totale: r.l1 + r.l2 + r.l3 }; });
+    const next = _d.dates.find(ds => !dayDone(ds));
+    const alerted = (res.soglie || []).filter(s => s.status === 'alert_sent' || s.status === 'already_sent');
+    render();
+    const a = document.getElementById('alert');
+    a.className = alerted.length ? 'alert warn' : 'alert ok';
+    a.textContent = `✓ Ticket salvati per ${fmtDate(_date)}.`
+      + (alerted.length ? ' ⚠ Soglia mensile raggiunta: i responsabili sono stati avvisati.' : '')
+      + (next ? ` Restano da compilare: ${fmtDate(next)}.` : '');
+  } catch (e) {
+    alrt.className = 'alert err';
+    alrt.textContent = '✗ ' + e.message;
+    btn.disabled = false; btn.textContent = 'Salva';
+  }
+}
+
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  _token = params.get('token');
+  if (!_token) { renderErr('Nessun token nel link. Usa il link ricevuto via email.'); return; }
+  try {
+    _d = await callApi('getTicketsByToken', { token: _token });
+    if (!_d.aree.length) { renderErr('Non risultano aree attive assegnate a te. Contatta l\'amministratore.', '📭'); return; }
+    _date = _d.dates.find(ds => !dayDone(ds)) || _d.dates[_d.dates.length - 1];
+    render();
+  } catch (e) {
+    const scaduto = e.message.includes('scaduto');
+    const firma   = e.message.includes('irma') || e.message.includes('malformato') || e.message.includes('campi');
+    renderErr(scaduto ? "Link scaduto. Puoi inserire i ticket dalla sezione Andamento progetto dell'app."
+            : firma   ? 'Link non valido. Usa il link ricevuto via email.'
+            : 'Errore: ' + esc(e.message));
+  }
+})();
+</script>
+</body>
+</html>
