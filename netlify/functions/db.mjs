@@ -766,17 +766,11 @@ async function sollecitaForecast(p) {
   if (!manager) return { sent: 0, reason: 'no_manager' };
   const managerName = manager.full_name;
 
-  // Quindicine attese: dall'inizio dell'anno corrente fino al mese corrente
-  const now          = new Date();
-  const currentYear  = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0-based
-  const currentDay   = now.getDate();
-
-  const expected = [];
-  for (let m = 0; m <= currentMonth; m++) {
-    expected.push({ mese: m, q: 1 });
-    if (m < currentMonth || currentDay > 15) expected.push({ mese: m, q: 2 });
-  }
+  // Mese filtrato nel pannello (mese 0-based, come ore_mensili)
+  const anno = Number(p.anno), mese = Number(p.mese);
+  if (!Number.isInteger(anno) || !Number.isInteger(mese) || mese < 0 || mese > 11)
+    throw new Error('Mese di riferimento non valido');
+  const meseLabel = `${_MESI_IT[mese]} ${anno}`;
 
   // Risorse del manager con email
   const risorse = await sql`
@@ -787,43 +781,34 @@ async function sollecitaForecast(p) {
 
   if (!risorse.length) return { sent: 0, skipped: 0, reason: 'no_resources' };
 
-  // Ore forecast esistenti per l'anno corrente
+  // Ore Forecast del solo mese filtrato
   const oreRows = await sql`
-    SELECT risorsa_id, mese, ore_q1, ore_q2
+    SELECT risorsa_id, ore_q1, ore_q2
     FROM ore_mensili
-    WHERE anno = ${currentYear}
+    WHERE anno = ${anno} AND mese = ${mese}
       AND risorsa_id IN (SELECT id FROM risorse WHERE manager_id = ${p.managerId})`;
-
   const oreByRes = {};
-  oreRows.forEach(r => {
-    if (!oreByRes[r.risorsa_id]) oreByRes[r.risorsa_id] = {};
-    oreByRes[r.risorsa_id][r.mese] = { q1: r.ore_q1, q2: r.ore_q2 };
-  });
+  oreRows.forEach(r => { oreByRes[r.risorsa_id] = r; });
 
-  // Individua chi ha quindicine mancanti
-  const toNotify = [];
-  for (const risorsa of risorse) {
-    const oreR = oreByRes[risorsa.id] || {};
-    const hasMissing = expected.some(({ mese, q }) => {
-      const row = oreR[mese];
-      const val = row ? (q === 1 ? row.q1 : row.q2) : null;
-      return val === null || val === undefined;
-    });
-    if (hasMissing) toNotify.push(risorsa);
-  }
+  // Da sollecitare: chi nel mese non ha compilato né la I né la II quindicina
+  const empty = v => v === null || v === undefined;
+  const toNotify = risorse.filter(r => {
+    const row = oreByRes[r.id];
+    return !row || (empty(row.ore_q1) && empty(row.ore_q2));
+  });
 
   const skipped = risorse.length - toNotify.length;
   if (!toNotify.length) return { sent: 0, skipped, reason: 'all_complete' };
 
   const mailer  = _absenceTransporter();
-  const subject = 'URGENTE - Inserimento ore Forecast';
+  const subject = `URGENTE - Inserimento ore Forecast ${meseLabel}`;
   let sent = 0, failed = 0;
   const destinatari = [];
 
   for (const risorsa of toNotify) {
-    const html = _buildForecastSollecitaHtml(risorsa.full_name, managerName, SITE_URL);
-    const text = _buildForecastSollecitaText(risorsa.full_name, managerName, SITE_URL);
-    const meta = { risorsa: risorsa.full_name, manager: managerName };
+    const html = _buildForecastSollecitaHtml(risorsa.full_name, managerName, SITE_URL, meseLabel);
+    const text = _buildForecastSollecitaText(risorsa.full_name, managerName, SITE_URL, meseLabel);
+    const meta = { risorsa: risorsa.full_name, manager: managerName, anno, mese };
     try {
       const info     = await mailer.sendMail({ from: `${FROM_NAME} <${GMAIL_USER}>`, to: risorsa.email, subject, html, text });
       const rejected = info?.rejected || [];
@@ -847,13 +832,13 @@ async function sollecitaForecast(p) {
   return { sent, failed, skipped, destinatari, reason: 'ok' };
 }
 
-function _buildForecastSollecitaText(risorsa, manager, siteUrl) {
+function _buildForecastSollecitaText(risorsa, manager, siteUrl, meseLabel) {
   return [
     `Ciao ${risorsa},`,
     '',
-    `${manager} ti sta sollecitando per l'inserimento delle ore Forecast.`,
+    `${manager} ti sta sollecitando per l'inserimento delle ore Forecast di ${meseLabel}.`,
     '',
-    'Ti chiediamo di procedere con la compilazione delle ore mancanti accedendo al seguente link:',
+    'Ti chiediamo di procedere con la compilazione delle ore di entrambe le quindicine accedendo al seguente link:',
     siteUrl,
     '',
     'Grazie.',
@@ -863,7 +848,7 @@ function _buildForecastSollecitaText(risorsa, manager, siteUrl) {
   ].join('\n');
 }
 
-function _buildForecastSollecitaHtml(risorsa, manager, siteUrl) {
+function _buildForecastSollecitaHtml(risorsa, manager, siteUrl, meseLabel) {
   return `<!DOCTYPE html>
 <html lang="it" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -907,10 +892,10 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
         <td class="dm-body" style="background-color:#ffffff;padding:32px 40px 24px;">
           <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;color:#111827;" class="dm-title">Ciao ${risorsa},</p>
           <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
-            <strong>${manager}</strong> ti sta sollecitando per l'inserimento delle ore Forecast.
+            <strong>${manager}</strong> ti sta sollecitando per l'inserimento delle ore Forecast di <strong>${_esc(meseLabel)}</strong>.
           </p>
           <p style="margin:0 0 28px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
-            Ti chiediamo di procedere con la compilazione delle ore mancanti accedendo al seguente link:
+            Ti chiediamo di procedere con la compilazione delle ore di entrambe le quindicine accedendo al seguente link:
           </p>
           <!--[if mso]>
           <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml"
@@ -1176,14 +1161,24 @@ async function saveSoglia(p){
 }
 
 // ── giornata ticket di un Team Lead: aree attive + valori già inseriti per le date richieste ──
-async function _ticketDayForTL(tlId, dates){
-  const [tl] = await sql`SELECT id, full_name FROM risorse WHERE id=${tlId}`;
-  if (!tl) throw new Error('Risorsa non trovata');
-  const aree = await sql`
+// Aree attive su cui una risorsa può inserire dati: quelle di cui è TL e, se withProjectTL,
+// tutte le aree dei progetti di cui è TL di progetto. progettoId limita a un solo progetto.
+function _editableAree(tlId, progettoId, withProjectTL){
+  const pid = progettoId ? +progettoId : null;
+  return sql`
     SELECT a.id, a.nome, a.progetto_id, p.nome AS progetto
     FROM aree a JOIN progetti p ON p.id = a.progetto_id
-    WHERE a.team_lead_id=${tlId} AND a.attiva
+    WHERE a.attiva
+      AND (a.team_lead_id=${tlId}
+           OR (${!!withProjectTL}::boolean AND a.progetto_id IN (SELECT progetto_id FROM progetto_team_leads WHERE risorsa_id=${tlId})))
+      AND (${pid}::int IS NULL OR a.progetto_id=${pid})
     ORDER BY p.nome, a.nome`;
+}
+
+async function _ticketDayForTL(tlId, dates, progettoId = null, withProjectTL = false){
+  const [tl] = await sql`SELECT id, full_name FROM risorse WHERE id=${tlId}`;
+  if (!tl) throw new Error('Risorsa non trovata');
+  const aree = await _editableAree(tlId, progettoId, withProjectTL);
   const areaIds = aree.map(a => a.id);
   const [rows, eeRows] = aree.length ? await Promise.all([
     sql`SELECT area_id, data::text AS data, l1, l2, l3, totale
@@ -1224,11 +1219,11 @@ function _eeRows(list) {
 
 // Upsert dei ticket (e sostituzione delle attività Extra Effort) di una giornata per le aree del TL,
 // in un'unica transazione; poi controllo soglie di progetti e aree coinvolti
-async function _saveTicketEntries(tlId, data, entries){
+async function _saveTicketEntries(tlId, data, entries, progettoId = null, withProjectTL = false){
   if (!_isIsoDate(data)) throw new Error('Data non valida');
   if (data > _todayRome()) throw new Error('Non è possibile inserire ticket per date future');
   if (!Array.isArray(entries) || !entries.length) throw new Error('Nessun dato da salvare');
-  const own = await sql`SELECT id, progetto_id FROM aree WHERE team_lead_id=${tlId} AND attiva`;
+  const own = await _editableAree(tlId, progettoId, withProjectTL);
   const prjByArea = {};
   own.forEach(a => { prjByArea[a.id] = a.progetto_id; });
   // Validazione completa prima di scrivere: o tutto o niente
@@ -1265,12 +1260,12 @@ async function _saveTicketEntries(tlId, data, entries){
   return { saved: clean.length, soglie };
 }
 
-// ── inserimento dall'app (Team Lead loggato) ──
+// ── inserimento dall'app (dettaglio progetto): TL dell'area o TL del progetto ──
 async function getTicketDay(p){
   if (!_isIsoDate(p.data)) throw new Error('Data non valida');
-  return _ticketDayForTL(+p.risorsaId, [p.data]);
+  return _ticketDayForTL(+p.risorsaId, [p.data], p.progettoId, true);
 }
-async function saveTickets(p){ return _saveTicketEntries(+p.risorsaId, p.data, p.entries); }
+async function saveTickets(p){ return _saveTicketEntries(+p.risorsaId, p.data, p.entries, p.progettoId, true); }
 
 // ── inserimento dal link email (nessun login: il token identifica TL e date) ──
 async function getTicketsByToken(p){

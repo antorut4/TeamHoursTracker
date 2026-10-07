@@ -291,10 +291,14 @@ tbody tr:hover td{background:var(--stone)}
 .and-kpi-ee b{color:var(--ink)}
 .and-pct{display:block;font-size:.68rem;color:var(--ink-3);font-weight:600}
 .and-badges{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.and-title-link{display:inline-flex;align-items:center;gap:10px;background:none;border:none;padding:0;cursor:pointer;font-family:var(--f-display);font-size:1.05rem;font-weight:700;color:var(--ink);letter-spacing:-.02em;text-align:left}
-.and-title-link:hover,.and-title-link:focus-visible{color:var(--amber)}
-.and-thr-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0 12px}
-.and-card-foot{display:flex;justify-content:flex-end;margin-top:14px}
+.and-list{display:flex;flex-direction:column}
+.and-list-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 10px;border-bottom:1px solid var(--stone-2);cursor:pointer;border-radius:var(--r)}
+.and-list-row:last-child{border-bottom:none}
+.and-list-row:hover,.and-list-row:focus-visible{background:var(--amber-bg)}
+.and-list-row:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}
+.and-list-name{font-family:var(--f-display);font-weight:700;font-size:.98rem;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.and-list-name .fa-folder-open{color:var(--amber)}
+.and-list-meta{font-size:.78rem;color:var(--ink-3);margin-top:2px}
 .and-row-link{cursor:pointer}
 .and-row-link:hover td,.and-row-link:focus-visible td{background:var(--amber-bg)}
 .and-row-link:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}

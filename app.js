@@ -274,16 +274,18 @@ async function deleteMyOre(id,label){
 async function sollecitaForecast(){
   const r=RESOURCES.find(x=>x.fullName===currentUser);
   if(!r){showMsg('sollecitaMsg','Risorsa non trovata.','err');return;}
+  // Il sollecito riguarda il mese filtrato nel pannello Riepilogo team
+  const mese=+document.getElementById('riepilogoMonth').value,anno=+document.getElementById('riepilogoYear').value,lbl=MONTHS[mese]+' '+anno;
   showSpinner();
   let res;
-  try{res=await call('sollecitaForecast',{managerId:r.id});}
+  try{res=await call('sollecitaForecast',{managerId:r.id,anno,mese});}
   catch(e){hideSpinner();showMsg('sollecitaMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
   if(res.reason==='no_smtp'){showMsg('sollecitaMsg','SMTP non configurato.','err');return;}
   if(res.reason==='no_resources'){showMsg('sollecitaMsg','Nessuna risorsa nel tuo team con email configurata.','warn');return;}
-  if(res.reason==='all_complete'){showMsg('sollecitaMsg','Tutte le risorse hanno compilato il Forecast. ','ok');return;}
-  let msg=`Solleciti inviati: ${res.sent}`;
-  if(res.skipped)msg+=`, già completi: ${res.skipped}`;
+  if(res.reason==='all_complete'){showMsg('sollecitaMsg',`Tutte le risorse hanno compilato il Forecast di ${lbl}.`,'ok');return;}
+  let msg=`${lbl} — solleciti inviati: ${res.sent}`;
+  if(res.skipped)msg+=`, già compilati: ${res.skipped}`;
   if(res.failed)msg+=`, errori: ${res.failed}`;
   showMsg('sollecitaMsg',msg,res.sent>0?'ok':'warn');
 }
@@ -1634,25 +1636,21 @@ function _myAree(){const me=_me();return me?_cache.aree.filter(a=>a.teamLeadId==
 function _prjAree(pid){return _cache.aree.filter(a=>a.progettoId===pid);}
 // Progetto con più aree: soglie e dati gestiti a livello di area
 function _isMultiArea(pid){return _prjAree(pid).length>1;}
-// Visibilità: admin tutti i progetti; manager i progetti delle proprie risorse; Team Lead solo i progetti
-// di cui è TL (tutte le aree) oppure, se TL d'area, le sole aree di cui è responsabile.
-// Map progettoId → null (progetto intero) | Set di areaId
-function _andScope(){
-  const sc=new Map(),full=pid=>{if(pid)sc.set(pid,null);};
-  if(isAdmin){(_cache.prj||[]).forEach(p=>full(_prjIdByName[p]));return sc;}
-  const me=_me();if(!me)return sc;
-  Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))full(_prjIdByName[p]);});
-  if(isTeamLead)_getManagerProjects().forEach(p=>full(_prjIdByName[p]));
-  _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>{
-    if(sc.has(a.progettoId)&&sc.get(a.progettoId)===null)return;
-    if(!sc.has(a.progettoId))sc.set(a.progettoId,new Set());
-    sc.get(a.progettoId).add(a.id);
-  });
-  // TL di tutte le aree del progetto = visibilità sull'intero progetto
-  sc.forEach((s,pid)=>{if(s&&_prjAree(pid).every(a=>s.has(a.id)))sc.set(pid,null);});
-  return sc;
+// Progetti visibili in Andamento, per qualsiasi ruolo: quelli su cui la risorsa è staffata
+// (allocazione) o di cui è Team Lead (di progetto o di un'area). L'admin vede tutti i progetti.
+// Il dettaglio mostra sempre l'intero progetto.
+function _andProjectIds(){
+  const ids=new Set();
+  if(isAdmin)(_cache.prj||[]).forEach(p=>ids.add(_prjIdByName[p]));
+  else{
+    const me=_me();if(!me)return[];
+    (me.progetti||[]).forEach(p=>ids.add(_prjIdByName[p]));
+    Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))ids.add(_prjIdByName[p]);});
+    _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>ids.add(a.progettoId));
+  }
+  return[...ids].filter(pid=>_prjNameById[pid]).sort((a,b)=>_prjNameById[a].localeCompare(_prjNameById[b],'it'));
 }
-function _andProjects(){return[..._andScope().keys()].map(pid=>_prjNameById[pid]).filter(Boolean).sort();}
+function _andProjects(){return _andProjectIds().map(pid=>_prjNameById[pid]);}
 // Soglia di progetto modificabile da: admin, TL del progetto, TL di un'area del progetto, manager con risorse sul progetto
 function _canEditSoglia(prj){
   if(isAdmin)return true;
@@ -1669,16 +1667,20 @@ function _canEditAreaSoglia(a){
   const prj=_prjNameById[a.progettoId];
   return a.teamLeadId===me.id||(_prjTLsByName[prj]||[]).includes(currentUser)||(isTeamLead&&_getManagerProjects().includes(prj));
 }
-let _andSel={pid:null,areaId:null},_andData=null,_andAutoOpen=true,_andCharts=[],_andTkInit=false,_andEeMode=S.get('andEeMode')==='n'?'n':'ore';
+// Aree su cui l'utente può inserire dati: quelle di cui è TL, oppure tutte se è TL del progetto
+function _andEditableAree(pid){
+  const me=_me();if(!me)return[];
+  const prjTL=(_prjTLsByName[_prjNameById[pid]]||[]).includes(currentUser);
+  return _prjAree(pid).filter(a=>a.attiva&&(prjTL||a.teamLeadId===me.id));
+}
+let _andSel={pid:null,areaId:null},_andData=null,_andCharts=[],_andEntryPid=null,_andEeMode=S.get('andEeMode')==='n'?'n':'ore';
 const _AND_EMPTY=Object.freeze({l1:0,l2:0,l3:0,totale:0,giorni:0,ultimo:null,ee:0,een:0,tk:false});
-// Riga dati visibile nello scope dell'utente
-function _andVis(sc,r){const pid=+r.progetto_id;if(!sc.has(pid))return false;const s=sc.get(pid);return!s||s.has(+r.area_id);}
-// Indice dei dati per progetto|area|mese ('*' = somma delle aree visibili del progetto)
-function _andBuild(d,sc){
+// Indice dei dati per progetto|area|mese ('*' = somma di tutte le aree del progetto)
+function _andBuild(d){
   const m={};
   const add=(r,f)=>{const key=r.anno+'-'+r.mese;[r.area_id,'*'].forEach(a=>{const k=`${r.progetto_id}|${a}|${key}`;f(m[k]||(m[k]={..._AND_EMPTY}));});};
-  d.tickets.filter(r=>_andVis(sc,r)).forEach(r=>add(r,z=>{TK_LV.forEach(s=>{z[s.k]+=r[s.k];});z.totale+=r.totale;z.giorni+=r.giorni;z.tk=true;if(!z.ultimo||r.ultimo>z.ultimo)z.ultimo=r.ultimo;}));
-  d.ee.filter(r=>_andVis(sc,r)).forEach(r=>add(r,z=>{z.ee=_r2(z.ee+r.ore);z.een+=r.n;}));
+  d.tickets.forEach(r=>add(r,z=>{TK_LV.forEach(s=>{z[s.k]+=r[s.k];});z.totale+=r.totale;z.giorni+=r.giorni;z.tk=true;if(!z.ultimo||r.ultimo>z.ultimo)z.ultimo=r.ultimo;}));
+  d.ee.forEach(r=>add(r,z=>{z.ee=_r2(z.ee+r.ore);z.een+=r.n;}));
   return(pid,aid,y,mo)=>m[`${pid}|${aid==null?'*':aid}|${y}-${mo}`]||_AND_EMPTY;
 }
 // % L1/L2/L3 sul totale del mese, a 1 decimale con il metodo del resto maggiore: la somma è sempre 100
@@ -1689,56 +1691,84 @@ function _lvPct(r){
   raw.map((v,i)=>[v-fl[i],i]).sort((a,b)=>b[0]-a[0]).forEach(([,i])=>{if(rest>0){fl[i]++;rest--;}});
   return fl.map(v=>v/10);
 }
-// Aree mostrate: nello scope dell'utente, attive o con dati nel mese selezionato
+// Aree mostrate nel dettaglio: attive o con dati nel mese selezionato
 function _andAree(pid){
-  const D=_andData,s=D.sc.get(pid);
-  return _prjAree(pid).filter(a=>{if(s&&!s.has(a.id))return false;const r=D.get(pid,a.id,D.year,D.month);return a.attiva||r.tk||r.een;}).sort((a,b)=>a.nome.localeCompare(b.nome,'it'));
+  const D=_andData;
+  return _prjAree(pid).filter(a=>{const r=D.get(pid,a.id,D.year,D.month);return a.attiva||r.tk||r.een;}).sort((a,b)=>a.nome.localeCompare(b.nome,'it'));
 }
-function _andRestricted(pid){return!!(_andData&&_andData.sc.get(pid));}
+// Elenco progetti (pagina iniziale) oppure dettaglio del progetto selezionato
 async function renderAndamento(){
   const el=document.getElementById('andamentoContent');if(!el)return;
+  const prjs=_andProjectIds();
+  if(_andSel.pid&&!prjs.includes(_andSel.pid))_andSel={pid:null,areaId:null};
+  const pid=_andSel.pid,fc=document.getElementById('andFilters');
+  if(fc)fc.style.display=pid?'':'none';
+  _andNavOpts(prjs);
+  if(!pid){_andData=null;_andCharts=[];_andEntryInit(null);el.innerHTML=_andListHtml(prjs);return;}
   const month=+document.getElementById('andMonth').value,year=+document.getElementById('andYear').value,n=+document.getElementById('andMesi').value;
-  const tc=document.getElementById('andTicketCard'),mine=_myAree();
-  if(tc){
-    tc.style.display=mine.length?'':'none';
-    if(mine.length&&!_andTkInit){
-      _andTkInit=true;
-      const inp=document.getElementById('andTicketDate'),y=new Date();y.setDate(y.getDate()-1);
-      inp.value=localDate(y);inp.max=localDate(new Date());
-      loadTicketDay().catch(console.error);
-    }
-  }
-  const sc=_andScope();
-  const prjs=[...sc.keys()].filter(pid=>_prjNameById[pid]).sort((a,b)=>_prjNameById[a].localeCompare(_prjNameById[b],'it'));
-  if(!prjs.length){_andData=null;_andNavOpts();el.innerHTML='<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Nessun progetto di cui sei Team Lead.</p></div>';return;}
   showSpinner();let d;
-  try{d=await call('getAndamento',{scope:prjs.map(pid=>({progettoId:pid,areaIds:sc.get(pid)?[...sc.get(pid)]:null})),anno:year,mese:month,mesi:n});}
+  try{d=await call('getAndamento',{scope:[{progettoId:pid,areaIds:null}],anno:year,mese:month,mesi:n});}
   catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
-  _andData={d,sc,prjs,year,month,n,get:_andBuild(d,sc),lbl:MONTHS[month]+' '+year};
-  if(_andSel.pid&&!sc.has(_andSel.pid))_andSel={pid:null,areaId:null};
-  if(_andSel.areaId&&!_andAree(_andSel.pid).some(a=>a.id===_andSel.areaId))_andSel.areaId=null;
-  // Con un solo progetto visibile si apre direttamente il dettaglio (solo al primo accesso)
-  if(_andAutoOpen&&!_andSel.pid&&prjs.length===1)_andSel={pid:prjs[0],areaId:null};
-  _andAutoOpen=false;
+  _andData={d,pid,year,month,n,get:_andBuild(d),lbl:MONTHS[month]+' '+year};
+  if(_andSel.areaId&&!_andAree(pid).some(a=>a.id===_andSel.areaId))_andSel.areaId=null;
+  _andNavOpts(prjs);
   _andDraw();
+  if(_andEntryPid!==pid)_andEntryInit(pid);
 }
 function _andDraw(){
   const el=document.getElementById('andamentoContent');if(!el||!_andData)return;
-  _andNavOpts();_andCharts=[];
-  el.innerHTML=_andSel.pid?_andDetailHtml(_andSel.pid,_andSel.areaId):_andOverviewHtml();
+  _andCharts=[];
+  el.innerHTML=_andDetailHtml(_andSel.pid,_andSel.areaId);
   requestAnimationFrame(()=>_andCharts.forEach(c=>c.init(c)));
 }
-// ── navigazione: panoramica → progetto → area ──
-function _andNavOpts(){
-  const D=_andData,o=[{v:'',l:'Panoramica — tutti i progetti'}];
-  if(D)D.prjs.forEach(pid=>{o.push({v:'p:'+pid,l:_prjNameById[pid]});if(_isMultiArea(pid))_andAree(pid).forEach(a=>o.push({v:`a:${pid}:${a.id}`,l:' ↳ '+a.nome}));});
+// ── navigazione: elenco progetti → progetto → area ──
+function _andNavOpts(prjs){
+  const o=[{v:'',l:'← Elenco progetti'}];
+  prjs.forEach(pid=>{o.push({v:'p:'+pid,l:_prjNameById[pid]});if(_isMultiArea(pid))_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')).forEach(a=>o.push({v:`a:${pid}:${a.id}`,l:' ↳ '+a.nome}));});
   popSel('andNav',o,_andSel.pid?(_andSel.areaId?`a:${_andSel.pid}:${_andSel.areaId}`:'p:'+_andSel.pid):'');
 }
 function andNavChange(v){const[t,p,a]=String(v||'').split(':');andGo(t?+p:null,t==='a'?+a:null);}
 function andGo(pid,aid){
-  _andSel={pid:pid||null,areaId:aid||null};_andDraw();
-  document.getElementById('andamentoContent')?.scrollIntoView({behavior:'smooth',block:'start'});
+  const same=!!pid&&_andData&&_andData.pid===pid;
+  _andSel={pid:pid||null,areaId:aid||null};
+  // Cambio area nello stesso progetto: basta ridisegnare (l'inserimento in fondo resta invariato)
+  if(same){_andNavOpts(_andProjectIds());_andDraw();}
+  else renderAndamento().catch(console.error);
+  document.getElementById('panel-andamento')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function _andListHtml(prjs){
+  if(!prjs.length)return '<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Non risulti staffato su alcun progetto.</p></div>';
+  const me=_me();
+  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'}</div><div class="and-list">${prjs.map(pid=>{
+    const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
+    const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':'';
+    return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
+      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
+        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div></div>
+      <button class="btn btn-ink btn-sm" onclick="event.stopPropagation();andGo(${pid})">Apri dettaglio <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button>
+    </div>`;}).join('')}</div></div>`;
+}
+// ── inserimento manuale in fondo al dettaglio: per area, ticket del giorno + attività di Extra Effort ──
+function _andEntryInit(pid){
+  const box=document.getElementById('andEntry');if(!box)return;
+  _andEntryPid=pid;
+  if(!pid){box.innerHTML='';return;}
+  const head=`<div class="card-title"><i class="fa-solid fa-pen-to-square"></i> Inserimento manuale — ticket ed Extra Effort</div>
+    <p style="font-size:.8rem;color:var(--ink-3);margin:-8px 0 14px">Per ogni area: numero di ticket aperti nel giorno (L1, L2, L3) e attività di Extra Effort con le ore.</p>`;
+  const msg=t=>`<div class="card">${head}<p style="font-size:.84rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:6px"></i>${t}</p></div>`;
+  if(!_prjAree(pid).some(a=>a.attiva)){box.innerHTML=msg('Nessuna area attiva configurata per questo progetto: l\'amministratore può crearle in Admin › Gestione aree.');return;}
+  if(!_me()){box.innerHTML=msg('L\'inserimento è riservato ai Team Lead del progetto o delle aree.');return;}
+  if(!_andEditableAree(pid).length){box.innerHTML=msg('Puoi inserire dati sulle aree di cui sei Team Lead, oppure su tutte le aree se sei Team Lead del progetto.');return;}
+  const y=new Date();y.setDate(y.getDate()-1);
+  box.innerHTML=`<div class="card">${head}
+    <div class="field-row"><div class="field" style="max-width:170px"><label>Data di riferimento</label><input type="date" id="andTicketDate" value="${localDate(y)}" max="${localDate(new Date())}" onchange="loadTicketDay().catch(console.error)"/></div></div>
+    <div id="andTicketForm"></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <button class="btn btn-ink" onclick="saveTicketDay()"><i class="fa-solid fa-floppy-disk"></i> Salva ticket ed Extra Effort</button>
+      <div id="andTicketMsg" class="msg"></div>
+    </div></div>`;
+  loadTicketDay().catch(console.error);
 }
 // ── soglie ──
 function _thrCfg(pid,aid){return aid?_cache.soglieArea[aid]:_cache.soglie[pid];}
@@ -1762,9 +1792,8 @@ function _thrBadge(ev,kind){
   if(ev.st==='near')return `<span class="badge badge-warn"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px"></i>Vicino alla soglia ${K}</span>`;
   return '';
 }
-// Badge di stato di uno scope (progetto o area); le soglie di progetto non valgono per chi vede solo alcune aree
+// Badge di stato di uno scope (progetto o area)
 function _andBadges(pid,aid,r){
-  if(!aid&&_andRestricted(pid))return '';
   const cfg=_thrCfg(pid,aid);
   return _thrBadge(_thrEval(cfg,'ticket',r.totale),'ticket')+_thrBadge(_thrEval(cfg,'ee',r.ee),'ee');
 }
@@ -1867,42 +1896,22 @@ function _andAreaTable(pid,aree){
       <td style="white-space:nowrap"><span class="and-go">Dettaglio <i class="fa-solid fa-chevron-right"></i></span></td>
     </tr>`;}).join('')}</tbody></table></div></div>`;
 }
-function _andOverviewHtml(){
-  const D=_andData;
-  return D.prjs.map(pid=>{
-    const p=_prjNameById[pid],r=D.get(pid,null,D.year,D.month),multi=_isMultiArea(pid),restr=_andRestricted(pid),aree=_andAree(pid);
-    const overAree=multi?aree.filter(a=>{const ar=D.get(pid,a.id,D.year,D.month),cfg=_thrCfg(pid,a.id);return['hit','over'].includes(_thrEval(cfg,'ticket',ar.totale).st)||['hit','over'].includes(_thrEval(cfg,'ee',ar.ee).st);}).length:0;
-    return `<div class="card">
-      <div class="and-head">
-        <button class="and-title-link" onclick="andGo(${pid})" title="Apri il dettaglio del progetto"><i class="fa-solid fa-folder-open"></i> ${_esc(p)} <i class="fa-solid fa-chevron-right" style="font-size:.7rem;color:var(--ink-3)"></i></button>
-        <div class="and-badges">${restr?'<span class="badge badge-info">Solo le tue aree</span>':''}${_andBadges(pid,null,r)}${overAree?`<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation" style="margin-right:5px"></i>${overAree} ${overAree>1?'aree':'area'} oltre soglia</span>`:''}</div>
-      </div>
-      <div class="and-sum-title">${restr?'Le tue aree':multi?'Totale progetto (tutte le aree)':'Totale progetto'} — ${D.lbl}</div>
-      ${_andKpis(r)}
-      ${restr?'':`<div class="and-thr-row">${_andThrMeters(pid,null,r)}</div>`}
-      ${multi&&aree.length?_andAreaTable(pid,aree):''}
-      <div class="and-card-foot"><button class="btn btn-ghost2 btn-sm" onclick="andGo(${pid})">Apri dettaglio progetto <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button></div>
-    </div>`;
-  }).join('');
-}
 function _andDetailHtml(pid,aid){
-  const D=_andData,p=_prjNameById[pid],multi=_isMultiArea(pid),restr=_andRestricted(pid),aree=_andAree(pid);
+  const D=_andData,p=_prjNameById[pid],multi=_isMultiArea(pid),aree=_andAree(pid);
   const area=aid?_cache.aree.find(a=>a.id===aid):null;
-  const scopeName=area?area.nome:restr?'Le tue aree':multi?'Tutto il progetto':'';
+  const scopeName=area?area.nome:multi?'Tutto il progetto':'';
   const periods=[];for(let i=D.n-1;i>=0;i--){let m=D.month-i,y=D.year;while(m<0){m+=12;y--;}periods.push({m,y});}
   const recs=periods.map(({m,y})=>D.get(pid,aid,y,m)),r=D.get(pid,aid,D.year,D.month);
-  // Le soglie di progetto non si applicano a chi vede solo alcune aree (il totale non è quello del progetto)
-  const thrOn=!!aid||!restr,cfg=_thrCfg(pid,aid);
-  const evTk=thrOn?_thrEval(cfg,'ticket',r.totale):{st:'none'},evEe=thrOn?_thrEval(cfg,'ee',r.ee):{st:'none'};
+  const cfg=_thrCfg(pid,aid),evTk=_thrEval(cfg,'ticket',r.totale),evEe=_thrEval(cfg,'ee',r.ee);
   const labels=periods.map(({m,y})=>MONTHS[m].slice(0,3)+' '+String(y).slice(2)),full=periods.map(({m,y})=>MONTHS[m]+' '+y);
   const sfx=`${pid}-${aid||0}`;
   const tk={id:'andCv-'+sfx,init:_initTicketChart,draw:_drawTicketChart,labels,full,has:recs.map(x=>x.tk),
     series:[...TK_LV,TK_TOT].map(s=>({...s,data:recs.map(x=>x[s.k])})),thr:_thrActive(evTk)?evTk.soglia:null};
   const ee={id:'andEe-'+sfx,ee:true,init:_initEeChart,draw:_drawEeChart,labels,full,ore:recs.map(x=>x.ee),cnt:recs.map(x=>x.een),thr:_thrActive(evEe)?evEe.soglia:null,mode:_andEeMode};
   _andCharts.push(tk,ee);
-  const crumb=`<nav class="and-crumb" aria-label="Percorso"><a href="#" onclick="andGo();return false"><i class="fa-solid fa-table-cells-large"></i> Panoramica progetti</a><span aria-hidden="true">›</span>${area?`<a href="#" onclick="andGo(${pid});return false">${_esc(p)}</a><span aria-hidden="true">›</span><b>${_esc(area.nome)}</b>`:`<b>${_esc(p)}</b>`}</nav>`;
-  const tabs=multi&&aree.length?`<div class="and-tabs" role="tablist" aria-label="Aree del progetto"><button role="tab" aria-selected="${!aid}" class="${aid?'':'on'}" onclick="andGo(${pid})">${restr?'Le tue aree':'Tutto il progetto'}</button>${aree.map(a=>`<button role="tab" aria-selected="${a.id===aid}" class="${a.id===aid?'on':''}" onclick="andGo(${pid},${a.id})">${_esc(a.nome)}</button>`).join('')}</div>`:'';
-  const canEdit=thrOn&&(area?_canEditAreaSoglia(area):_canEditSoglia(p));
+  const crumb=`<nav class="and-crumb" aria-label="Percorso"><a href="#" onclick="andGo();return false"><i class="fa-solid fa-arrow-left"></i> ${isAdmin?'Progetti':'I tuoi progetti'}</a><span aria-hidden="true">›</span>${area?`<a href="#" onclick="andGo(${pid});return false">${_esc(p)}</a><span aria-hidden="true">›</span><b>${_esc(area.nome)}</b>`:`<b>${_esc(p)}</b>`}</nav>`;
+  const tabs=multi&&aree.length?`<div class="and-tabs" role="tablist" aria-label="Aree del progetto"><button role="tab" aria-selected="${!aid}" class="${aid?'':'on'}" onclick="andGo(${pid})">Tutto il progetto</button>${aree.map(a=>`<button role="tab" aria-selected="${a.id===aid}" class="${a.id===aid?'on':''}" onclick="andGo(${pid},${a.id})">${_esc(a.nome)}</button>`).join('')}</div>`:'';
+  const canEdit=area?_canEditAreaSoglia(area):_canEditSoglia(p);
   let editor='';
   if(canEdit)editor=!aid&&multi
     ?`<details class="thr-more"><summary>Soglia complessiva di progetto (facoltativa)</summary>${_thrEditor(pid,null)}</details>`
@@ -1911,13 +1920,13 @@ function _andDetailHtml(pid,aid){
       <div class="and-sum-title">${scopeName?_esc(scopeName)+' — ':''}${D.lbl}</div>
       ${_andKpis(r)}
       ${r.tk||r.een?'':'<div style="font-size:.72rem;color:var(--ink-3);margin-top:6px"><i class="fa-regular fa-circle-question" style="margin-right:4px"></i>Nessun dato registrato nel mese</div>'}
-      ${thrOn?_andThrMeters(pid,aid,r):'<div class="thr thr-none"><i class="fa-solid fa-sitemap" style="margin-right:5px"></i>Soglie disponibili nel dettaglio di ciascuna area</div>'}
+      ${_andThrMeters(pid,aid,r)}
       ${editor}
     </div>`;
   const tableRows=periods.map(({m,y},i)=>{const x=recs[i],pc=_lvPct(x);return `<tr><td>${MONTHS[m]} ${y}</td>${x.tk?TK_LV.map(s=>`<td class="and-num">${_fmtNum(x[s.k])}</td>`).join('')+`<td class="and-num"><b>${_fmtNum(x.totale)}</b></td><td class="and-num">${pc?pc.map(_fmtPct).join(' · '):'—'}</td>`:'<td colspan="5" style="color:var(--ink-3);text-align:center">nessun dato</td>'}</tr>`;}).join('');
   const eeRows=periods.map(({m,y},i)=>`<tr><td>${MONTHS[m]} ${y}</td><td class="and-num">${_fmtNum(recs[i].een)}</td><td class="and-num">${_fmtOre(recs[i].ee)}</td></tr>`).join('');
   // Attività Extra Effort del mese selezionato
-  const acts=D.d.eeDettaglio.filter(e=>+e.progetto_id===pid&&_andVis(D.sc,e)&&(!aid||+e.area_id===aid));
+  const acts=D.d.eeDettaglio.filter(e=>+e.progetto_id===pid&&(!aid||+e.area_id===aid));
   const areaName=id=>_cache.aree.find(a=>a.id===+id)?.nome||'—',showArea=!aid&&multi;
   const actsHtml=acts.length
     ?`<div class="table-wrap"><table><thead><tr><th>Data</th>${showArea?'<th>Area</th>':''}<th>Tipologia attività / Dettaglio</th><th class="and-num">Extra Effort (ore)</th><th>Inserito da</th></tr></thead><tbody>${acts.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.data)}</td>${showArea?`<td>${_esc(areaName(e.area_id))}</td>`:''}<td>${_esc(e.attivita)}</td><td class="and-num">${_fmtOre(e.ore)}</td><td style="color:var(--ink-3)">${_esc(e.inserito_da||'—')}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="${showArea?3:2}"><b>Totale Extra Effort ${_esc(scopeName||p)}</b></td><td class="and-num"><b>${_fmtOre(r.ee)}</b></td><td></td></tr></tfoot></table></div>`
@@ -1925,7 +1934,7 @@ function _andDetailHtml(pid,aid){
   const seg=m=>`<button type="button" data-m="${m}" class="${_andEeMode===m?'on':''}" aria-pressed="${_andEeMode===m}" onclick="andEeMode('${m}')">${m==='n'?'Numero attività':'Ore'}</button>`;
   return `${crumb}
     <div class="card">
-      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${restr&&!aid?'<span class="badge badge-info">Solo le tue aree</span>':''}${_andBadges(pid,aid,r)}</div></div>
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${_andBadges(pid,aid,r)}</div></div>
       ${tabs}
       <div class="and-grid">
         <div class="and-chart-wrap">
@@ -2111,17 +2120,17 @@ function _eeCollect(box){
   });
   return{rows,bad};
 }
-// ── inserimento ticket ed Extra Effort dall'app (Team Lead delle aree) ──
+// ── inserimento ticket ed Extra Effort dal dettaglio progetto (TL dell'area o del progetto) ──
 async function loadTicketDay(){
   const me=_me(),inp=document.getElementById('andTicketDate'),form=document.getElementById('andTicketForm');
   if(!me||!inp||!inp.value||!form)return;
   showSpinner();let d;
-  try{d=await call('getTicketDay',{risorsaId:me.id,data:inp.value});}
+  try{d=await call('getTicketDay',{risorsaId:me.id,data:inp.value,progettoId:_andEntryPid});}
   catch(e){hideSpinner();form.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
   const ent=d.entries[inp.value]||{},ee=(d.ee||{})[inp.value]||{};
-  if(!d.aree.length){form.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna area attiva assegnata.</p>';return;}
-  form.innerHTML=`<div class="tk-row tk-header" style="padding-top:0"><div class="tk-head" style="text-align:left">Progetto / Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-area" data-area="${a.id}"><div class="tk-row"><div><div style="font-size:.7rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em">${_esc(a.progetto)}</div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>${_eeBlockHtml(ee[a.id]||[])}</div>`;}).join('');
+  if(!d.aree.length){form.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna area attiva su cui puoi inserire dati.</p>';return;}
+  form.innerHTML=`<div class="tk-row tk-header" style="padding-top:0"><div class="tk-head" style="text-align:left">Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-area" data-area="${a.id}"><div class="tk-row"><div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>${_eeBlockHtml(ee[a.id]||[])}</div>`;}).join('');
 }
 function _tkRecalc(inp){
   const row=inp.closest('.tk-row');let tot=0;
@@ -2142,7 +2151,7 @@ async function saveTicketDay(){
   if(badEe){showMsg('andTicketMsg','Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero.','err');return;}
   if(!entries.length)return;
   showSpinner();let res;
-  try{res=await call('saveTickets',{risorsaId:me.id,data,entries});}
+  try{res=await call('saveTickets',{risorsaId:me.id,data,entries,progettoId:_andEntryPid});}
   catch(e){hideSpinner();showMsg('andTicketMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
   const hit=(res.soglie||[]).filter(s=>s.status==='alert_sent'),kinds=[...new Set(hit.map(s=>_THR_KIND[s.kind]?.l||'ticket'))];

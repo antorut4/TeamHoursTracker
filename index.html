@@ -338,10 +338,10 @@
         </div>
         <div id="consuntivoContent"></div>
       </div>
-      <!-- ANDAMENTO PROGETTO -->
+      <!-- ANDAMENTO PROGETTO: elenco dei progetti della risorsa → dettaglio con grafici e inserimento manuale -->
       <div class="panel" id="panel-andamento">
-        <div class="page-header"><h1>Andamento progetto</h1><p>Ticket L1, L2, L3 ed Extra Effort per progetto e area — valori riferiti al mese selezionato</p></div>
-        <div class="card">
+        <div class="page-header"><h1>Andamento progetto</h1><p>I progetti su cui sei staffato: apri il dettaglio per andamento ticket, Extra Effort e inserimento dati</p></div>
+        <div class="card" id="andFilters" style="display:none">
           <div class="field-row" style="margin-bottom:0">
             <div class="field" style="min-width:220px;max-width:300px"><label>Progetto / area</label><select id="andNav" onchange="andNavChange(this.value)"></select></div>
             <div class="field" style="max-width:170px"><label>Mese</label><select id="andMonth" onchange="renderAndamento().catch(console.error)"></select></div>
@@ -352,18 +352,8 @@
             <div><button class="btn btn-ghost2" onclick="renderAndamento().catch(console.error)"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
           </div>
         </div>
-        <div class="card" id="andTicketCard" style="display:none">
-          <div class="card-title"><i class="fa-solid fa-ticket"></i> Inserisci ticket ed Extra Effort delle tue aree</div>
-          <div class="field-row">
-            <div class="field" style="max-width:170px"><label>Data di riferimento</label><input type="date" id="andTicketDate" onchange="loadTicketDay().catch(console.error)"/></div>
-          </div>
-          <div id="andTicketForm"></div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-            <button class="btn btn-ink" onclick="saveTicketDay()"><i class="fa-solid fa-floppy-disk"></i> Salva ticket ed Extra Effort</button>
-            <div id="andTicketMsg" class="msg"></div>
-          </div>
-        </div>
         <div id="andamentoContent"></div>
+        <div id="andEntry"></div>
       </div>
       <!-- OVERVIEW REPERIBILITÀ -->
       <div class="panel" id="panel-rep-overview">
