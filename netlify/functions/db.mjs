@@ -189,7 +189,51 @@ async function ensureTicketSchema(){
     created_at  TIMESTAMP DEFAULT NOW()
   )`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS ee_alert_log_scope_uq ON ee_alert_log (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia)`;
+
+  // Classificazione facoltativa dei ticket del giorno secondo TICKET_TREE (livello › categoria › attività).
+  // Si affianca a ticket_giornalieri senza modificarlo: per livello, la somma di n non supera i ticket dichiarati.
+  await sql`CREATE TABLE IF NOT EXISTS ticket_classificazioni (
+    id          BIGSERIAL PRIMARY KEY,
+    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
+    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
+    data        DATE    NOT NULL,
+    livello     TEXT    NOT NULL CHECK (livello IN ('L1','L2','L3')),
+    categoria   TEXT    NOT NULL,
+    attivita    TEXT    NOT NULL,
+    n           INTEGER NOT NULL CHECK (n > 0),
+    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
+    created_at  TIMESTAMP DEFAULT NOW(),
+    UNIQUE (area_id, data, livello, categoria, attivita)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS ticket_class_prj_data_idx ON ticket_classificazioni (progetto_id, data)`;
 }
+
+// Alberatura AMS per la classificazione dei ticket: unica fonte, inviata ai client e usata per validare
+const TICKET_TREE = {
+  L1: {
+    'OPERATION': ['Recupero / Ripristino', 'Riavvio', 'Rerun / Riesecuzione', 'Monitoraggio', 'Gestione alert', 'Controllo esito elaborazione', 'Verifica disponibilità servizio'],
+    'CONFIGURAZIONE': ['Gestione utenze', 'Gestione accessi', 'Abilitazione / Disabilitazione', 'Parametrizzazione standard', 'Setup standard'],
+    'DATA OPERATION': ['Controllo dati', 'Estrazione standard', 'Caricamento standard', 'Controllo file', 'Controllo flussi', 'Recupero elaborazione'],
+    'SUPPORTO': ['How-to', 'Supporto utente', 'Check funzionale', 'Raccolta evidenze', 'Verifica segnalazione', 'Escalation']
+  },
+  L2: {
+    'TROUBLESHOOTING': ['Analisi anomalia applicativa', 'Analisi errore tecnico', 'Analisi log', 'Analisi integrazione', 'Analisi performance', 'Analisi dipendenze', 'Identificazione causa'],
+    'OPERATION SPECIALISTICA': ['Recovery specialistico', 'Rerun con gestione dipendenze', 'Ripristino flusso', 'Gestione batch', 'Gestione job', 'Sblocco elaborazione', 'Remediation operativa'],
+    'CONFIGURAZIONE': ['Configurazione applicativa', 'Parametrizzazione avanzata', 'Configurazione integrazione', 'Configurazione schedulazione', 'Configurazione autorizzazioni', 'Configurazione ambiente'],
+    'DATA MANAGEMENT': ['Bonifica dati', 'Correzione dati', 'Rielaborazione dati', 'Allineamento dati', 'Analisi inconsistenze', 'Riconciliazione dati'],
+    'INTEGRATION': ['Analisi flusso', 'Analisi interfaccia', 'Analisi API', 'Analisi errore integrazione', 'Gestione messaggi / code', 'Ripristino integrazione'],
+    'PROBLEM ANALYSIS': ['Analisi incident ricorrenti', 'Root Cause Analysis', 'Analisi impatto', 'Individuazione workaround', 'Identificazione remediation', 'Escalation L3']
+  },
+  L3: {
+    'MANUTENZIONE CORRETTIVA': ['Bug fixing', 'Correzione codice', 'Correzione query / procedure', 'Correzione pipeline', 'Correzione interfaccia', 'Correzione logica applicativa', 'Hotfix'],
+    'MANUTENZIONE EVOLUTIVA': ['Modifica funzionalità', 'Nuova funzionalità', 'Enhancement', 'Modifica logica applicativa', 'Modifica logica dati', 'Estensione integrazione'],
+    'CONFIGURAZIONE AVANZATA': ['Modifica configurazione strutturale', 'Modifica componenti', 'Modifica integrazione', 'Modifica security / permission', 'Modifica schedulazione complessa', 'Modifica configurazione ambiente'],
+    'DATA & DATABASE': ['Modifica schema', 'Modifica data model', 'Modifica procedure', 'Modifica query', 'Ottimizzazione performance', 'Intervento strutturale sui dati'],
+    'INTEGRATION & PIPELINE': ['Modifica API / interfaccia', 'Modifica pipeline', 'Modifica flusso', 'Refactoring integrazione', 'Nuova integrazione', 'Re-engineering flusso'],
+    'ARCHITETTURA': ['Refactoring', 'Re-engineering', 'Migrazione', 'Modifica architetturale', 'Upgrade tecnologico', 'Introduzione nuovo componente'],
+    'RELEASE & DEPLOYMENT': ['Deployment', 'Patch', 'Hotfix release', 'Rollback', 'Supporto UAT', 'Verifica post-release', 'Hypercare']
+  }
+};
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
 async function saveOre(p){
@@ -1078,12 +1122,12 @@ async function getAndamento(p){
     if (Array.isArray(s.areaIds)) s.areaIds.map(Number).filter(Boolean).forEach(a => areas.push(a));
     else full.push(pid);
   });
-  if (!full.length && !areas.length) return { tickets: [], ee: [], eeDettaglio: [], alert: [] };
+  if (!full.length && !areas.length) return { tickets: [], ee: [], eeDettaglio: [], alert: [], cls: [] };
   const anno = +p.anno, mese = +p.mese;               // mese 0-based
   const mesi = Math.min(Math.max(+p.mesi || 12, 1), 24);
   const from = new Date(Date.UTC(anno, mese - mesi + 1, 1)).toISOString().slice(0, 10);
   const [mFrom, to] = _monthRange(anno, mese);
-  const [tickets, ee, eeDettaglio, alertTk, alertEe] = await Promise.all([
+  const [tickets, ee, eeDettaglio, alertTk, alertEe, cls] = await Promise.all([
     sql`SELECT progetto_id, area_id,
                EXTRACT(YEAR FROM data)::int      AS anno,
                EXTRACT(MONTH FROM data)::int - 1 AS mese,
@@ -1114,9 +1158,14 @@ async function getAndamento(p){
     sql`SELECT 'ee' AS kind, progetto_id, area_id, soglia::float AS soglia, totale::float AS totale, stato,
                to_char(created_at, 'DD/MM/YYYY HH24:MI') AS quando
         FROM ee_alert_log
-        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[])) AND anno=${anno} AND mese=${mese}`
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[])) AND anno=${anno} AND mese=${mese}`,
+    sql`SELECT progetto_id, area_id, livello, categoria, attivita, SUM(n)::int AS n
+        FROM ticket_classificazioni
+        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
+          AND data BETWEEN ${mFrom}::date AND ${to}::date
+        GROUP BY 1, 2, 3, 4, 5`
   ]);
-  return { tickets, ee, eeDettaglio, alert: [...alertTk, ...alertEe] };
+  return { tickets, ee, eeDettaglio, alert: [...alertTk, ...alertEe], cls };
 }
 
 // Valore di soglia facoltativo: vuoto = non impostata
@@ -1180,16 +1229,24 @@ async function _ticketDayForTL(tlId, dates, progettoId = null, withProjectTL = f
   if (!tl) throw new Error('Risorsa non trovata');
   const aree = await _editableAree(tlId, progettoId, withProjectTL);
   const areaIds = aree.map(a => a.id);
-  const [rows, eeRows] = aree.length ? await Promise.all([
+  const [rows, eeRows, clsRows] = aree.length ? await Promise.all([
     sql`SELECT area_id, data::text AS data, l1, l2, l3, totale
         FROM ticket_giornalieri
         WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])`,
     sql`SELECT area_id, data::text AS data, attivita, ore::float AS ore
         FROM extra_effort
         WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
+        ORDER BY id`,
+    sql`SELECT area_id, data::text AS data, livello, categoria, attivita, n
+        FROM ticket_classificazioni
+        WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
         ORDER BY id`
-  ]) : [[], []];
-  const entries = {}, ee = {};
+  ]) : [[], [], []];
+  const entries = {}, ee = {}, cls = {};
+  clsRows.forEach(r => {
+    if (!cls[r.data]) cls[r.data] = {};
+    (cls[r.data][r.area_id] = cls[r.data][r.area_id] || []).push({ livello: r.livello, categoria: r.categoria, attivita: r.attivita, n: r.n });
+  });
   rows.forEach(r => {
     if (!entries[r.data]) entries[r.data] = {};
     entries[r.data][r.area_id] = { l1: r.l1, l2: r.l2, l3: r.l3, totale: r.totale };
@@ -1198,7 +1255,33 @@ async function _ticketDayForTL(tlId, dates, progettoId = null, withProjectTL = f
     if (!ee[r.data]) ee[r.data] = {};
     (ee[r.data][r.area_id] = ee[r.data][r.area_id] || []).push({ attivita: r.attivita, ore: r.ore });
   });
-  return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries, ee };
+  return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries, ee, cls, tree: TICKET_TREE };
+}
+
+// Classificazione dei ticket di un'area per una giornata. undefined = non inviata (classificazione invariata).
+// Ogni voce deve esistere in TICKET_TREE; per livello la somma non può superare i ticket dichiarati.
+function _clsRows(list, counts) {
+  if (list === undefined) return undefined;
+  if (!Array.isArray(list)) throw new Error('Formato classificazione ticket non valido');
+  if (list.length > 200) throw new Error('Classificazione ticket: troppe voci');
+  const merged = new Map(), perLv = { L1: 0, L2: 0, L3: 0 };
+  for (const r of list) {
+    const livello = String(r?.livello ?? ''), categoria = String(r?.categoria ?? ''), attivita = String(r?.attivita ?? '');
+    if (!TICKET_TREE[livello]?.[categoria]?.includes(attivita))
+      throw new Error(`Classificazione ticket non valida: ${livello} › ${categoria} › ${attivita}`);
+    const n = Number(r?.n);
+    if (!Number.isInteger(n) || n <= 0 || n > 100000)
+      throw new Error(`Classificazione "${attivita}": il numero di ticket deve essere un intero maggiore di zero`);
+    const key = `${livello}\u0000${categoria}\u0000${attivita}`;
+    merged.set(key, { livello, categoria, attivita, n: (merged.get(key)?.n || 0) + n });
+    perLv[livello] += n;
+  }
+  for (const lv of ['L1', 'L2', 'L3']) {
+    const max = counts[lv.toLowerCase()];
+    if (perLv[lv] > max)
+      throw new Error(`Classificazione ${lv}: ${perLv[lv]} ticket classificati ma ne risultano ${max} dichiarati`);
+  }
+  return [...merged.values()];
 }
 
 // Righe Extra Effort di un'area per una giornata. undefined = non inviate (Extra Effort invariato).
@@ -1230,9 +1313,8 @@ async function _saveTicketEntries(tlId, data, entries, progettoId = null, withPr
   const clean = entries.map(e => {
     const areaId = +e.areaId;
     if (!prjByArea[areaId]) throw new Error('Area non assegnata a questo Team Lead o non attiva');
-    return { areaId, progettoId: prjByArea[areaId],
-             l1: _ticketInt(e.l1, 'L1'), l2: _ticketInt(e.l2, 'L2'), l3: _ticketInt(e.l3, 'L3'),
-             ee: _eeRows(e.ee) };
+    const counts = { l1: _ticketInt(e.l1, 'L1'), l2: _ticketInt(e.l2, 'L2'), l3: _ticketInt(e.l3, 'L3') };
+    return { areaId, progettoId: prjByArea[areaId], ...counts, ee: _eeRows(e.ee), cls: _clsRows(e.cls, counts) };
   });
   const queries = [];
   for (const e of clean) {
@@ -1240,11 +1322,19 @@ async function _saveTicketEntries(tlId, data, entries, progettoId = null, withPr
               VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${e.l1}, ${e.l2}, ${e.l3}, ${tlId}, NOW())
               ON CONFLICT (area_id, data) DO UPDATE SET l1=EXCLUDED.l1, l2=EXCLUDED.l2, l3=EXCLUDED.l3,
                 inserito_da=EXCLUDED.inserito_da, updated_at=NOW()`);
-    if (e.ee === undefined) continue;
-    queries.push(sql`DELETE FROM extra_effort WHERE area_id=${e.areaId} AND data=${data}::date`);
-    for (const r of e.ee) {
-      queries.push(sql`INSERT INTO extra_effort (area_id, progetto_id, data, attivita, ore, inserito_da)
-                VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.attivita}, ${r.ore}, ${tlId})`);
+    if (e.ee !== undefined) {
+      queries.push(sql`DELETE FROM extra_effort WHERE area_id=${e.areaId} AND data=${data}::date`);
+      for (const r of e.ee) {
+        queries.push(sql`INSERT INTO extra_effort (area_id, progetto_id, data, attivita, ore, inserito_da)
+                  VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.attivita}, ${r.ore}, ${tlId})`);
+      }
+    }
+    if (e.cls !== undefined) {
+      queries.push(sql`DELETE FROM ticket_classificazioni WHERE area_id=${e.areaId} AND data=${data}::date`);
+      for (const r of e.cls) {
+        queries.push(sql`INSERT INTO ticket_classificazioni (area_id, progetto_id, data, livello, categoria, attivita, n, inserito_da)
+                  VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.livello}, ${r.categoria}, ${r.attivita}, ${r.n}, ${tlId})`);
+      }
     }
   }
   await sql.transaction(queries);

@@ -75,6 +75,8 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
 .oops h2{color:var(--text);font-size:17px;margin-bottom:8px}
 .oops p{color:var(--muted);font-size:14px;line-height:1.5}
 </style>
+<link rel="stylesheet" href="ticket-cls.css">
+<script src="ticket-cls.js"></script>
 </head>
 <body>
 <div class="card">
@@ -143,6 +145,7 @@ function render() {
           <input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${k}" value="${val(k)}" oninput="recalc(this)"></div>`).join('')}
         <div><label>Totale</label><div class="tot">${v ? v.totale : 0}</div></div>
       </div>
+      ${_d.tree ? TicketCls.html(_d.tree, ((_d.cls || {})[_date] || {})[a.id]) : ''}
       ${eeBlock(((_d.ee || {})[_date] || {})[a.id] || [])}
     </div>`;
   }).join('');
@@ -151,9 +154,10 @@ function render() {
     <div class="u-date">📅 ${fmtDate(_date)}</div>
     ${tabs}
     ${aree}
-    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.<br>Extra Effort: una riga per attività (facoltativo).</div>
+    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.<br>Classificazione: indica a quali attività si riferiscono i ticket (facoltativo).<br>Extra Effort: una riga per attività (facoltativo).</div>
     <button class="btn-save" id="save" onclick="doSave()">Salva</button>
     <div class="alert" id="alert"></div>`;
+  TicketCls.mount(document.getElementById('app'));
   const first = document.querySelector('.lv input');
   if (first) first.focus();
 }
@@ -228,12 +232,13 @@ function recalc(inp) {
     if (ok && i.value !== '') tot += n;
   });
   box.querySelector('.tot').textContent = tot;
+  TicketCls.mount(box);
 }
 
 async function doSave() {
   const btn = document.getElementById('save'), alrt = document.getElementById('alert');
   const entries = [];
-  let bad = false, badEe = false;
+  let bad = false, badEe = false, badCls = false;
   document.querySelectorAll('.area').forEach(box => {
     const row = { areaId: +box.dataset.area };
     box.querySelectorAll('.lv input').forEach(i => {
@@ -245,9 +250,13 @@ async function doSave() {
     const ee = eeCollect(box.querySelector('.ee'));
     if (ee.bad) badEe = true;
     row.ee = ee.rows;
+    const cls = TicketCls.collect(box.querySelector('.tc'));
+    if (cls.bad) badCls = true;
+    if (cls.rows) row.cls = cls.rows;
     entries.push(row);
   });
   if (bad) { alrt.className = 'alert err'; alrt.textContent = '⚠ Inserisci solo numeri interi non negativi'; return; }
+  if (badCls) { alrt.className = 'alert err'; alrt.textContent = '⚠ Classificazione: per un livello hai classificato più ticket di quelli dichiarati'; return; }
   if (badEe) { alrt.className = 'alert err'; alrt.textContent = '⚠ Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero'; return; }
   btn.disabled = true; btn.textContent = 'Salvataggio...'; alrt.className = 'alert';
   try {
@@ -256,9 +265,12 @@ async function doSave() {
     _d.entries[_date] = _d.entries[_date] || {};
     _d.ee = _d.ee || {};
     _d.ee[_date] = _d.ee[_date] || {};
+    _d.cls = _d.cls || {};
+    _d.cls[_date] = _d.cls[_date] || {};
     entries.forEach(r => {
       _d.entries[_date][r.areaId] = { l1: r.l1, l2: r.l2, l3: r.l3, totale: r.l1 + r.l2 + r.l3 };
       _d.ee[_date][r.areaId] = r.ee;
+      if (r.cls) _d.cls[_date][r.areaId] = r.cls;
     });
     const next = _d.dates.find(ds => !dayDone(ds));
     const alerted = (res.soglie || []).filter(s => s.status === 'alert_sent' || s.status === 'already_sent');

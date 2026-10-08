@@ -1946,6 +1946,7 @@ function _andDetailHtml(pid,aid){
         ${sum}
       </div>
     </div>
+    ${_andClsHtml(pid,aid,r,scopeName)}
     <div class="card">
       <div class="and-head"><div class="card-title"><i class="fa-solid fa-stopwatch"></i> Extra Effort${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''}</div>
         <div class="and-seg" role="group" aria-label="Metrica del grafico Extra Effort">${seg('n')}${seg('ore')}</div></div>
@@ -1958,6 +1959,21 @@ function _andDetailHtml(pid,aid){
       ${actsHtml}
     </div>
     ${!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
+}
+// Classificazione dei ticket del mese: per livello, categorie ordinate per numero, con dettaglio attività
+function _andClsHtml(pid,aid,r,scopeName){
+  const D=_andData,rows=(D.d.cls||[]).filter(x=>+x.progetto_id===pid&&(!aid||+x.area_id===aid));
+  const title=`<div class="card-title"><i class="fa-solid fa-sitemap"></i> Classificazione ticket${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''} <span style="color:var(--ink-3);font-weight:600">· ${D.lbl}</span></div>`;
+  if(!rows.length)return `<div class="card">${title}<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessun ticket classificato in ${D.lbl}. La classificazione per attività si indica nell'inserimento manuale, sotto i numeri L1, L2, L3.</p></div>`;
+  const cols=TK_LV.map(s=>{
+    const lv=s.l,mine=rows.filter(x=>x.livello===lv),tot=mine.reduce((a,x)=>a+x.n,0);
+    // le righe arrivano per area: si sommano per categoria e attività
+    const cats={};mine.forEach(x=>{const c=cats[x.categoria]||(cats[x.categoria]={n:0,acts:{}});c.n+=x.n;c.acts[x.attivita]=(c.acts[x.attivita]||0)+x.n;});
+    const list=Object.entries(cats).sort((a,b)=>b[1].n-a[1].n||a[0].localeCompare(b[0],'it')),mx=list.length?list[0][1].n:1;
+    const cov=r[s.k]?`${_fmtNum(tot)} di ${_fmtNum(r[s.k])} classificati (${_fmtPct(Math.min(100,tot/r[s.k]*100))})`:`${_fmtNum(tot)} classificati`;
+    return `<div class="and-cls-col"><div class="and-cls-hd">${_mkSvg(s,11)}<b>${lv}</b><span>${cov}</span></div>${list.length?list.map(([c,v])=>`<details class="and-cls-cat"><summary><span class="and-cls-nm">${_esc(c)}</span><span class="and-cls-bar" aria-hidden="true"><i style="width:${Math.max(4,v.n/mx*100)}%;background:${s.c}"></i></span><b>${_fmtNum(v.n)}</b></summary><ul>${Object.entries(v.acts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'it')).map(([a,n])=>`<li><span>${_esc(a)}</span><b>${_fmtNum(n)}</b></li>`).join('')}</ul></details>`).join(''):'<p class="and-cls-none">Nessun ticket classificato</p>'}</div>`;
+  }).join('');
+  return `<div class="card">${title}<div class="and-cls">${cols}</div></div>`;
 }
 function andEeMode(m){
   _andEeMode=m==='n'?'n':'ore';S.set('andEeMode',_andEeMode);
@@ -2128,26 +2144,30 @@ async function loadTicketDay(){
   try{d=await call('getTicketDay',{risorsaId:me.id,data:inp.value,progettoId:_andEntryPid});}
   catch(e){hideSpinner();form.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
-  const ent=d.entries[inp.value]||{},ee=(d.ee||{})[inp.value]||{};
+  const ent=d.entries[inp.value]||{},ee=(d.ee||{})[inp.value]||{},cls=(d.cls||{})[inp.value]||{};
   if(!d.aree.length){form.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna area attiva su cui puoi inserire dati.</p>';return;}
-  form.innerHTML=`<div class="tk-row tk-header" style="padding-top:0"><div class="tk-head" style="text-align:left">Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-area" data-area="${a.id}"><div class="tk-row"><div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>${_eeBlockHtml(ee[a.id]||[])}</div>`;}).join('');
+  form.innerHTML=`<div class="tk-row tk-header" style="padding-top:0"><div class="tk-head" style="text-align:left">Area</div>${TK_LV.map(s=>`<div class="tk-head">${s.l}</div>`).join('')}<div class="tk-head">Totale</div></div>`+d.aree.map(a=>{const v=ent[a.id];return `<div class="tk-area" data-area="${a.id}"><div class="tk-row"><div><div style="font-weight:600">${_esc(a.nome)} ${v?'<span class="badge badge-ok" style="font-size:.65rem">inserito</span>':''}</div></div>${TK_LV.map(s=>`<input type="number" min="0" step="1" inputmode="numeric" placeholder="0" data-k="${s.k}" value="${v?v[s.k]:''}" oninput="_tkRecalc(this)" aria-label="${s.l} ${_esc(a.nome)}"/>`).join('')}<div class="tk-tot">${v?v.totale:0}</div></div>${d.tree?TicketCls.html(d.tree,cls[a.id]):''}${_eeBlockHtml(ee[a.id]||[])}</div>`;}).join('');
+  TicketCls.mount(form);
 }
 function _tkRecalc(inp){
   const row=inp.closest('.tk-row');let tot=0;
   row.querySelectorAll('input').forEach(i=>{const n=Number(i.value),ok=i.value===''||(Number.isInteger(n)&&n>=0);i.classList.toggle('bad',!ok);if(ok&&i.value!=='')tot+=n;});
   row.querySelector('.tk-tot').textContent=tot;
+  TicketCls.mount(inp.closest('.tk-area'));
 }
 async function saveTicketDay(){
   const me=_me(),data=document.getElementById('andTicketDate')?.value;
   if(!me||!data){showMsg('andTicketMsg','Seleziona una data.','err');return;}
-  const entries=[];let bad=false,badEe=false;
+  const entries=[];let bad=false,badEe=false,badCls=false;
   document.querySelectorAll('#andTicketForm .tk-area[data-area]').forEach(box=>{
     const e={areaId:+box.dataset.area};
     box.querySelectorAll('.tk-row input').forEach(i=>{const raw=i.value.trim(),n=raw===''?0:Number(raw);if(!Number.isInteger(n)||n<0){bad=true;i.classList.add('bad');}e[i.dataset.k]=n;});
     const x=_eeCollect(box.querySelector('.ee'));if(x.bad)badEe=true;e.ee=x.rows;
+    const c=TicketCls.collect(box.querySelector('.tc'));if(c.bad)badCls=true;if(c.rows)e.cls=c.rows;
     entries.push(e);
   });
   if(bad){showMsg('andTicketMsg','Inserisci solo numeri interi non negativi.','err');return;}
+  if(badCls){showMsg('andTicketMsg','Classificazione: per un livello hai classificato più ticket di quelli dichiarati.','err');return;}
   if(badEe){showMsg('andTicketMsg','Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero.','err');return;}
   if(!entries.length)return;
   showSpinner();let res;

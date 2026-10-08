@@ -280,6 +280,25 @@ tbody tr:hover td{background:var(--stone)}
 .ee-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
 .ee-tot{font-size:.8rem;color:var(--ink-3)}
 .ee-tot b{color:var(--amber);font-size:.92rem;font-variant-numeric:tabular-nums}
+/* Classificazione ticket: blocco di inserimento (ticket-cls.css) + riepilogo nel dettaglio */
+.tk-area .tc{margin:6px 0 8px;padding:10px 12px;background:var(--stone);border:1px dashed var(--stone-3);border-radius:var(--r);font-family:var(--f-body)}
+.and-cls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media(max-width:900px){.and-cls{grid-template-columns:1fr}}
+.and-cls-hd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--line);font-size:.86rem;color:var(--ink)}
+.and-cls-hd span{margin-left:auto;font-size:.72rem;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.and-cls-cat summary{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(40px,1fr) auto;gap:8px;align-items:center;padding:5px 2px;cursor:pointer;font-size:.78rem;list-style:none;border-radius:6px}
+.and-cls-cat summary::-webkit-details-marker{display:none}
+.and-cls-cat summary:hover{background:var(--stone)}
+.and-cls-nm{font-weight:600;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.and-cls-nm::before{content:'›';display:inline-block;margin-right:5px;color:var(--ink-3);transition:transform .15s}
+.and-cls-cat[open] .and-cls-nm::before{transform:rotate(90deg)}
+.and-cls-bar{height:8px;background:var(--stone-2);border-radius:4px;overflow:hidden}
+.and-cls-bar i{display:block;height:100%;border-radius:4px}
+.and-cls-cat summary b{font-variant-numeric:tabular-nums;color:var(--ink);min-width:22px;text-align:right}
+.and-cls-cat ul{list-style:none;margin:2px 0 6px 14px;padding:0}
+.and-cls-cat li{display:flex;justify-content:space-between;gap:8px;padding:3px 2px;font-size:.75rem;color:var(--ink-2);border-bottom:1px dotted var(--line)}
+.and-cls-cat li b{font-variant-numeric:tabular-nums;color:var(--ink)}
+.and-cls-none{font-size:.75rem;color:var(--ink-3)}
 /* Andamento: KPI, navigazione progetto → area, soglie */
 .and-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:8px;margin-bottom:10px}
 .and-kpi{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:8px 6px;text-align:center;min-width:0}
