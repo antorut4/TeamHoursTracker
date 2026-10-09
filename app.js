@@ -1636,20 +1636,23 @@ function _myAree(){const me=_me();return me?_cache.aree.filter(a=>a.teamLeadId==
 function _prjAree(pid){return _cache.aree.filter(a=>a.progettoId===pid);}
 // Progetto con più aree: soglie e dati gestiti a livello di area
 function _isMultiArea(pid){return _prjAree(pid).length>1;}
-// Progetti visibili in Andamento, per qualsiasi ruolo: quelli su cui la risorsa è staffata
-// (allocazione) o di cui è Team Lead (di progetto o di un'area). L'admin vede tutti i progetti.
-// Il dettaglio mostra sempre l'intero progetto.
+// Progetti in cui la risorsa è coinvolta: staffata (allocazione) o Team Lead (di progetto o di un'area)
+function _andInvolvedIds(){
+  const me=_me(),ids=new Set();if(!me)return ids;
+  (me.progetti||[]).forEach(p=>ids.add(_prjIdByName[p]));
+  Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))ids.add(_prjIdByName[p]);});
+  _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>ids.add(a.progettoId));
+  return ids;
+}
+// Progetti visibili in Andamento: quelli in cui si è coinvolti e, per il Manager, quelli delle sue risorse.
+// L'admin vede tutti i progetti. Il dettaglio mostra sempre l'intero progetto.
 function _andProjectIds(){
-  const ids=new Set();
-  if(isAdmin)(_cache.prj||[]).forEach(p=>ids.add(_prjIdByName[p]));
-  else{
-    const me=_me();if(!me)return[];
-    (me.progetti||[]).forEach(p=>ids.add(_prjIdByName[p]));
-    Object.entries(_prjTLsByName).forEach(([p,tls])=>{if(tls.includes(currentUser))ids.add(_prjIdByName[p]);});
-    _cache.aree.filter(a=>a.teamLeadId===me.id).forEach(a=>ids.add(a.progettoId));
-  }
+  const ids=isAdmin?new Set((_cache.prj||[]).map(p=>_prjIdByName[p])):_andInvolvedIds();
+  if(!isAdmin&&isTeamLead)_getManagerProjects().forEach(p=>ids.add(_prjIdByName[p]));
   return[...ids].filter(pid=>_prjNameById[pid]).sort((a,b)=>_prjNameById[a].localeCompare(_prjNameById[b],'it'));
 }
+// Sola lettura: progetto visibile al Manager tramite le sue risorse, senza esserne coinvolto direttamente
+function _andReadOnly(pid){return !isAdmin&&!_andInvolvedIds().has(pid);}
 function _andProjects(){return _andProjectIds().map(pid=>_prjNameById[pid]);}
 // Soglia di progetto modificabile da: admin, TL del progetto, TL di un'area del progetto, manager con risorse sul progetto
 function _canEditSoglia(prj){
@@ -1742,7 +1745,7 @@ function _andListHtml(prjs){
   const me=_me();
   return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'}</div><div class="and-list">${prjs.map(pid=>{
     const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
-    const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':'';
+    const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':_andReadOnly(pid)?'Manager · sola lettura':'';
     return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
       <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
         <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div></div>
@@ -1753,7 +1756,7 @@ function _andListHtml(prjs){
 function _andEntryInit(pid){
   const box=document.getElementById('andEntry');if(!box)return;
   _andEntryPid=pid;
-  if(!pid){box.innerHTML='';return;}
+  if(!pid||_andReadOnly(pid)){box.innerHTML='';return;}
   const head=`<div class="card-title"><i class="fa-solid fa-pen-to-square"></i> Inserimento manuale — ticket ed Extra Effort</div>
     <p style="font-size:.8rem;color:var(--ink-3);margin:-8px 0 14px">Per ogni area: numero di ticket aperti nel giorno (L1, L2, L3) e attività di Extra Effort con le ore.</p>`;
   const msg=t=>`<div class="card">${head}<p style="font-size:.84rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:6px"></i>${t}</p></div>`;
@@ -1932,21 +1935,23 @@ function _andDetailHtml(pid,aid){
     ?`<div class="table-wrap"><table><thead><tr><th>Data</th>${showArea?'<th>Area</th>':''}<th>Tipologia attività / Dettaglio</th><th class="and-num">Extra Effort (ore)</th><th>Inserito da</th></tr></thead><tbody>${acts.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.data)}</td>${showArea?`<td>${_esc(areaName(e.area_id))}</td>`:''}<td>${_esc(e.attivita)}</td><td class="and-num">${_fmtOre(e.ore)}</td><td style="color:var(--ink-3)">${_esc(e.inserito_da||'—')}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="${showArea?3:2}"><b>Totale Extra Effort ${_esc(scopeName||p)}</b></td><td class="and-num"><b>${_fmtOre(r.ee)}</b></td><td></td></tr></tfoot></table></div>`
     :`<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessuna attività di Extra Effort registrata in ${D.lbl}.</p>`;
   const seg=m=>`<button type="button" data-m="${m}" class="${_andEeMode===m?'on':''}" aria-pressed="${_andEeMode===m}" onclick="andEeMode('${m}')">${m==='n'?'Numero attività':'Ore'}</button>`;
+  // Manager in sola lettura: solo i due grafici e, sotto, gli elenchi delle attività
+  const ro=_andReadOnly(pid);
   return `${crumb}
     <div class="card">
-      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${_andBadges(pid,aid,r)}</div></div>
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${ro?'<span class="badge badge-amber"><i class="fa-solid fa-eye" style="margin-right:4px"></i>Sola lettura</span>':''}${_andBadges(pid,aid,r)}</div></div>
       ${tabs}
-      <div class="and-grid">
+      <div class="${ro?'':'and-grid'}">
         <div class="and-chart-wrap">
           <div class="and-sum-title">Andamento ticket — ultimi ${D.n} mesi</div>
           <canvas id="${tk.id}" role="img" aria-label="Andamento ticket L1, L2, L3 e totale di ${_esc(p)}${area?' / '+_esc(area.nome):''}"></canvas><div class="and-tip" id="${tk.id}-tip"></div>
           <div class="and-legend">${[...TK_LV,TK_TOT].map(s=>`<span>${_mkSvg(s,12,true)}${s.l}</span>`).join('')}${tk.thr?`<span>${_thrSwatch()}Soglia ${_fmtNum(tk.thr)}</span>`:''}<span style="color:var(--ink-3)">${_mkSvg({c:'#8C8C8C',m:'circle'},10,false,true)}mese senza dati</span></div>
           <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">% L1 · L2 · L3</th></tr></thead><tbody>${tableRows}</tbody></table></div></details>
         </div>
-        ${sum}
+        ${ro?'':sum}
       </div>
     </div>
-    ${_andClsHtml(pid,aid,r,scopeName)}
+    ${ro?'':_andClsHtml(pid,aid,r,scopeName)}
     <div class="card">
       <div class="and-head"><div class="card-title"><i class="fa-solid fa-stopwatch"></i> Extra Effort${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''}</div>
         <div class="and-seg" role="group" aria-label="Metrica del grafico Extra Effort">${seg('n')}${seg('ore')}</div></div>
@@ -1958,13 +1963,14 @@ function _andDetailHtml(pid,aid){
       <div class="and-sum-title" style="margin-top:18px">Attività di Extra Effort — ${D.lbl}</div>
       ${actsHtml}
     </div>
-    ${!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
+    ${ro?_andClsHtml(pid,aid,r,scopeName):''}
+    ${!ro&&!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
 }
 // Classificazione dei ticket del mese: per livello, categorie ordinate per numero, con dettaglio attività
 function _andClsHtml(pid,aid,r,scopeName){
   const D=_andData,rows=(D.d.cls||[]).filter(x=>+x.progetto_id===pid&&(!aid||+x.area_id===aid));
   const title=`<div class="card-title"><i class="fa-solid fa-sitemap"></i> Classificazione ticket${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''} <span style="color:var(--ink-3);font-weight:600">· ${D.lbl}</span></div>`;
-  if(!rows.length)return `<div class="card">${title}<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessun ticket classificato in ${D.lbl}. La classificazione per attività si indica nell'inserimento manuale, sotto i numeri L1, L2, L3.</p></div>`;
+  if(!rows.length)return `<div class="card">${title}<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessun ticket classificato in ${D.lbl}.${_andReadOnly(pid)?'':' La classificazione per attività si indica nell\'inserimento manuale, sotto i numeri L1, L2, L3.'}</p></div>`;
   const cols=TK_LV.map(s=>{
     const lv=s.l,mine=rows.filter(x=>x.livello===lv),tot=mine.reduce((a,x)=>a+x.n,0);
     // le righe arrivano per area: si sommano per categoria e attività
