@@ -1873,12 +1873,12 @@ function removeThr(pid,aid){
   },'Rimuovi');
 }
 // ── viste ──
-function _andKpis(r){
+function _andKpis(r,noEe){
   const pc=_lvPct(r);
   return `<div class="and-kpis">
     ${TK_LV.map((s,i)=>`<div class="and-kpi"><small>${_mkSvg(s,10)}${s.l}</small><b>${_fmtNum(r[s.k])}</b><span>${_fmtPct(pc&&pc[i])}</span></div>`).join('')}
     <div class="and-kpi and-kpi-tot"><small>Totale ticket</small><b>${_fmtNum(r.totale)}</b><span>${r.totale?'100%':'—'}</span></div>
-    <div class="and-kpi and-kpi-ee"><small><i class="fa-solid fa-stopwatch"></i> Extra Effort</small><b>${_fmtOre(r.ee)}</b><span>${_fmtNum(r.een)} attività</span></div>
+    ${noEe?'':`<div class="and-kpi and-kpi-ee"><small><i class="fa-solid fa-stopwatch"></i> Extra Effort</small><b>${_fmtOre(r.ee)}</b><span>${_fmtNum(r.een)} attività</span></div>`}
   </div>`;
 }
 function _andAreaTable(pid,aree){
@@ -1941,6 +1941,7 @@ function _andDetailHtml(pid,aid){
     <div class="card">
       <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${ro?'<span class="badge badge-amber"><i class="fa-solid fa-eye" style="margin-right:4px"></i>Sola lettura</span>':''}${_andBadges(pid,aid,r)}</div></div>
       ${tabs}
+      ${ro?`<div class="and-ro-kpis"><div class="and-sum-title">Ticket ${scopeName?_esc(scopeName)+' — ':''}${D.lbl} · % sul totale del mese</div>${_andKpis(r,true)}</div>`:''}
       <div class="${ro?'':'and-grid'}">
         <div class="and-chart-wrap">
           <div class="and-sum-title">Andamento ticket — ultimi ${D.n} mesi</div>
