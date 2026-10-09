@@ -220,7 +220,7 @@ const TICKET_TREE = {
     'TROUBLESHOOTING': ['Analisi anomalia applicativa', 'Analisi errore tecnico', 'Analisi log', 'Analisi integrazione', 'Analisi performance', 'Analisi dipendenze', 'Identificazione causa'],
     'OPERATION SPECIALISTICA': ['Recovery specialistico', 'Rerun con gestione dipendenze', 'Ripristino flusso', 'Gestione batch', 'Gestione job', 'Sblocco elaborazione', 'Remediation operativa'],
     'CONFIGURAZIONE': ['Configurazione applicativa', 'Parametrizzazione avanzata', 'Configurazione integrazione', 'Configurazione schedulazione', 'Configurazione autorizzazioni', 'Configurazione ambiente'],
-    'DATA MANAGEMENT': ['Bonifica dati', 'Correzione dati', 'Rielaborazione dati', 'Allineamento dati', 'Analisi inconsistenze', 'Riconciliazione dati'],
+    'DATA MANAGEMENT': ['Bonifica dati', 'Correzione dati', 'Rielaborazione dati', 'Allineamento dati', 'Analisi inconsistenze', 'Riconciliazione dati', 'Estrazione'],
     'INTEGRATION': ['Analisi flusso', 'Analisi interfaccia', 'Analisi API', 'Analisi errore integrazione', 'Gestione messaggi / code', 'Ripristino integrazione'],
     'PROBLEM ANALYSIS': ['Analisi incident ricorrenti', 'Root Cause Analysis', 'Analisi impatto', 'Individuazione workaround', 'Identificazione remediation', 'Escalation L3']
   },
