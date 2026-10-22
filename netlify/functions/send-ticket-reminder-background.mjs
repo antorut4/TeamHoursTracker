@@ -102,13 +102,21 @@ export const handler = async () => {
       ORDER BY r.cognome, r.nome, p.nome, a.nome`;
 
     // Extra Effort già registrato per le date di riferimento: precompila la tabella nell'email
-    const [eeReg] = await sql`SELECT to_regclass('public.extra_effort') IS NOT NULL AS ok`;
-    const eeRows = eeReg.ok && rows.length ? await sql`
-      SELECT area_id, attivita, ore::float AS ore FROM extra_effort
-      WHERE area_id = ANY(${rows.map(r => r.area_id)}::int[]) AND data = ANY(${dates}::date[])
-      ORDER BY data, id` : [];
+    // Le colonne tipo/md nascono al primo avvio dell'app dopo il rilascio: fino ad allora tutto è 'extra'
+    const [eeReg] = await sql`SELECT to_regclass('public.extra_effort') IS NOT NULL AS ok,
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'extra_effort' AND column_name = 'tipo') AS tipo`;
+    const areaIds = rows.map(r => r.area_id);
+    const eeRows = !eeReg.ok || !rows.length ? []
+      : eeReg.tipo ? await sql`
+      SELECT area_id, attivita, tipo, ore::float AS ore, md::float AS md FROM extra_effort
+      WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
+      ORDER BY data, id`
+      : await sql`
+      SELECT area_id, attivita, 'extra' AS tipo, ore::float AS ore, NULL::float AS md FROM extra_effort
+      WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
+      ORDER BY data, id`;
     const eeByArea = {};
-    eeRows.forEach(e => { (eeByArea[e.area_id] = eeByArea[e.area_id] || []).push({ attivita: e.attivita, ore: e.ore }); });
+    eeRows.forEach(e => { (eeByArea[e.area_id] = eeByArea[e.area_id] || []).push({ attivita: e.attivita, tipo: e.tipo, ore: e.ore, md: e.md }); });
 
     // Raggruppa per TL; salta chi ha già inserito tutte le date per tutte le aree.
     // L'Extra Effort è facoltativo: non conta fra gli inserimenti mancanti.
@@ -183,17 +191,28 @@ function groupByProject(aree) {
 // Area da mostrare come sottotitolo solo se il progetto è suddiviso in più aree
 const showArea = (list) => list.length > 1 || list[0].multi;
 
+// Attività extra in ore, CR (da scalare a Plafond) in Man Day
+const isCr = e => e.tipo === 'cr';
+const eeTipo = e => isCr(e) ? 'CR' : 'Attività extra';
+const eeValore = e => isCr(e) ? `${fmtOre(e.md)} MD` : `${fmtOre(e.ore)} ore`;
+function eeTotals(list) {
+  const t = { ore: 0, md: 0 };
+  list.forEach(a => a.ee.forEach(e => { if (isCr(e)) t.md += e.md; else t.ore += e.ore; }));
+  return t;
+}
+
 function buildEeText(aree) {
   return groupByProject(aree).map(([progetto, list]) => {
     let t = `${progetto}\n`;
-    let tot = 0;
     list.forEach(a => {
       if (showArea(list)) t += `  Area: ${a.area}\n`;
-      t += `  Tipologia attività / Dettaglio | Extra Effort (ore)\n`;
-      if (a.ee.length) a.ee.forEach(e => { t += `  - ${e.attivita} | ${fmtOre(e.ore)}\n`; tot += e.ore; });
-      else t += `  - (da compilare) | —\n`;
+      t += `  Tipologia attività / Dettaglio | Tipologia | Valore\n`;
+      if (a.ee.length) a.ee.forEach(e => { t += `  - ${e.attivita} | ${eeTipo(e)} | ${eeValore(e)}\n`; });
+      else t += `  - (da compilare) | Attività extra (ore) o CR (MD) | —\n`;
     });
-    t += `  Totale Extra Effort ${progetto}: ${tot ? fmtOre(tot) + ' ore' : '—'}\n`;
+    const tot = eeTotals(list);
+    t += `  Totale Extra Effort ${progetto}: ${tot.ore ? fmtOre(tot.ore) + ' ore' : '—'}\n`;
+    if (tot.md) t += `  Totale CR ${progetto}: ${fmtOre(tot.md)} MD\n`;
     return t;
   }).join('\n');
 }
@@ -238,31 +257,36 @@ function buildEmailHtml(firstName, fullName, aree, dates, link) {
   const cell = 'padding:7px 12px;font-family:Arial,Helvetica,sans-serif;font-size:13px;border-bottom:1px solid #eeeeee;text-align:left;';
   const head = 'padding:7px 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;background-color:#f8f9fc;text-align:left;';
   const eeHtml = groupByProject(aree).map(([progetto, list]) => {
-    let tot = 0;
+    const tot = eeTotals(list);
     const body = list.map(a => {
       const sub = showArea(list) ? `
-                <tr><td colspan="2" style="${cell}font-size:12px;font-weight:700;color:#7b00cc;" class="dm-name">Area: ${_esc(a.area)}</td></tr>` : '';
+                <tr><td colspan="3" style="${cell}font-size:12px;font-weight:700;color:#7b00cc;" class="dm-name">Area: ${_esc(a.area)}</td></tr>` : '';
       const rowsHtml = a.ee.length
-        ? a.ee.map(e => { tot += e.ore; return `
+        ? a.ee.map(e => `
                 <tr>
                   <td style="${cell}color:#111827;" class="dm-name">${_esc(e.attivita)}</td>
-                  <td style="${cell}color:#111827;font-weight:700;text-align:right;white-space:nowrap;" class="dm-name">${fmtOre(e.ore)}</td>
-                </tr>`; }).join('')
+                  <td style="${cell}color:#6b7280;white-space:nowrap;" class="dm-intro">${eeTipo(e)}</td>
+                  <td style="${cell}color:#111827;font-weight:700;text-align:right;white-space:nowrap;" class="dm-name">${eeValore(e)}</td>
+                </tr>`).join('')
         : [1, 2, 3].map(() => `
                 <tr>
                   <td style="${cell}color:#9ca3af;" class="dm-valid">Attività / dettaglio</td>
+                  <td style="${cell}color:#9ca3af;white-space:nowrap;" class="dm-valid">Attività extra / CR</td>
                   <td style="${cell}color:#9ca3af;text-align:right;" class="dm-valid">—</td>
                 </tr>`).join('');
       return `${sub}
-                <tr><td style="${head}">Tipologia attività / Dettaglio</td><td style="${head}text-align:right;white-space:nowrap;">Extra Effort (ore)</td></tr>${rowsHtml}`;
+                <tr><td style="${head}">Tipologia attività / Dettaglio</td><td style="${head}white-space:nowrap;">Tipologia</td><td style="${head}text-align:right;white-space:nowrap;">Ore / MD</td></tr>${rowsHtml}`;
     }).join('');
+    const totRow = (label, val, last) => `
+              <tr>
+                <td colspan="2" style="${cell}${last ? 'border-bottom:none;' : ''}font-weight:700;color:#111827;" class="dm-name">${label}</td>
+                <td style="${cell}${last ? 'border-bottom:none;' : ''}font-weight:700;color:#111827;text-align:right;white-space:nowrap;" class="dm-name">${val}</td>
+              </tr>`;
     return `
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px;border:1px solid #eeeeee;border-radius:6px;">
-              <tr><td colspan="2" bgcolor="#f3e8ff" class="dm-badge" style="padding:9px 12px;background-color:#f3e8ff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#7b00cc;text-align:left;"><span class="dm-badge-text">${_esc(progetto)}</span></td></tr>${body}
-              <tr>
-                <td style="${cell}border-bottom:none;font-weight:700;color:#111827;" class="dm-name">Totale Extra Effort ${_esc(progetto)}</td>
-                <td style="${cell}border-bottom:none;font-weight:700;color:#111827;text-align:right;white-space:nowrap;" class="dm-name">${tot ? `${fmtOre(tot)} ore` : '—'}</td>
-              </tr>
+              <tr><td colspan="3" bgcolor="#f3e8ff" class="dm-badge" style="padding:9px 12px;background-color:#f3e8ff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#7b00cc;text-align:left;"><span class="dm-badge-text">${_esc(progetto)}</span></td></tr>${body}
+              ${totRow(`Totale Extra Effort ${_esc(progetto)}`, tot.ore ? `${fmtOre(tot.ore)} ore` : '—', !tot.md)}
+              ${tot.md ? totRow(`Totale CR ${_esc(progetto)} (da scalare a Plafond)`, `${fmtOre(tot.md)} MD`, true) : ''}
             </table>`;
   }).join('');
   return `<!DOCTYPE html>

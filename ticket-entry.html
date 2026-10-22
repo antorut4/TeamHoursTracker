@@ -45,10 +45,10 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
      background:var(--accent-bg);border-radius:8px;border:2px solid transparent}
 .ee{margin-top:12px;border-top:1px dashed var(--border);padding-top:10px}
 .ee-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px}
-.ee-row{display:grid;grid-template-columns:1fr 76px 30px;gap:6px;margin-bottom:6px}
-.ee-row.ee-head{margin-bottom:2px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
-.ee-row input{width:100%;padding:8px;font-size:14px;color:var(--text);border:2px solid var(--border);border-radius:8px;outline:none;background:var(--card)}
-.ee-row input:focus{border-color:var(--accent)}
+.ee-row{display:grid;grid-template-columns:1fr 84px 30px;gap:6px;margin-bottom:10px}
+.ee-row .ee-att{grid-column:1/-1}
+.ee-row input,.ee-row select{width:100%;padding:8px;font-size:14px;color:var(--text);border:2px solid var(--border);border-radius:8px;outline:none;background:var(--card);font-family:inherit}
+.ee-row input:focus,.ee-row select:focus{border-color:var(--accent)}
 .ee-row input.bad{border-color:#dc2626}
 .ee-row .ee-ore{text-align:right}
 .ee-del{border:none;background:none;color:var(--muted);font-size:18px;cursor:pointer;border-radius:6px}
@@ -56,7 +56,7 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
 .ee-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px}
 .ee-add{border:1.5px dashed var(--accent);background:none;color:var(--accent2);font-size:12px;font-weight:700;padding:6px 10px;border-radius:8px;cursor:pointer}
 .ee-tot{font-size:13px;color:var(--muted)}
-.ee-tot b{color:var(--accent2);font-size:15px}
+.ee-tot b{color:var(--accent2);font-size:15px;white-space:nowrap}
 .hint{text-align:center;font-size:12px;color:var(--muted);margin:4px 0 16px}
 .btn-save{width:100%;padding:15px;background:var(--accent);color:#fff;border:none;
           border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;transition:background .2s}
@@ -154,7 +154,7 @@ function render() {
     <div class="u-date">📅 ${fmtDate(_date)}</div>
     ${tabs}
     ${aree}
-    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.<br>Classificazione: indica a quali attività si riferiscono i ticket (facoltativo).<br>Extra Effort: una riga per attività (facoltativo).</div>
+    <div class="hint">Numero di ticket aperti nel giorno, per livello. Il totale è calcolato automaticamente.<br>Classificazione: indica a quali attività si riferiscono i ticket (facoltativo).<br>Extra Effort: una riga per attività (facoltativo). Tipologia: attività extra in ore, oppure CR da scalare a Plafond in MD (Man Day).</div>
     <button class="btn-save" id="save" onclick="doSave()">Salva</button>
     <div class="alert" id="alert"></div>`;
   TicketCls.mount(document.getElementById('app'));
@@ -165,21 +165,33 @@ function render() {
 function fmtOre(n) { return Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 }); }
 
 // ── Extra Effort: tabella compilabile, una riga per attività ──
+// Tipologia: 'extra' = attività extra in ore, 'cr' = CR da scalare a Plafond in MD (Man Day)
+const EE_UNIT = { extra: { ph: 'ore', lbl: 'Extra Effort (ore)' }, cr: { ph: 'MD', lbl: 'CR (MD, Man Day)' } };
 function eeRowHtml(r) {
+  const t = r && r.tipo === 'cr' ? 'cr' : 'extra', v = r ? (t === 'cr' ? r.md : r.ore) : '';
   return `<div class="ee-row">
     <input type="text" class="ee-att" maxlength="300" placeholder="Tipologia attività / dettaglio" value="${esc(r ? r.attivita : '')}" oninput="eeRecalc(this)" aria-label="Tipologia attività / dettaglio">
-    <input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="ore" value="${r ? r.ore : ''}" oninput="eeRecalc(this)" aria-label="Extra Effort (ore)">
+    <select class="ee-tipo" onchange="eeTipo(this)" aria-label="Tipologia">
+      <option value="extra"${t === 'extra' ? ' selected' : ''}>Attività extra (ore)</option>
+      <option value="cr"${t === 'cr' ? ' selected' : ''}>CR (MD)</option>
+    </select>
+    <input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="${EE_UNIT[t].ph}" value="${v ?? ''}" oninput="eeRecalc(this)" aria-label="${EE_UNIT[t].lbl}">
     <button type="button" class="ee-del" title="Rimuovi riga" onclick="eeDel(this)">×</button>
   </div>`;
 }
+function eeTipo(sel) {
+  const i = sel.closest('.ee-row').querySelector('.ee-ore'), u = EE_UNIT[sel.value];
+  i.placeholder = u.ph; i.setAttribute('aria-label', u.lbl); eeRecalc(sel);
+}
+function eeTotHtml(h, md) { return `Extra Effort: <b>${fmtOre(h)} h</b> · CR: <b>${fmtOre(md)} MD</b>`; }
 function eeBlock(rows) {
-  const tot = rows.reduce((s, r) => s + r.ore, 0);
+  const h = rows.filter(r => r.tipo !== 'cr').reduce((s, r) => s + r.ore, 0);
+  const md = rows.filter(r => r.tipo === 'cr').reduce((s, r) => s + r.md, 0);
   return `<div class="ee">
-    <div class="ee-title">Extra Effort</div>
-    <div class="ee-row ee-head"><span>Tipologia attività / Dettaglio</span><span style="text-align:right">Ore</span><span></span></div>
+    <div class="ee-title">Extra Effort / CR da scalare a Plafond</div>
     <div class="ee-rows">${(rows.length ? rows : [null]).map(eeRowHtml).join('')}</div>
     <div class="ee-foot"><button type="button" class="ee-add" onclick="eeAdd(this)">+ Aggiungi attività</button>
-      <span class="ee-tot">Totale Extra Effort: <b>${fmtOre(tot)} h</b></span></div>
+      <span class="ee-tot">${eeTotHtml(h, md)}</span></div>
   </div>`;
 }
 function eeAdd(btn) {
@@ -190,19 +202,21 @@ function eeAdd(btn) {
 function eeDel(btn) {
   const box = btn.closest('.ee'), row = btn.closest('.ee-row');
   if (box.querySelectorAll('.ee-rows .ee-row').length > 1) row.remove();
-  else row.querySelectorAll('input').forEach(i => { i.value = ''; i.classList.remove('bad'); });
+  else {
+    row.querySelectorAll('input').forEach(i => { i.value = ''; i.classList.remove('bad'); });
+    const s = row.querySelector('.ee-tipo'); s.value = 'extra'; eeTipo(s);
+  }
   eeRecalc(box);
 }
 function eeRecalc(el) {
-  const box = el.closest('.ee');
-  let tot = 0;
-  box.querySelectorAll('.ee-ore').forEach(i => {
-    const n = Number(i.value);
+  const box = el.closest('.ee'), tot = { extra: 0, cr: 0 };
+  box.querySelectorAll('.ee-rows .ee-row').forEach(row => {
+    const i = row.querySelector('.ee-ore'), n = Number(i.value);
     const ok = i.value === '' || (Number.isFinite(n) && n > 0);
     i.classList.toggle('bad', !ok);
-    if (ok && i.value !== '') tot += n;
+    if (ok && i.value !== '') tot[row.querySelector('.ee-tipo').value] += n;
   });
-  box.querySelector('.ee-tot b').textContent = `${fmtOre(tot)} h`;
+  box.querySelector('.ee-tot').innerHTML = eeTotHtml(tot.extra, tot.cr);
 }
 // Righe compilate dell'area; righe completamente vuote ignorate, righe a metà segnalate come errore
 function eeCollect(box) {
@@ -215,7 +229,8 @@ function eeCollect(box) {
     const okA = !!a, okO = o !== '' && Number.isFinite(n) && n > 0;
     att.classList.toggle('bad', !okA); ore.classList.toggle('bad', !okO);
     if (!okA || !okO) { bad = true; return; }
-    rows.push({ attivita: a, ore: Math.round(n * 100) / 100 });
+    const tipo = row.querySelector('.ee-tipo').value, v = Math.round(n * 100) / 100;
+    rows.push(tipo === 'cr' ? { tipo, attivita: a, md: v } : { tipo, attivita: a, ore: v });
   });
   return { rows, bad };
 }
@@ -257,7 +272,7 @@ async function doSave() {
   });
   if (bad) { alrt.className = 'alert err'; alrt.textContent = '⚠ Inserisci solo numeri interi non negativi'; return; }
   if (badCls) { alrt.className = 'alert err'; alrt.textContent = '⚠ Classificazione: per un livello hai classificato più ticket di quelli dichiarati'; return; }
-  if (badEe) { alrt.className = 'alert err'; alrt.textContent = '⚠ Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero'; return; }
+  if (badEe) { alrt.className = 'alert err'; alrt.textContent = '⚠ Extra Effort: per ogni riga indica la tipologia attività e un valore maggiore di zero (ore per le attività extra, MD per le CR)'; return; }
   btn.disabled = true; btn.textContent = 'Salvataggio...'; alrt.className = 'alert';
   try {
     const res = await callApi('saveTicketsByToken', { token: _token, data: _date, entries });

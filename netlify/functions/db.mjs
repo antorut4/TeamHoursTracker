@@ -173,6 +173,14 @@ async function ensureTicketSchema(){
     inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
     created_at  TIMESTAMP DEFAULT NOW()
   )`;
+  // Tipologia: 'extra' = attività extra in ore (colonna ore); 'cr' = CR da scalare a Plafond in Man Day (colonna md).
+  // Le righe preesistenti diventano 'extra'. Il vincolo garantisce una sola unità di misura per riga.
+  await sql`ALTER TABLE extra_effort ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'extra'`;
+  await sql`ALTER TABLE extra_effort ADD COLUMN IF NOT EXISTS md NUMERIC(6,2) CHECK (md > 0)`;
+  await sql`ALTER TABLE extra_effort ALTER COLUMN ore DROP NOT NULL`;
+  await sql`ALTER TABLE extra_effort DROP CONSTRAINT IF EXISTS extra_effort_tipo_ck`;
+  await sql`ALTER TABLE extra_effort ADD CONSTRAINT extra_effort_tipo_ck CHECK (
+    (tipo = 'extra' AND ore IS NOT NULL AND md IS NULL) OR (tipo = 'cr' AND md IS NOT NULL AND ore IS NULL))`;
   await sql`CREATE INDEX IF NOT EXISTS extra_effort_prj_data_idx ON extra_effort (progetto_id, data)`;
   await sql`CREATE INDEX IF NOT EXISTS extra_effort_area_data_idx ON extra_effort (area_id, data)`;
   // Registro alert Extra Effort: un solo invio per scope + mese + soglia
@@ -1122,12 +1130,12 @@ async function getAndamento(p){
     if (Array.isArray(s.areaIds)) s.areaIds.map(Number).filter(Boolean).forEach(a => areas.push(a));
     else full.push(pid);
   });
-  if (!full.length && !areas.length) return { tickets: [], ee: [], eeDettaglio: [], alert: [], cls: [] };
+  if (!full.length && !areas.length) return { tickets: [], ee: [], cr: [], eeDettaglio: [], alert: [], cls: [] };
   const anno = +p.anno, mese = +p.mese;               // mese 0-based
   const mesi = Math.min(Math.max(+p.mesi || 12, 1), 24);
   const from = new Date(Date.UTC(anno, mese - mesi + 1, 1)).toISOString().slice(0, 10);
   const [mFrom, to] = _monthRange(anno, mese);
-  const [tickets, ee, eeDettaglio, alertTk, alertEe, cls] = await Promise.all([
+  const [tickets, ee, cr, eeDettaglio, alertTk, alertEe, cls] = await Promise.all([
     sql`SELECT progetto_id, area_id,
                EXTRACT(YEAR FROM data)::int      AS anno,
                EXTRACT(MONTH FROM data)::int - 1 AS mese,
@@ -1142,11 +1150,19 @@ async function getAndamento(p){
                EXTRACT(MONTH FROM data)::int - 1 AS mese,
                SUM(ore)::float AS ore, COUNT(*)::int AS n
         FROM extra_effort
-        WHERE (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
+        WHERE tipo = 'extra' AND (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
           AND data BETWEEN ${from}::date AND ${to}::date
         GROUP BY 1, 2, 3, 4`,
-    sql`SELECT e.id, e.progetto_id, e.area_id, e.data::text AS data, e.attivita, e.ore::float AS ore,
-               r.full_name AS inserito_da
+    sql`SELECT progetto_id, area_id,
+               EXTRACT(YEAR FROM data)::int      AS anno,
+               EXTRACT(MONTH FROM data)::int - 1 AS mese,
+               SUM(md)::float AS md, COUNT(*)::int AS n
+        FROM extra_effort
+        WHERE tipo = 'cr' AND (progetto_id = ANY(${full}::int[]) OR area_id = ANY(${areas}::int[]))
+          AND data BETWEEN ${from}::date AND ${to}::date
+        GROUP BY 1, 2, 3, 4`,
+    sql`SELECT e.id, e.progetto_id, e.area_id, e.data::text AS data, e.attivita, e.tipo,
+               e.ore::float AS ore, e.md::float AS md, r.full_name AS inserito_da
         FROM extra_effort e LEFT JOIN risorse r ON r.id = e.inserito_da
         WHERE (e.progetto_id = ANY(${full}::int[]) OR e.area_id = ANY(${areas}::int[]))
           AND e.data BETWEEN ${mFrom}::date AND ${to}::date
@@ -1165,7 +1181,7 @@ async function getAndamento(p){
           AND data BETWEEN ${mFrom}::date AND ${to}::date
         GROUP BY 1, 2, 3, 4, 5`
   ]);
-  return { tickets, ee, eeDettaglio, alert: [...alertTk, ...alertEe], cls };
+  return { tickets, ee, cr, eeDettaglio, alert: [...alertTk, ...alertEe], cls };
 }
 
 // Valore di soglia facoltativo: vuoto = non impostata
@@ -1233,7 +1249,7 @@ async function _ticketDayForTL(tlId, dates, progettoId = null, withProjectTL = f
     sql`SELECT area_id, data::text AS data, l1, l2, l3, totale
         FROM ticket_giornalieri
         WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])`,
-    sql`SELECT area_id, data::text AS data, attivita, ore::float AS ore
+    sql`SELECT area_id, data::text AS data, attivita, tipo, ore::float AS ore, md::float AS md
         FROM extra_effort
         WHERE area_id = ANY(${areaIds}::int[]) AND data = ANY(${dates}::date[])
         ORDER BY id`,
@@ -1253,7 +1269,9 @@ async function _ticketDayForTL(tlId, dates, progettoId = null, withProjectTL = f
   });
   eeRows.forEach(r => {
     if (!ee[r.data]) ee[r.data] = {};
-    (ee[r.data][r.area_id] = ee[r.data][r.area_id] || []).push({ attivita: r.attivita, ore: r.ore });
+    (ee[r.data][r.area_id] = ee[r.data][r.area_id] || []).push(r.tipo === 'cr'
+      ? { tipo: 'cr', attivita: r.attivita, md: r.md }
+      : { tipo: 'extra', attivita: r.attivita, ore: r.ore });
   });
   return { risorsaId: +tl.id, fullName: tl.full_name, dates, aree, entries, ee, cls, tree: TICKET_TREE };
 }
@@ -1289,14 +1307,18 @@ function _eeRows(list) {
   if (list === undefined) return undefined;
   if (!Array.isArray(list)) throw new Error('Formato Extra Effort non valido');
   if (list.length > 50) throw new Error('Extra Effort: massimo 50 attività per area e giorno');
+  // tipo assente = 'extra' (client precedenti): ore per le attività extra, Man Day (md) per le CR
   return list.map(r => {
     const attivita = String(r?.attivita ?? '').trim();
     if (!attivita) throw new Error('Extra Effort: indica la tipologia attività / dettaglio per ogni riga');
     if (attivita.length > 300) throw new Error('Extra Effort: descrizione troppo lunga (massimo 300 caratteri)');
-    const ore = Number(r?.ore);
-    if (r?.ore === '' || r?.ore === null || !Number.isFinite(ore) || ore <= 0 || ore > 999)
-      throw new Error(`Extra Effort "${attivita}": inserisci un numero di ore maggiore di zero`);
-    return { attivita, ore: Math.round(ore * 100) / 100 };
+    const tipo = r?.tipo === undefined || r?.tipo === null || r?.tipo === '' ? 'extra' : r.tipo;
+    if (tipo !== 'extra' && tipo !== 'cr') throw new Error(`Extra Effort "${attivita}": tipologia non valida`);
+    const raw = tipo === 'cr' ? r?.md : r?.ore, v = Number(raw);
+    if (raw === '' || raw === null || raw === undefined || !Number.isFinite(v) || v <= 0 || v > 999)
+      throw new Error(`Extra Effort "${attivita}": inserisci un numero di ${tipo === 'cr' ? 'MD (Man Day)' : 'ore'} maggiore di zero`);
+    const val = Math.round(v * 100) / 100;
+    return tipo === 'cr' ? { tipo, attivita, ore: null, md: val } : { tipo, attivita, ore: val, md: null };
   });
 }
 
@@ -1325,8 +1347,8 @@ async function _saveTicketEntries(tlId, data, entries, progettoId = null, withPr
     if (e.ee !== undefined) {
       queries.push(sql`DELETE FROM extra_effort WHERE area_id=${e.areaId} AND data=${data}::date`);
       for (const r of e.ee) {
-        queries.push(sql`INSERT INTO extra_effort (area_id, progetto_id, data, attivita, ore, inserito_da)
-                  VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.attivita}, ${r.ore}, ${tlId})`);
+        queries.push(sql`INSERT INTO extra_effort (area_id, progetto_id, data, attivita, tipo, ore, md, inserito_da)
+                  VALUES (${e.areaId}, ${e.progettoId}, ${data}::date, ${r.attivita}, ${r.tipo}, ${r.ore}, ${r.md}, ${tlId})`);
       }
     }
     if (e.cls !== undefined) {
@@ -1387,7 +1409,7 @@ async function _scopeMonthTotals(progettoId, areaId, anno, mese){
           AND data BETWEEN ${from}::date AND ${to}::date`,
     sql`SELECT COALESCE(SUM(ore),0)::float AS ore, COUNT(*)::int AS n
         FROM extra_effort
-        WHERE ((${aid}::int IS NULL AND progetto_id=${progettoId}) OR area_id=${aid})
+        WHERE tipo = 'extra' AND ((${aid}::int IS NULL AND progetto_id=${progettoId}) OR area_id=${aid})
           AND data BETWEEN ${from}::date AND ${to}::date`
   ]);
   return { ...t, ee_ore: _r2(e.ore), ee_n: e.n };

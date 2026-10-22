@@ -1630,6 +1630,8 @@ function _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 function _fmtNum(n){return Number(n).toLocaleString('it-IT');}
 function _r2(n){return Math.round(Number(n)*100)/100;}
 function _fmtOre(n){return _r2(n).toLocaleString('it-IT',{maximumFractionDigits:2})+' h';}
+function _fmtU(n,u){return _r2(n).toLocaleString('it-IT',{maximumFractionDigits:2})+' '+u;}
+function _fmtMd(n){return _fmtU(n,'MD');}
 function _fmtPct(v){return v==null?'—':v.toLocaleString('it-IT',{maximumFractionDigits:1})+'%';}
 function _me(){return isAdmin?null:(RESOURCES.find(r=>r.fullName===currentUser)||null);}
 function _myAree(){const me=_me();return me?_cache.aree.filter(a=>a.teamLeadId===me.id&&a.attiva):[];}
@@ -1677,13 +1679,14 @@ function _andEditableAree(pid){
   return _prjAree(pid).filter(a=>a.attiva&&(prjTL||a.teamLeadId===me.id));
 }
 let _andSel={pid:null,areaId:null},_andData=null,_andCharts=[],_andEntryPid=null,_andEeMode=S.get('andEeMode')==='n'?'n':'ore';
-const _AND_EMPTY=Object.freeze({l1:0,l2:0,l3:0,totale:0,giorni:0,ultimo:null,ee:0,een:0,tk:false});
+const _AND_EMPTY=Object.freeze({l1:0,l2:0,l3:0,totale:0,giorni:0,ultimo:null,ee:0,een:0,cr:0,crn:0,tk:false});
 // Indice dei dati per progetto|area|mese ('*' = somma di tutte le aree del progetto)
 function _andBuild(d){
   const m={};
   const add=(r,f)=>{const key=r.anno+'-'+r.mese;[r.area_id,'*'].forEach(a=>{const k=`${r.progetto_id}|${a}|${key}`;f(m[k]||(m[k]={..._AND_EMPTY}));});};
   d.tickets.forEach(r=>add(r,z=>{TK_LV.forEach(s=>{z[s.k]+=r[s.k];});z.totale+=r.totale;z.giorni+=r.giorni;z.tk=true;if(!z.ultimo||r.ultimo>z.ultimo)z.ultimo=r.ultimo;}));
   d.ee.forEach(r=>add(r,z=>{z.ee=_r2(z.ee+r.ore);z.een+=r.n;}));
+  (d.cr||[]).forEach(r=>add(r,z=>{z.cr=_r2(z.cr+r.md);z.crn+=r.n;}));
   return(pid,aid,y,mo)=>m[`${pid}|${aid==null?'*':aid}|${y}-${mo}`]||_AND_EMPTY;
 }
 // % L1/L2/L3 sul totale del mese, a 1 decimale con il metodo del resto maggiore: la somma è sempre 100
@@ -1697,7 +1700,7 @@ function _lvPct(r){
 // Aree mostrate nel dettaglio: attive o con dati nel mese selezionato
 function _andAree(pid){
   const D=_andData;
-  return _prjAree(pid).filter(a=>{const r=D.get(pid,a.id,D.year,D.month);return a.attiva||r.tk||r.een;}).sort((a,b)=>a.nome.localeCompare(b.nome,'it'));
+  return _prjAree(pid).filter(a=>{const r=D.get(pid,a.id,D.year,D.month);return a.attiva||r.tk||r.een||r.crn;}).sort((a,b)=>a.nome.localeCompare(b.nome,'it'));
 }
 // Elenco progetti (pagina iniziale) oppure dettaglio del progetto selezionato
 async function renderAndamento(){
@@ -1707,8 +1710,20 @@ async function renderAndamento(){
   const pid=_andSel.pid,fc=document.getElementById('andFilters');
   if(fc)fc.style.display=pid?'':'none';
   _andNavOpts(prjs);
-  if(!pid){_andData=null;_andCharts=[];_andEntryInit(null);el.innerHTML=_andListHtml(prjs);return;}
   const month=+document.getElementById('andMonth').value,year=+document.getElementById('andYear').value,n=+document.getElementById('andMesi').value;
+  if(!pid){
+    _andData=null;_andCharts=[];_andEntryInit(null);
+    // Warning soglie in elenco: totali del mese selezionato per tutti i progetti, in una sola chiamata
+    let warn={};
+    if(prjs.length){
+      showSpinner();
+      try{const d=await call('getAndamento',{scope:prjs.map(p=>({progettoId:p,areaIds:null})),anno:year,mese:month,mesi:1});warn=_andWarnings(prjs,_andBuild(d),year,month);}
+      catch(e){console.error(e);}
+      hideSpinner();
+    }
+    if(_andSel.pid)return;
+    el.innerHTML=_andListHtml(prjs,warn,MONTHS[month]+' '+year);return;
+  }
   showSpinner();let d;
   try{d=await call('getAndamento',{scope:[{progettoId:pid,areaIds:null}],anno:year,mese:month,mesi:n});}
   catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
@@ -1740,15 +1755,35 @@ function andGo(pid,aid){
   else renderAndamento().catch(console.error);
   document.getElementById('panel-andamento')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
-function _andListHtml(prjs){
+// Soglie raggiunte o superate nel mese, per progetto: soglia di progetto e soglie delle singole aree
+function _andWarnings(prjs,get,y,m){
+  const out={};
+  prjs.forEach(pid=>{
+    const list=[];
+    [null,..._prjAree(pid).map(a=>a.id)].forEach(aid=>{
+      const cfg=_thrCfg(pid,aid);if(!cfg)return;
+      const r=get(pid,aid,y,m);
+      ['ticket','ee'].forEach(k=>{
+        const tot=k==='ee'?r.ee:r.totale,ev=_thrEval(cfg,k,tot);
+        if(ev.st==='hit'||ev.st==='over')list.push({kind:k,area:aid?_cache.aree.find(a=>a.id===aid)?.nome:null,st:ev.st,tot,soglia:ev.soglia});
+      });
+    });
+    if(list.length)out[pid]=list;
+  });
+  return out;
+}
+function _andListHtml(prjs,warn,lbl){
   if(!prjs.length)return '<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Non risulti staffato su alcun progetto.</p></div>';
-  const me=_me();
-  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'}</div><div class="and-list">${prjs.map(pid=>{
+  const me=_me();warn=warn||{};
+  const wTxt=w=>{const K=_THR_KIND[w.kind];return `${w.kind==='ee'?'Extra Effort':'Ticket'}${w.area?` (${_esc(w.area)})`:''} ${w.st==='over'?'superata':'raggiunta'}: ${K.n(w.tot)} / ${K.n(w.soglia)}`;};
+  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'} <span style="color:var(--ink-3);font-weight:600;font-size:.78rem">· soglie di ${lbl}</span></div><div class="and-list">${prjs.map(pid=>{
     const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
     const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':_andReadOnly(pid)?'Manager · sola lettura':'';
+    const w=warn[pid];
     return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
-      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
-        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div></div>
+      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
+        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div>
+        ${w?`<div class="and-list-warn"><i class="fa-solid fa-triangle-exclamation"></i> Soglia ${w.map(wTxt).join(' · ')}</div>`:''}</div>
       <button class="btn btn-ink btn-sm" onclick="event.stopPropagation();andGo(${pid})">Apri dettaglio <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button>
     </div>`;}).join('')}</div></div>`;
 }
@@ -1758,7 +1793,7 @@ function _andEntryInit(pid){
   _andEntryPid=pid;
   if(!pid||_andReadOnly(pid)){box.innerHTML='';return;}
   const head=`<div class="card-title"><i class="fa-solid fa-pen-to-square"></i> Inserimento manuale — ticket ed Extra Effort</div>
-    <p style="font-size:.8rem;color:var(--ink-3);margin:-8px 0 14px">Per ogni area: numero di ticket aperti nel giorno (L1, L2, L3) e attività di Extra Effort con le ore.</p>`;
+    <p style="font-size:.8rem;color:var(--ink-3);margin:-8px 0 14px">Per ogni area: numero di ticket aperti nel giorno (L1, L2, L3) e attività di Extra Effort, indicando la tipologia: attività extra in ore oppure CR da scalare a Plafond in MD (Man Day).</p>`;
   const msg=t=>`<div class="card">${head}<p style="font-size:.84rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:6px"></i>${t}</p></div>`;
   if(!_prjAree(pid).some(a=>a.attiva)){box.innerHTML=msg('Nessuna area attiva configurata per questo progetto: l\'amministratore può crearle in Admin › Gestione aree.');return;}
   if(!_me()){box.innerHTML=msg('L\'inserimento è riservato ai Team Lead del progetto o delle aree.');return;}
@@ -1878,12 +1913,13 @@ function _andKpis(r,noEe){
   return `<div class="and-kpis">
     ${TK_LV.map((s,i)=>`<div class="and-kpi"><small>${_mkSvg(s,10)}${s.l}</small><b>${_fmtNum(r[s.k])}</b><span>${_fmtPct(pc&&pc[i])}</span></div>`).join('')}
     <div class="and-kpi and-kpi-tot"><small>Totale ticket</small><b>${_fmtNum(r.totale)}</b><span>${r.totale?'100%':'—'}</span></div>
-    ${noEe?'':`<div class="and-kpi and-kpi-ee"><small><i class="fa-solid fa-stopwatch"></i> Extra Effort</small><b>${_fmtOre(r.ee)}</b><span>${_fmtNum(r.een)} attività</span></div>`}
+    ${noEe?'':`<div class="and-kpi and-kpi-ee"><small><i class="fa-solid fa-stopwatch"></i> Extra Effort</small><b>${_fmtOre(r.ee)}</b><span>${_fmtNum(r.een)} attività</span></div>
+    <div class="and-kpi and-kpi-cr"><small><i class="fa-solid fa-file-signature"></i> CR da scalare a Plafond</small><b>${_fmtMd(r.cr)}</b><span>${_fmtNum(r.crn)} attività</span></div>`}
   </div>`;
 }
 function _andAreaTable(pid,aree){
   const D=_andData;
-  return `<div class="and-areas"><div class="and-sum-title">Dettaglio per area — ${D.lbl}</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Team Lead</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">Extra Effort</th><th>Soglie</th><th class="and-num">Giorni inseriti</th><th>Ultimo</th><th></th></tr></thead><tbody>${aree.map(a=>{
+  return `<div class="and-areas"><div class="and-sum-title">Dettaglio per area — ${D.lbl}</div><div class="table-wrap"><table><thead><tr><th>Area</th><th>Team Lead</th>${TK_LV.map(s=>`<th class="and-num">${s.l}</th>`).join('')}<th class="and-num">Totale</th><th class="and-num">Extra Effort</th><th class="and-num">CR</th><th>Soglie</th><th class="and-num">Giorni inseriti</th><th>Ultimo</th><th></th></tr></thead><tbody>${aree.map(a=>{
     const r=D.get(pid,a.id,D.year,D.month),pc=_lvPct(r),cfg=_thrCfg(pid,a.id);
     const tl=a.teamLeadId?(RESOURCES.find(x=>x.id===a.teamLeadId)?.fullName||'—'):'—';
     const pills=_thrPill(cfg,'ticket',r.totale)+_thrPill(cfg,'ee',r.ee);
@@ -1893,6 +1929,7 @@ function _andAreaTable(pid,aree){
       ${TK_LV.map((s,i)=>`<td class="and-num">${_fmtNum(r[s.k])}<small class="and-pct">${_fmtPct(pc&&pc[i])}</small></td>`).join('')}
       <td class="and-num"><b>${_fmtNum(r.totale)}</b></td>
       <td class="and-num">${_fmtOre(r.ee)}<small class="and-pct">${_fmtNum(r.een)} att.</small></td>
+      <td class="and-num">${_fmtMd(r.cr)}<small class="and-pct">${_fmtNum(r.crn)} att.</small></td>
       <td><div class="and-pills">${pills||'<span style="color:var(--ink-3)">—</span>'}</div></td>
       <td class="and-num">${r.giorni}</td>
       <td style="color:var(--ink-3);white-space:nowrap">${r.ultimo?fmt(r.ultimo):'—'}</td>
@@ -1911,7 +1948,9 @@ function _andDetailHtml(pid,aid){
   const tk={id:'andCv-'+sfx,init:_initTicketChart,draw:_drawTicketChart,labels,full,has:recs.map(x=>x.tk),
     series:[...TK_LV,TK_TOT].map(s=>({...s,data:recs.map(x=>x[s.k])})),thr:_thrActive(evTk)?evTk.soglia:null};
   const ee={id:'andEe-'+sfx,ee:true,init:_initEeChart,draw:_drawEeChart,labels,full,ore:recs.map(x=>x.ee),cnt:recs.map(x=>x.een),thr:_thrActive(evEe)?evEe.soglia:null,mode:_andEeMode};
-  _andCharts.push(tk,ee);
+  // CR da scalare a Plafond: stesso grafico a barre dell'Extra Effort, in Man Day, senza soglia
+  const cr={id:'andCr-'+sfx,init:_initEeChart,draw:_drawEeChart,labels,full,ore:recs.map(x=>x.cr),cnt:recs.map(x=>x.crn),thr:null,mode:'md',unit:'MD',vLabel:'MD (Man Day)'};
+  _andCharts.push(tk,ee,cr);
   const crumb=`<nav class="and-crumb" aria-label="Percorso"><a href="#" onclick="andGo();return false"><i class="fa-solid fa-arrow-left"></i> ${isAdmin?'Progetti':'I tuoi progetti'}</a><span aria-hidden="true">›</span>${area?`<a href="#" onclick="andGo(${pid});return false">${_esc(p)}</a><span aria-hidden="true">›</span><b>${_esc(area.nome)}</b>`:`<b>${_esc(p)}</b>`}</nav>`;
   const tabs=multi&&aree.length?`<div class="and-tabs" role="tablist" aria-label="Aree del progetto"><button role="tab" aria-selected="${!aid}" class="${aid?'':'on'}" onclick="andGo(${pid})">Tutto il progetto</button>${aree.map(a=>`<button role="tab" aria-selected="${a.id===aid}" class="${a.id===aid?'on':''}" onclick="andGo(${pid},${a.id})">${_esc(a.nome)}</button>`).join('')}</div>`:'';
   const canEdit=area?_canEditAreaSoglia(area):_canEditSoglia(p);
@@ -1922,20 +1961,25 @@ function _andDetailHtml(pid,aid){
   const sum=`<div class="and-sum">
       <div class="and-sum-title">${scopeName?_esc(scopeName)+' — ':''}${D.lbl}</div>
       ${_andKpis(r)}
-      ${r.tk||r.een?'':'<div style="font-size:.72rem;color:var(--ink-3);margin-top:6px"><i class="fa-regular fa-circle-question" style="margin-right:4px"></i>Nessun dato registrato nel mese</div>'}
+      ${r.tk||r.een||r.crn?'':'<div style="font-size:.72rem;color:var(--ink-3);margin-top:6px"><i class="fa-regular fa-circle-question" style="margin-right:4px"></i>Nessun dato registrato nel mese</div>'}
       ${_andThrMeters(pid,aid,r)}
       ${editor}
     </div>`;
   const tableRows=periods.map(({m,y},i)=>{const x=recs[i],pc=_lvPct(x);return `<tr><td>${MONTHS[m]} ${y}</td>${x.tk?TK_LV.map(s=>`<td class="and-num">${_fmtNum(x[s.k])}</td>`).join('')+`<td class="and-num"><b>${_fmtNum(x.totale)}</b></td><td class="and-num">${pc?pc.map(_fmtPct).join(' · '):'—'}</td>`:'<td colspan="5" style="color:var(--ink-3);text-align:center">nessun dato</td>'}</tr>`;}).join('');
   const eeRows=periods.map(({m,y},i)=>`<tr><td>${MONTHS[m]} ${y}</td><td class="and-num">${_fmtNum(recs[i].een)}</td><td class="and-num">${_fmtOre(recs[i].ee)}</td></tr>`).join('');
-  // Attività Extra Effort del mese selezionato
-  const acts=D.d.eeDettaglio.filter(e=>+e.progetto_id===pid&&(!aid||+e.area_id===aid));
+  const crRows=periods.map(({m,y},i)=>`<tr><td>${MONTHS[m]} ${y}</td><td class="and-num">${_fmtNum(recs[i].crn)}</td><td class="and-num">${_fmtMd(recs[i].cr)}</td></tr>`).join('');
+  // Attività del mese selezionato: 'extra' (ore) nella card Extra Effort, 'cr' (MD) nella card CR
   const areaName=id=>_cache.aree.find(a=>a.id===+id)?.nome||'—',showArea=!aid&&multi;
-  const actsHtml=acts.length
-    ?`<div class="table-wrap"><table><thead><tr><th>Data</th>${showArea?'<th>Area</th>':''}<th>Tipologia attività / Dettaglio</th><th class="and-num">Extra Effort (ore)</th><th>Inserito da</th></tr></thead><tbody>${acts.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.data)}</td>${showArea?`<td>${_esc(areaName(e.area_id))}</td>`:''}<td>${_esc(e.attivita)}</td><td class="and-num">${_fmtOre(e.ore)}</td><td style="color:var(--ink-3)">${_esc(e.inserito_da||'—')}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="${showArea?3:2}"><b>Totale Extra Effort ${_esc(scopeName||p)}</b></td><td class="and-num"><b>${_fmtOre(r.ee)}</b></td><td></td></tr></tfoot></table></div>`
-    :`<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>Nessuna attività di Extra Effort registrata in ${D.lbl}.</p>`;
+  const actsTable=(tipo,valHead,val,totLabel,tot,empty)=>{
+    const acts=D.d.eeDettaglio.filter(e=>(e.tipo||'extra')===tipo&&+e.progetto_id===pid&&(!aid||+e.area_id===aid));
+    return acts.length
+      ?`<div class="table-wrap"><table><thead><tr><th>Data</th>${showArea?'<th>Area</th>':''}<th>Tipologia attività / Dettaglio</th><th class="and-num">${valHead}</th><th>Inserito da</th></tr></thead><tbody>${acts.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.data)}</td>${showArea?`<td>${_esc(areaName(e.area_id))}</td>`:''}<td>${_esc(e.attivita)}</td><td class="and-num">${val(e)}</td><td style="color:var(--ink-3)">${_esc(e.inserito_da||'—')}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="${showArea?3:2}"><b>${totLabel} ${_esc(scopeName||p)}</b></td><td class="and-num"><b>${tot}</b></td><td></td></tr></tfoot></table></div>`
+      :`<p style="font-size:.8rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:5px"></i>${empty} in ${D.lbl}.</p>`;
+  };
+  const actsHtml=actsTable('extra','Extra Effort (ore)',e=>_fmtOre(e.ore),'Totale Extra Effort',_fmtOre(r.ee),'Nessuna attività di Extra Effort registrata');
+  const crActsHtml=actsTable('cr','CR (MD)',e=>_fmtMd(e.md),'Totale CR',_fmtMd(r.cr),'Nessuna CR registrata');
   const seg=m=>`<button type="button" data-m="${m}" class="${_andEeMode===m?'on':''}" aria-pressed="${_andEeMode===m}" onclick="andEeMode('${m}')">${m==='n'?'Numero attività':'Ore'}</button>`;
-  // Manager in sola lettura: solo i due grafici e, sotto, gli elenchi delle attività
+  // Manager in sola lettura: solo i grafici e, sotto, gli elenchi delle attività
   const ro=_andReadOnly(pid);
   return `${crumb}
     <div class="card">
@@ -1963,6 +2007,16 @@ function _andDetailHtml(pid,aid){
       </div>
       <div class="and-sum-title" style="margin-top:18px">Attività di Extra Effort — ${D.lbl}</div>
       ${actsHtml}
+    </div>
+    <div class="card">
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-file-signature"></i> CR - Attività da scalare a Plafond${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''}</div></div>
+      <div class="and-chart-wrap">
+        <div class="and-sum-title">Man Day (MD) per mese — ultimi ${D.n} mesi</div>
+        <canvas id="${cr.id}" class="and-ee-cv" role="img" aria-label="CR da scalare a Plafond, Man Day mensili di ${_esc(p)}${area?' / '+_esc(area.nome):''}"></canvas><div class="and-tip" id="${cr.id}-tip"></div>
+        <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">Attività</th><th class="and-num">MD</th></tr></thead><tbody>${crRows}</tbody></table></div></details>
+      </div>
+      <div class="and-sum-title" style="margin-top:18px">CR da scalare a Plafond — ${D.lbl}</div>
+      ${crActsHtml}
     </div>
     ${ro?_andClsHtml(pid,aid,r,scopeName):''}
     ${!ro&&!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
@@ -2078,31 +2132,32 @@ function _drawEeChart(c){
   const cv=document.getElementById(c.id);if(!cv)return;
   const dpr=window.devicePixelRatio||1,W=cv.clientWidth||600,H=240;
   cv.width=W*dpr;cv.height=H*dpr;const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
-  const isOre=c.mode!=='n',vals=isOre?c.ore:c.cnt,thr=isOre?c.thr:null,fv=v=>isOre?_fmtOre(v):_fmtNum(v);
+  const isOre=c.mode!=='n',u=c.unit||'h',vals=isOre?c.ore:c.cnt,thr=isOre?c.thr:null,fv=v=>isOre?_fmtU(v,u):_fmtNum(v);
   const P={t:20,r:16,b:30,l:48},pw=W-P.l-P.r,ph=H-P.t-P.b,n=vals.length,band=pw/n,bw=Math.max(6,Math.min(36,band*.62));
   const mx=_niceMax(Math.max(1,...vals,thr||0));
   c.geo={l:P.l,band};
   const Y=v=>P.t+ph*(1-v/mx),BX=i=>P.l+band*i+(band-bw)/2;
   ctx.font='11px DM Sans,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
   const div=mx%4===0?4:5;
-  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#8C8C8C';ctx.fillText(_fmtNum(_r2(v))+(isOre?' h':''),P.l-8,y);}
+  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#8C8C8C';ctx.fillText(_fmtNum(_r2(v))+(isOre?' '+u:''),P.l-8,y);}
   const every=band<44?2:1;ctx.textAlign='center';ctx.textBaseline='alphabetic';
   c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#3D3D3D':'#8C8C8C';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,BX(i)+bw/2,H-8);});
   if(c.hover!=null){ctx.fillStyle='rgba(0,0,0,.04)';ctx.fillRect(P.l+band*c.hover,P.t,band,ph);}
   // barre sottili ancorate alla base, angoli superiori arrotondati
   vals.forEach((v,i)=>{if(!v)return;const y=Y(v);_barPath(ctx,BX(i),y,bw,P.t+ph-y,4);ctx.fillStyle=c.hover===i?EE_C_HOVER:EE_C;ctx.fill();});
-  if(thr)_drawThrLine(ctx,P,pw,Y(thr),'Soglia '+_fmtOre(thr));
+  if(thr)_drawThrLine(ctx,P,pw,Y(thr),'Soglia '+_fmtU(thr,u));
   // etichetta diretta solo sul mese selezionato (ultima barra)
   const last=vals[n-1];
   ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#3D3D3D';
-  ctx.fillText(last?fv(last):(isOre?'0 h':'0'),BX(n-1)+bw/2,(last?Y(last):P.t+ph)-4);
+  ctx.fillText(last?fv(last):(isOre?'0 '+u:'0'),BX(n-1)+bw/2,(last?Y(last):P.t+ph)-4);
 }
 function _showEeTip(c,i){
   const t=document.getElementById(c.id+'-tip'),cv=document.getElementById(c.id);if(!t||!cv)return;
+  const u=c.unit||'h';
   t.innerHTML=`<div class="and-tip-t">${c.full[i]}</div>`+(c.cnt[i]
-    ?`<div class="and-tip-r"><span>Attività</span><span>${_fmtNum(c.cnt[i])}</span></div><div class="and-tip-r"><span>Ore Extra Effort</span><span>${_fmtOre(c.ore[i])}</span></div>`
+    ?`<div class="and-tip-r"><span>Attività</span><span>${_fmtNum(c.cnt[i])}</span></div><div class="and-tip-r"><span>${c.vLabel||'Ore Extra Effort'}</span><span>${_fmtU(c.ore[i],u)}</span></div>`
     :'<div style="color:var(--ink-3)">Nessuna attività registrata</div>')
-    +(c.thr?`<div class="and-tip-r" style="color:var(--ink-3)"><span>Soglia</span><span>${_fmtOre(c.thr)}</span></div>`:'');
+    +(c.thr?`<div class="and-tip-r" style="color:var(--ink-3)"><span>Soglia</span><span>${_fmtU(c.thr,u)}</span></div>`:'');
   t.style.display='block';
   const x=c.geo.l+c.geo.band*(i+.5),w=t.offsetWidth;
   t.style.left=Math.max(0,Math.min(cv.clientWidth-w,x+14>cv.clientWidth-w?x-w-14:x+14))+'px';t.style.top='10px';
@@ -2110,25 +2165,34 @@ function _showEeTip(c,i){
 let _andResizeT=null;
 window.addEventListener('resize',()=>{clearTimeout(_andResizeT);_andResizeT=setTimeout(()=>{if(document.getElementById('panel-andamento')?.classList.contains('active'))_andCharts.forEach(c=>c.draw(c));},150);});
 // ── Extra Effort: tabella compilabile (una riga per attività), usata nell'inserimento dall'app ──
+// Tipologia: 'extra' = attività extra in ore (grafico Extra Effort), 'cr' = CR in Man Day (grafico CR - da scalare a Plafond)
+const _EE_UNIT={extra:{ph:'ore',lbl:'Extra Effort (ore)'},cr:{ph:'MD',lbl:'CR (MD, Man Day)'}};
 function _eeRowHtml(r){
-  return `<div class="ee-row"><input type="text" class="ee-att" maxlength="300" placeholder="Tipologia attività / dettaglio" value="${_esc(r?r.attivita:'')}" oninput="_eeRecalc(this)" aria-label="Tipologia attività / dettaglio"/><input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="ore" value="${r?r.ore:''}" oninput="_eeRecalc(this)" aria-label="Extra Effort (ore)"/><button type="button" class="btn-icon danger" title="Rimuovi riga" onclick="_eeDel(this)"><i class="fa-solid fa-xmark" style="font-size:.75rem"></i></button></div>`;
+  const t=r&&r.tipo==='cr'?'cr':'extra',v=r?(t==='cr'?r.md:r.ore):'';
+  return `<div class="ee-row"><input type="text" class="ee-att" maxlength="300" placeholder="Tipologia attività / dettaglio" value="${_esc(r?r.attivita:'')}" oninput="_eeRecalc(this)" aria-label="Tipologia attività / dettaglio"/><select class="ee-tipo" onchange="_eeTipo(this)" aria-label="Tipologia"><option value="extra"${t==='extra'?' selected':''}>Attività extra (ore)</option><option value="cr"${t==='cr'?' selected':''}>CR (MD)</option></select><input type="number" class="ee-ore" min="0" step="0.25" inputmode="decimal" placeholder="${_EE_UNIT[t].ph}" value="${v??''}" oninput="_eeRecalc(this)" aria-label="${_EE_UNIT[t].lbl}"/><button type="button" class="btn-icon danger" title="Rimuovi riga" onclick="_eeDel(this)"><i class="fa-solid fa-xmark" style="font-size:.75rem"></i></button></div>`;
 }
+function _eeTipo(sel){
+  const i=sel.closest('.ee-row').querySelector('.ee-ore'),u=_EE_UNIT[sel.value];
+  i.placeholder=u.ph;i.setAttribute('aria-label',u.lbl);_eeRecalc(sel);
+}
+function _eeTotHtml(h,md){return `Totale Extra Effort: <b>${_fmtOre(h)}</b> · CR: <b>${_fmtMd(md)}</b>`;}
 function _eeBlockHtml(rows){
-  return `<div class="ee"><div class="ee-row ee-head"><span>Extra Effort — tipologia attività / dettaglio</span><span style="text-align:right">Ore</span><span></span></div>
+  const h=rows.filter(r=>r.tipo!=='cr').reduce((s,r)=>s+r.ore,0),md=rows.filter(r=>r.tipo==='cr').reduce((s,r)=>s+r.md,0);
+  return `<div class="ee"><div class="ee-row ee-head"><span>Extra Effort / CR — tipologia attività / dettaglio</span><span>Tipologia</span><span style="text-align:right">Ore / MD</span><span></span></div>
     <div class="ee-rows">${(rows.length?rows:[null]).map(_eeRowHtml).join('')}</div>
-    <div class="ee-foot"><button type="button" class="btn btn-ghost2 btn-sm" onclick="_eeAdd(this)"><i class="fa-solid fa-plus"></i> Aggiungi attività</button><span class="ee-tot">Totale Extra Effort: <b>${_fmtOre(rows.reduce((s,r)=>s+r.ore,0))}</b></span></div></div>`;
+    <div class="ee-foot"><button type="button" class="btn btn-ghost2 btn-sm" onclick="_eeAdd(this)"><i class="fa-solid fa-plus"></i> Aggiungi attività</button><span class="ee-tot">${_eeTotHtml(h,md)}</span></div></div>`;
 }
 function _eeAdd(btn){const l=btn.closest('.ee').querySelector('.ee-rows');l.insertAdjacentHTML('beforeend',_eeRowHtml(null));l.lastElementChild.querySelector('.ee-att').focus();}
 function _eeDel(btn){
   const box=btn.closest('.ee'),row=btn.closest('.ee-row');
   if(box.querySelectorAll('.ee-rows .ee-row').length>1)row.remove();
-  else row.querySelectorAll('input').forEach(i=>{i.value='';i.classList.remove('bad');});
+  else{row.querySelectorAll('input').forEach(i=>{i.value='';i.classList.remove('bad');});const s=row.querySelector('.ee-tipo');s.value='extra';_eeTipo(s);}
   _eeRecalc(box);
 }
 function _eeRecalc(el){
-  const box=el.closest('.ee');let tot=0;
-  box.querySelectorAll('.ee-ore').forEach(i=>{const n=Number(i.value),ok=i.value===''||(Number.isFinite(n)&&n>0);i.classList.toggle('bad',!ok);if(ok&&i.value!=='')tot+=n;});
-  box.querySelector('.ee-tot b').textContent=_fmtOre(tot);
+  const box=el.closest('.ee'),tot={extra:0,cr:0};
+  box.querySelectorAll('.ee-rows .ee-row').forEach(row=>{const i=row.querySelector('.ee-ore'),n=Number(i.value),ok=i.value===''||(Number.isFinite(n)&&n>0);i.classList.toggle('bad',!ok);if(ok&&i.value!=='')tot[row.querySelector('.ee-tipo').value]+=n;});
+  box.querySelector('.ee-tot').innerHTML=_eeTotHtml(tot.extra,tot.cr);
 }
 // Righe compilate: le righe completamente vuote sono ignorate, quelle a metà sono un errore
 function _eeCollect(box){
@@ -2139,7 +2203,8 @@ function _eeCollect(box){
     const n=Number(o),okA=!!a,okO=o!==''&&Number.isFinite(n)&&n>0;
     att.classList.toggle('bad',!okA);ore.classList.toggle('bad',!okO);
     if(!okA||!okO){bad=true;return;}
-    rows.push({attivita:a,ore:_r2(n)});
+    const tipo=row.querySelector('.ee-tipo').value;
+    rows.push(tipo==='cr'?{tipo,attivita:a,md:_r2(n)}:{tipo,attivita:a,ore:_r2(n)});
   });
   return{rows,bad};
 }
@@ -2175,7 +2240,7 @@ async function saveTicketDay(){
   });
   if(bad){showMsg('andTicketMsg','Inserisci solo numeri interi non negativi.','err');return;}
   if(badCls){showMsg('andTicketMsg','Classificazione: per un livello hai classificato più ticket di quelli dichiarati.','err');return;}
-  if(badEe){showMsg('andTicketMsg','Extra Effort: per ogni riga indica la tipologia attività e un numero di ore maggiore di zero.','err');return;}
+  if(badEe){showMsg('andTicketMsg','Extra Effort: per ogni riga indica la tipologia attività e un valore maggiore di zero (ore per le attività extra, MD per le CR).','err');return;}
   if(!entries.length)return;
   showSpinner();let res;
   try{res=await call('saveTickets',{risorsaId:me.id,data,entries,progettoId:_andEntryPid});}
