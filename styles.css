@@ -310,6 +310,12 @@ tbody tr:hover td{background:var(--stone)}
 .and-kpi-tot{background:var(--stone-2)}
 .and-ro-kpis{max-width:560px;margin-bottom:14px}
 .and-kpi-cr{grid-column:span 2}
+.and-acts{margin-top:18px}
+.and-acts>summary{display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none;margin-bottom:10px;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.and-acts>summary::-webkit-details-marker{display:none}
+.and-acts>summary::before{content:'▸';font-size:.8rem;transition:transform .15s}
+.and-acts[open]>summary::before{transform:rotate(90deg)}
+.and-acts>summary:hover{color:var(--ink)}
 .and-list-warn{margin-top:5px;font-size:.76rem;font-weight:600;color:var(--danger);line-height:1.4}
 .and-list-warn i{margin-right:4px}
 .and-kpi-ee{grid-column:span 2;border-color:var(--amber-rim);background:var(--amber-bg)}

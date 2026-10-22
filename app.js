@@ -2005,8 +2005,7 @@ function _andDetailHtml(pid,aid){
         ${ee.thr?`<div class="and-legend"><span>${_thrSwatch()}Soglia ${_fmtOre(ee.thr)} (visibile in modalità Ore)</span></div>`:''}
         <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">Attività</th><th class="and-num">Ore</th></tr></thead><tbody>${eeRows}</tbody></table></div></details>
       </div>
-      <div class="and-sum-title" style="margin-top:18px">Attività di Extra Effort — ${D.lbl}</div>
-      ${actsHtml}
+      ${_andActsBlock('ee',`Attività di Extra Effort — ${D.lbl}`,actsHtml)}
     </div>
     <div class="card">
       <div class="and-head"><div class="card-title"><i class="fa-solid fa-file-signature"></i> CR - Attività da scalare a Plafond${scopeName?` <span style="color:var(--ink-3);font-weight:600">— ${_esc(scopeName)}</span>`:''}</div></div>
@@ -2015,8 +2014,7 @@ function _andDetailHtml(pid,aid){
         <canvas id="${cr.id}" class="and-ee-cv" role="img" aria-label="CR da scalare a Plafond, Man Day mensili di ${_esc(p)}${area?' / '+_esc(area.nome):''}"></canvas><div class="and-tip" id="${cr.id}-tip"></div>
         <details style="margin-top:10px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">Mostra dati in tabella</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">Attività</th><th class="and-num">MD</th></tr></thead><tbody>${crRows}</tbody></table></div></details>
       </div>
-      <div class="and-sum-title" style="margin-top:18px">CR da scalare a Plafond — ${D.lbl}</div>
-      ${crActsHtml}
+      ${_andActsBlock('cr',`CR da scalare a Plafond — ${D.lbl}`,crActsHtml)}
     </div>
     ${ro?_andClsHtml(pid,aid,r,scopeName):''}
     ${!ro&&!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
@@ -2035,6 +2033,11 @@ function _andClsHtml(pid,aid,r,scopeName){
     return `<div class="and-cls-col"><div class="and-cls-hd">${_mkSvg(s,11)}<b>${lv}</b><span>${cov}</span></div>${list.length?list.map(([c,v])=>`<details class="and-cls-cat"><summary><span class="and-cls-nm">${_esc(c)}</span><span class="and-cls-bar" aria-hidden="true"><i style="width:${Math.max(4,v.n/mx*100)}%;background:${s.c}"></i></span><b>${_fmtNum(v.n)}</b></summary><ul>${Object.entries(v.acts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'it')).map(([a,n])=>`<li><span>${_esc(a)}</span><b>${_fmtNum(n)}</b></li>`).join('')}</ul></details>`).join(''):'<p class="and-cls-none">Nessun ticket classificato</p>'}</div>`;
   }).join('');
   return `<div class="card">${title}<div class="and-cls">${cols}</div></div>`;
+}
+// Elenco attività del mese richiudibile; lo stato aperto/chiuso resta cambiando mese, area o progetto
+const _andActsOpen={};
+function _andActsBlock(k,title,html){
+  return `<details class="and-acts"${_andActsOpen[k]===false?'':' open'} ontoggle="_andActsOpen['${k}']=this.open"><summary>${title}</summary>${html}</details>`;
 }
 function andEeMode(m){
   _andEeMode=m==='n'?'n':'ore';S.set('andEeMode',_andEeMode);
