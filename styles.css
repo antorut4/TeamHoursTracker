@@ -77,7 +77,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--amber);background:var
 .badge-danger{background:var(--danger-bg);color:var(--danger)}.badge-info{background:var(--info-bg);color:var(--info)}
 .badge-amber{background:var(--amber-bg);color:var(--amber)}
 .msg{padding:9px 13px;border-radius:var(--r);font-size:.82rem;font-weight:500;display:none}
-.msg.ok{background:var(--ok-bg);color:var(--ok);display:block}.msg.err{background:var(--danger-bg);color:var(--danger);display:block}
+.msg.ok{background:var(--ok-bg);color:var(--ok);display:block}.msg.err{background:var(--danger-bg);color:var(--danger);display:block}.msg.warn{background:var(--warn-bg);color:var(--warn);display:block}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.84rem}
 th{text-align:left;padding:9px 12px;font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);border-bottom:1.5px solid var(--stone-3);background:transparent}

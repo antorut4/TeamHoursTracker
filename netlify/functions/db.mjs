@@ -56,9 +56,11 @@ async function bootstrap(){
   await sql`CREATE INDEX IF NOT EXISTS email_log_created_idx ON email_log (created_at DESC)`;
   // Reminder giornaliero: attivo di default per tutti (anche per le righe già esistenti)
   await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS daily_reminder BOOLEAN NOT NULL DEFAULT TRUE`;
+  // Employee number aziendale (facoltativo), usato nell'export Excel della reperibilità
+  await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS employee_id TEXT`;
   await ensureTicketSchema();
 
-  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie, repExpRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
           COALESCE(
             ARRAY_AGG(r.full_name ORDER BY r.cognome, r.nome)
@@ -70,7 +72,7 @@ async function bootstrap(){
         LEFT JOIN risorse r ON ptl.risorsa_id = r.id
         GROUP BY p.id, p.nome, p.wbs
         ORDER BY p.nome`,
-    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost, daily_reminder FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost, daily_reminder, employee_id FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
@@ -78,8 +80,13 @@ async function bootstrap(){
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 4) = 'wbs_'`,
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`,
     sql`SELECT id, progetto_id, nome, team_lead_id, attiva FROM aree ORDER BY nome`,
-    sql`SELECT progetto_id, area_id, soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket`
+    sql`SELECT progetto_id, area_id, soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket`,
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 11) = 'rep_export_'`
   ]);
+  const repExport = {};
+  repExpRows.forEach(r => {
+    try { repExport[r.chiave.substring(11)] = JSON.parse(r.valore); } catch {}
+  });
   const wbs = {};
   wbsRows.forEach(r => {
     const key = r.chiave.substring(4); // strip 'wbs_' prefix → '{risorsaId}_{anno}_{mese}'
@@ -90,7 +97,7 @@ async function bootstrap(){
     const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
     try { repTipi[pid] = JSON.parse(r.valore); } catch {}
   });
-  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie };
+  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie, repExport };
 }
 
 // ── schema Andamento progetto (idempotente, eseguito a ogni bootstrap) ──
@@ -689,12 +696,19 @@ async function saveProjectWbs(p){
 async function deleteProject(p){ await sql`DELETE FROM progetti WHERE nome=${p.nome}`; }
 
 // ── risorse + allocazioni (full_name lo genera il trigger; team_lead è testo) ──
+// Employee number facoltativo: vuoto = null
+function _employeeId(v){
+  const s = String(v ?? '').trim();
+  if (s.length > 50) throw new Error('Employee number troppo lungo (massimo 50 caratteri)');
+  return s || null;
+}
 async function addResource(p){
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
   const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
-  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager, load_cost) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}, ${loadCost}) RETURNING id`;
+  const employeeId = _employeeId(p.employeeId);
+  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager, load_cost, employee_id) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}, ${loadCost}, ${employeeId}) RETURNING id`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
               SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
@@ -705,7 +719,10 @@ async function saveEdit(p){
   const isManager = !!p.isManager;
   const email = p.email || null;
   const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
-  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager}, load_cost=${loadCost} WHERE id=${p.id}`;
+  // employeeId non inviato = valore invariato
+  const keepEmp = p.employeeId === undefined, employeeId = keepEmp ? null : _employeeId(p.employeeId);
+  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager}, load_cost=${loadCost},
+            employee_id = CASE WHEN ${keepEmp}::boolean THEN employee_id ELSE ${employeeId} END WHERE id=${p.id}`;
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
@@ -785,6 +802,25 @@ async function saveRepTipi(p){
   const valore = JSON.stringify(p.tipi || []);
   await sql`INSERT INTO config (chiave, valore) VALUES (${chiave}, ${valore})
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+}
+
+// ── valori fissi per l'export Excel della reperibilità, per progetto (config rep_export_{progettoId}) ──
+const REP_WORKFORCE = ['Consulting', 'Services', 'Outsourcing', 'Solutions'];
+async function saveRepExport(p){
+  const pid = +p.id;
+  const [proj] = pid ? await sql`SELECT id FROM progetti WHERE id=${pid}` : [];
+  if (!proj) throw new Error('Progetto non trovato');
+  const txt = (v, label) => {
+    const s = String(v ?? '').trim();
+    if (s.length > 200) throw new Error(`${label}: massimo 200 caratteri`);
+    return s;
+  };
+  const workforce = String(p.workforce ?? '').trim();
+  if (workforce && !REP_WORKFORCE.includes(workforce)) throw new Error(`Workforce non valida: usa ${REP_WORKFORCE.join(', ')}`);
+  const valore = JSON.stringify({ workforce, wbs: txt(p.wbs, 'WBS JOB/progetto'), spoc: txt(p.spoc, 'SPOC'), jobUnit: txt(p.jobUnit, 'Job/Unit/Progetto') });
+  await sql`INSERT INTO config (chiave, valore) VALUES (${'rep_export_' + pid}, ${valore})
+            ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+  return JSON.parse(valore);
 }
 
 // ── WBS (stored in config as wbs_{risorsaId}_{anno}_{mese}) ──
@@ -1695,7 +1731,7 @@ const ACTIONS = {
   addResource, saveEdit, deleteResource, saveRep, deleteRep, getRepForProject,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs, setResourceManager, toggleIsManager, saveRepTipi,
+  saveWbs, setResourceManager, toggleIsManager, saveRepTipi, saveRepExport,
   getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast,
   saveArea, deleteArea, getAndamento, saveSoglia, getTicketDay, saveTickets,
   getTicketsByToken, saveTicketsByToken

@@ -293,6 +293,11 @@
               <div id="repMsg" class="msg"></div>
             </div>
           </div>
+          <div class="card" id="repExportCard" style="display:none">
+            <div class="card-title"><i class="fa-solid fa-file-excel"></i> Export Excel reperibilità</div>
+            <p style="font-size:.78rem;color:var(--ink-3);margin:-8px 0 14px">Progetto e mese sono quelli selezionati sopra. Una riga per risorsa, giorno e sistema; il foglio prende il nome del mese.</p>
+            <div id="repExportBody"></div>
+          </div>
           <div class="card">
             <div class="card-title"><i class="fa-solid fa-list"></i> Reperibilità del team</div>
             <div class="search-row">
@@ -382,6 +387,7 @@
               <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
               <div class="field" style="min-width:210px"><label>Email *</label><input type="email" id="resEmail" placeholder="nome.cognome@accenture.com"/></div>
               <div class="field" style="max-width:130px" id="resLCField"><label>LC (€)</label><input type="text" id="resLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
+              <div class="field" style="max-width:150px" id="resEmpField"><label>Employee ID</label><input type="text" id="resEmpId" maxlength="50" placeholder="facoltativo"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="resManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">
@@ -424,6 +430,7 @@
               <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
               <div class="field" style="min-width:210px"><label>Email</label><input type="email" id="editEmail" placeholder="nome.cognome@accenture.com"/></div>
               <div class="field" style="max-width:130px" id="editLCField"><label>LC (€)</label><input type="text" id="editLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
+              <div class="field" style="max-width:150px" id="editEmpField"><label>Employee ID</label><input type="text" id="editEmpId" maxlength="50" placeholder="facoltativo"/></div>
               <div class="field" style="min-width:180px"><label>Manager</label><select id="editManagerSel"><option value="">— Nessun manager —</option></select></div>
               <div class="field" style="min-width:240px"><label>Progetti</label>
                 <div style="display:flex;gap:5px;margin-bottom:5px">

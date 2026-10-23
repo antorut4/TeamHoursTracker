@@ -24,13 +24,14 @@ async function reloadAll(){
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null,dailyReminder:r.daily_reminder!==false}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null,dailyReminder:r.daily_reminder!==false,employeeId:r.employee_id||''}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note,oraInizio:f.ora_inizio||null,oraFine:f.ora_fine||null}));
   _cache.rep=(d.rep||[]).map(rp=>({id:rp.id,risorsaId:+rp.risorsa_id,progetto:_prjNameById[rp.progetto_id]||'',teamLead:rp.team_lead_id?nameById[rp.team_lead_id]||'':'',anno:+rp.anno,mese:+rp.mese,giorni:Array.isArray(rp.giorni)?rp.giorni.map(Number):[],etichetta:rp.etichetta||''}));
   _cache.wbs=d.wbs||{};
   _cache.repTipi=d.repTipi||{};
+  _cache.repExport=d.repExport||{};
   _cache.aree=(d.aree||[]).map(a=>({id:+a.id,progettoId:+a.progetto_id,nome:a.nome,teamLeadId:a.team_lead_id?+a.team_lead_id:null,attiva:a.attiva!==false}));
   // Soglie: area_id nullo = soglia di progetto, altrimenti soglia della singola area
   _cache.soglie={};_cache.soglieArea={};(d.soglie||[]).forEach(s=>{const v={soglia:s.soglia!=null?+s.soglia:null,sogliaEe:s.soglia_ee!=null?+s.soglia_ee:null,attiva:s.attiva!==false,destinatari:s.destinatari||''};if(s.area_id)_cache.soglieArea[s.area_id]=v;else _cache.soglie[s.progetto_id]=v;});
@@ -144,7 +145,7 @@ async function initApp(){
   await renderFerieList();
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
-  ['resLCField','editLCField'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=(isAdmin||isTeamLead)?'':'none';});
+  ['resLCField','editLCField','resEmpField','editEmpField'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=(isAdmin||isTeamLead)?'':'none';});
   // consuntivoRes: visibile solo a manager/admin, permette di filtrare per risorsa
   const consuntivoResField=document.getElementById('consuntivoResField');
   if(consuntivoResField)consuntivoResField.style.display=(isAdmin||isTeamLead)?'':'none';
@@ -763,10 +764,12 @@ async function addResource(){
   if(!email){showMsg('addResMsg','Email obbligatoria.','err');return;}
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
   const loadCost=(document.getElementById('resLC')?.value||'').replace(/,/g,'.');
-  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  const employeeId=(document.getElementById('resEmpId')?.value||'').trim();
+  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('resNome').value='';document.getElementById('resCognome').value='';
   if(document.getElementById('resEmail'))document.getElementById('resEmail').value='';
   if(document.getElementById('resLC'))document.getElementById('resLC').value='';
+  if(document.getElementById('resEmpId'))document.getElementById('resEmpId').value='';
   if(document.getElementById('resIsManager'))document.getElementById('resIsManager').checked=false;
   populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
@@ -792,7 +795,8 @@ async function renderResourceList(){
     const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${r.managerName}</span> · `:'';
     const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${r.email}</span> · `:'';
     const lcMeta=(isAdmin||isTeamLead)&&r.loadCost!=null?`<span style="color:var(--amber);font-size:.72rem;font-weight:600"><i class="fa-solid fa-euro-sign" style="margin-right:2px"></i>LC: ${r.loadCost}</span> · `:'';
-    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    const empMeta=(isAdmin||isTeamLead)&&r.employeeId?`<span style="color:var(--ink-2);font-size:.72rem;font-weight:600"><i class="fa-solid fa-id-badge" style="margin-right:3px"></i>Emp. ${_esc(r.employeeId)}</span> · `:'';
+    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${empMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
@@ -808,6 +812,7 @@ function startEdit(idx){
   const emSel=document.getElementById('editManagerSel');if(emSel)emSel.value=r.managerName||'';
   const emChk=document.getElementById('editIsManager');if(emChk)emChk.checked=!!r.isManager;
   const elcEl=document.getElementById('editLC');if(elcEl)elcEl.value=r.loadCost!=null?r.loadCost:'';
+  const eempEl=document.getElementById('editEmpId');if(eempEl)eempEl.value=r.employeeId||'';
   const ec=document.getElementById('editCard');ec.style.display='block';
   const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');
   if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}
@@ -825,7 +830,9 @@ async function saveEdit(){
   const email=(document.getElementById('editEmail')?.value||'').trim().toLowerCase()||null;
   const newFN=nome+' '+cognome,rid=RESOURCES[idx].id;
   const loadCost=(document.getElementById('editLC')?.value||'').replace(/,/g,'.');
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  // campo nascosto (stessa visibilità del LC) → employeeId non inviato, il server lo lascia invariato
+  const empEl=document.getElementById('editEmpId'),employeeId=empEl&&document.getElementById('editEmpField')?.style.display!=='none'?empEl.value.trim():undefined;
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}
@@ -907,7 +914,81 @@ async function initRepPanel(){
   }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});popSel('repUserMonth',mOpts,now.getMonth());popSel('repUserYear',yOpts,now.getFullYear());await renderRepMine();}
 }
 async function ferieGiorniSet(fullName,year,month){const r=RESOURCES.find(x=>x.fullName===fullName);const mine=r?(_read(K_FER,[])||[]).filter(f=>f.risorsaId===r.id):[];const set=new Set();mine.forEach(e=>{let cur=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(cur<=en){if(cur.getFullYear()===year&&cur.getMonth()===month)set.add(cur.getDate());cur.setDate(cur.getDate()+1);}});return set;}
+// ── Export Excel reperibilità: valori fissi per progetto + download del mese selezionato ──
+const REP_WORKFORCE=['Consulting','Services','Outsourcing','Solutions'];
+const REP_XLS_COLS=['Employee number','Workforce','Cognome','Nome','Importo bonus','Mese di riferimento','WBS JOB/progetto','SPOC','Job/Unit/Progetto','Note','Sistema'];
+function _repExpCfg(progetto){return _cache.repExport[String(_prjIdByName[progetto])]||{};}
+function _repExpForm(){return{workforce:document.getElementById('repExpWorkforce')?.value||'',wbs:(document.getElementById('repExpWbs')?.value||'').trim(),spoc:(document.getElementById('repExpSpoc')?.value||'').trim(),jobUnit:(document.getElementById('repExpJob')?.value||'').trim()};}
+function renderRepExport(){
+  const card=document.getElementById('repExportCard'),body=document.getElementById('repExportBody');if(!card||!body)return;
+  const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
+  if(!progetto){card.style.display='none';body.dataset.prj='';return;}
+  card.style.display='';
+  const lbl=`Scarica Excel — ${MONTHS[month]} ${year}`;
+  // stesso progetto (cambio mese): aggiorna solo il pulsante, senza perdere eventuali modifiche ai campi
+  if(body.dataset.prj===progetto){const b=document.getElementById('repExpDlLbl');if(b)b.textContent=lbl;return;}
+  body.dataset.prj=progetto;
+  const c=_repExpCfg(progetto),prjWbs=_prjWbsByName[progetto]||'';
+  body.innerHTML=`<div class="and-sum-title">Valori fissi del progetto ${_esc(progetto)}</div>
+    <div class="field-row" style="flex-wrap:wrap;align-items:flex-end">
+      <div class="field" style="max-width:170px"><label>Workforce</label><select id="repExpWorkforce"><option value="">— Seleziona —</option>${REP_WORKFORCE.map(w=>`<option${c.workforce===w?' selected':''}>${w}</option>`).join('')}</select></div>
+      <div class="field" style="max-width:200px"><label>WBS JOB/progetto</label><input type="text" id="repExpWbs" maxlength="200" value="${_esc(c.wbs||'')}" placeholder="${prjWbs?_esc(prjWbs):'es. ABC123'}"/></div>
+      <div class="field" style="max-width:200px"><label>SPOC</label><input type="text" id="repExpSpoc" maxlength="200" value="${_esc(c.spoc||'')}"/></div>
+      <div class="field" style="max-width:220px"><label>Job/Unit/Progetto</label><input type="text" id="repExpJob" maxlength="200" value="${_esc(c.jobUnit||'')}"/></div>
+      <div style="padding-bottom:2px"><button class="btn btn-ghost2 btn-sm" onclick="saveRepExportCfg()"><i class="fa-solid fa-floppy-disk"></i> Salva valori</button></div>
+    </div>
+    ${prjWbs?`<div style="font-size:.72rem;color:var(--ink-3);margin:-4px 0 10px">Se "WBS JOB/progetto" resta vuoto, nell'Excel viene usata la WBS del progetto (${_esc(prjWbs)}).</div>`:''}
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-ink" onclick="downloadRepExcel()"><i class="fa-solid fa-file-arrow-down"></i> <span id="repExpDlLbl">${lbl}</span></button>
+      <div id="repExpMsg" class="msg"></div>
+    </div>`;
+}
+async function saveRepExportCfg(){
+  const progetto=document.getElementById('repProgetto').value;if(!progetto)return;
+  const pid=_prjIdByName[progetto],f=_repExpForm();
+  showSpinner();let saved;
+  try{saved=await call('saveRepExport',{id:pid,...f});}
+  catch(e){hideSpinner();showMsg('repExpMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();_cache.repExport[String(pid)]=saved;
+  showMsg('repExpMsg','Valori fissi salvati per '+progetto+'.','ok');
+}
+async function downloadRepExcel(){
+  const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
+  if(!progetto){showMsg('repExpMsg','Seleziona il progetto.','err');return;}
+  // l'Excel riporta i dati salvati: niente export con modifiche ancora in sospeso
+  const pendingGrid=Object.values(_repGridData).some(g=>Object.values(g).some(gd=>gd.selectedDays.size!==gd.savedDays.size||[...gd.selectedDays].some(d=>!gd.savedDays.has(d))));
+  if(pendingGrid){showMsg('repExpMsg','Ci sono modifiche non salvate nella griglia: clicca "Salva" prima di scaricare.','err');return;}
+  const c=_repExpCfg(progetto),f=_repExpForm();
+  if(['workforce','wbs','spoc','jobUnit'].some(k=>(c[k]||'')!==f[k])){showMsg('repExpMsg','Hai modificato i valori fissi: clicca "Salva valori" prima di scaricare.','err');return;}
+  showSpinner();let rep;
+  try{rep=await call('getRepForProject',{progetto,anno:year,mese:month});}
+  catch(e){hideSpinner();showMsg('repExpMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();
+  const meseLbl=`${MONTHS[month]} ${year}`,wbs=c.wbs||_prjWbsByName[progetto]||'',pad=n=>String(n).padStart(2,'0');
+  const rows=[],noEmp=new Set();
+  rep.forEach(e=>{
+    const r=RESOURCES.find(x=>x.id===e.risorsaId);if(!r)return;
+    if(!r.employeeId)noEmp.add(r.fullName);
+    e.giorni.forEach(d=>rows.push({r,d,sistema:e.etichetta||''}));
+  });
+  if(!rows.length){showMsg('repExpMsg',`Nessuna reperibilità salvata per ${progetto} in ${meseLbl}.`,'err');return;}
+  rows.sort((a,b)=>a.r.cognome.localeCompare(b.r.cognome,'it')||a.r.nome.localeCompare(b.r.nome,'it')||a.d-b.d||a.sistema.localeCompare(b.sistema,'it'));
+  const aoa=[REP_XLS_COLS,...rows.map(({r,d,sistema})=>[r.employeeId||'',c.workforce||'',r.cognome,r.nome,calcRepEarningsFromDays([d],year,month),meseLbl,wbs,c.spoc||'',c.jobUnit||'',`${pad(d)}/${pad(month+1)}/${year}`,sistema])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[16,13,18,16,13,18,18,18,22,12,18].map(wch=>({wch}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,meseLbl);
+  XLSX.writeFile(wb,`Reperibilita_${progetto.replace(/[^\w-]+/g,'_')}_${year}-${pad(month+1)}.xlsx`);
+  const miss=[!c.workforce&&'Workforce',!wbs&&'WBS JOB/progetto',!c.spoc&&'SPOC',!c.jobUnit&&'Job/Unit/Progetto'].filter(Boolean);
+  const warn=[miss.length?`valori fissi vuoti: ${miss.join(', ')}`:'',noEmp.size?`Employee number mancante per ${[...noEmp].join(', ')}`:''].filter(Boolean);
+  const txt=`Excel scaricato: ${rows.length} righe (${meseLbl}).`;
+  if(!warn.length){showMsg('repExpMsg',txt,'ok');return;}
+  // avviso più lungo da leggere: resta visibile più a lungo del messaggio standard
+  const m=document.getElementById('repExpMsg');m.textContent=`${txt} Attenzione — ${warn.join('; ')}.`;m.className='msg warn';
+  clearTimeout(m._t);m._t=setTimeout(()=>{m.className='msg';},15000);
+}
 async function buildRepGriglia(){
+  renderRepExport();
   const progetto=document.getElementById('repProgetto').value,month=+document.getElementById('repMonth').value,year=+document.getElementById('repYear').value;
   const wrap=document.getElementById('repGrigliaWrap');
   if(!progetto){wrap.style.display='none';_repGridData={};return;}
