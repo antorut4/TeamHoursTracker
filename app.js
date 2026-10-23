@@ -917,6 +917,17 @@ async function ferieGiorniSet(fullName,year,month){const r=RESOURCES.find(x=>x.f
 // ── Export Excel reperibilità: valori fissi per progetto + download del mese selezionato ──
 const REP_WORKFORCE=['Consulting','Services','Outsourcing','Solutions'];
 const REP_XLS_COLS=['Employee number','Workforce','Cognome','Nome','Importo bonus','Mese di riferimento','WBS JOB/progetto','SPOC','Job/Unit/Progetto','Note','Sistema'];
+// ExcelJS (font, colori e formati di cella) caricato solo al primo export
+let _excelJsP=null;
+function _loadExcelJs(){
+  if(window.ExcelJS)return Promise.resolve(window.ExcelJS);
+  return _excelJsP||(_excelJsP=new Promise((res,rej)=>{
+    const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload=()=>window.ExcelJS?res(window.ExcelJS):rej(new Error('libreria Excel non disponibile'));
+    s.onerror=()=>{_excelJsP=null;s.remove();rej(new Error('impossibile caricare la libreria Excel, controlla la connessione'));};
+    document.head.appendChild(s);
+  }));
+}
 function _repExpCfg(progetto){return _cache.repExport[String(_prjIdByName[progetto])]||{};}
 function _repExpForm(){return{workforce:document.getElementById('repExpWorkforce')?.value||'',wbs:(document.getElementById('repExpWbs')?.value||'').trim(),spoc:(document.getElementById('repExpSpoc')?.value||'').trim(),jobUnit:(document.getElementById('repExpJob')?.value||'').trim()};}
 function renderRepExport(){
@@ -960,10 +971,9 @@ async function downloadRepExcel(){
   if(pendingGrid){showMsg('repExpMsg','Ci sono modifiche non salvate nella griglia: clicca "Salva" prima di scaricare.','err');return;}
   const c=_repExpCfg(progetto),f=_repExpForm();
   if(['workforce','wbs','spoc','jobUnit'].some(k=>(c[k]||'')!==f[k])){showMsg('repExpMsg','Hai modificato i valori fissi: clicca "Salva valori" prima di scaricare.','err');return;}
-  showSpinner();let rep;
-  try{rep=await call('getRepForProject',{progetto,anno:year,mese:month});}
+  showSpinner();let rep,ExcelJS;
+  try{[rep,ExcelJS]=await Promise.all([call('getRepForProject',{progetto,anno:year,mese:month}),_loadExcelJs()]);}
   catch(e){hideSpinner();showMsg('repExpMsg','Errore: '+e.message,'err');return;}
-  hideSpinner();
   const meseLbl=`${MONTHS[month]} ${year}`,pad=n=>String(n).padStart(2,'0'),v=s=>s||'-';
   const rows=[],noEmp=new Set();
   rep.forEach(e=>{
@@ -971,18 +981,27 @@ async function downloadRepExcel(){
     if(!r.employeeId)noEmp.add(r.fullName);
     e.giorni.forEach(d=>rows.push({r,d,sistema:e.etichetta||''}));
   });
-  if(!rows.length){showMsg('repExpMsg',`Nessuna reperibilità salvata per ${progetto} in ${meseLbl}.`,'err');return;}
-  rows.sort((a,b)=>a.r.cognome.localeCompare(b.r.cognome,'it')||a.r.nome.localeCompare(b.r.nome,'it')||a.d-b.d||a.sistema.localeCompare(b.sistema,'it'));
-  // Note = data vera di Excel (seriale dal 30/12/1899, senza fuso orario) mostrata come "1-Nov":
-  // [$-409] forza i mesi in inglese anche in un Excel italiano
-  const serial=d=>Date.UTC(year,month,d)/864e5+25569;
-  const aoa=[REP_XLS_COLS,...rows.map(({r,d,sistema})=>[v(r.employeeId),v(c.workforce),v(r.cognome),v(r.nome),calcRepEarningsFromDays([d],year,month),meseLbl,v(c.wbs),v(c.spoc),v(c.jobUnit),serial(d),v(sistema)])];
-  const ws=XLSX.utils.aoa_to_sheet(aoa);
-  for(let i=1;i<aoa.length;i++){const cell=ws[XLSX.utils.encode_cell({r:i,c:9})];cell.z='[$-409]d-mmm';cell.w=XLSX.SSF.format(cell.z,cell.v);}
-  ws['!cols']=[16,13,18,16,13,18,18,18,22,12,18].map(wch=>({wch}));
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,meseLbl);
-  XLSX.writeFile(wb,`Reperibilita_${progetto.replace(/[^\w-]+/g,'_')}_${year}-${pad(month+1)}.xlsx`);
+  if(!rows.length){hideSpinner();showMsg('repExpMsg',`Nessuna reperibilità salvata per ${progetto} in ${meseLbl}.`,'err');return;}
+  // ordine per giorno (colonna Note), poi per risorsa e sistema
+  rows.sort((a,b)=>a.d-b.d||a.r.cognome.localeCompare(b.r.cognome,'it')||a.r.nome.localeCompare(b.r.nome,'it')||a.sistema.localeCompare(b.sistema,'it'));
+  const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet(MONTHS[month]);
+  const W=[16,13,18,16,14,13,18,18,22,10,18],FONT={name:'Comic Sans MS',size:9};
+  ws.columns=REP_XLS_COLS.map((h,i)=>({header:h,width:W[i]}));
+  // Note = data di Excel in UTC (nessuno slittamento di fuso) mostrata come "1-Nov": [$-409] = mesi in inglese
+  rows.forEach(({r,d,sistema})=>ws.addRow([v(r.employeeId),v(c.workforce),v(r.cognome),v(r.nome),calcRepEarningsFromDays([d],year,month),MONTHS[month],v(c.wbs),v(c.spoc),v(c.jobUnit),new Date(Date.UTC(year,month,d)),v(sistema)]));
+  ws.eachRow((row,n)=>row.eachCell({includeEmpty:true},cell=>{
+    cell.font=n===1?{...FONT,bold:true}:FONT;
+    if(n===1)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFC0C0C0'}};
+    else if(cell.col===5)cell.numFmt='#,##0.00 "€"';
+    else if(cell.col===10)cell.numFmt='[$-409]d-mmm';
+  }));
+  let buf;
+  try{buf=await wb.xlsx.writeBuffer();}catch(e){hideSpinner();showMsg('repExpMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.download=`Reperibilita_${progetto.replace(/[^\w-]+/g,'_')}_${year}-${pad(month+1)}.xlsx`;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
   const miss=[!c.workforce&&'Workforce',!c.wbs&&'WBS JOB/progetto',!c.spoc&&'SPOC',!c.jobUnit&&'Job/Unit/Progetto'].filter(Boolean);
   const warn=[miss.length?`valori fissi vuoti: ${miss.join(', ')}`:'',noEmp.size?`Employee number mancante per ${[...noEmp].join(', ')}`:''].filter(Boolean);
   const txt=`Excel scaricato: ${rows.length} righe (${meseLbl}).`;
