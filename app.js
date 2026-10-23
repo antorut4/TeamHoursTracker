@@ -928,16 +928,16 @@ function renderRepExport(){
   // stesso progetto (cambio mese): aggiorna solo il pulsante, senza perdere eventuali modifiche ai campi
   if(body.dataset.prj===progetto){const b=document.getElementById('repExpDlLbl');if(b)b.textContent=lbl;return;}
   body.dataset.prj=progetto;
-  const c=_repExpCfg(progetto),prjWbs=_prjWbsByName[progetto]||'';
+  const c=_repExpCfg(progetto);
   body.innerHTML=`<div class="and-sum-title">Valori fissi del progetto ${_esc(progetto)}</div>
     <div class="field-row" style="flex-wrap:wrap;align-items:flex-end">
       <div class="field" style="max-width:170px"><label>Workforce</label><select id="repExpWorkforce"><option value="">— Seleziona —</option>${REP_WORKFORCE.map(w=>`<option${c.workforce===w?' selected':''}>${w}</option>`).join('')}</select></div>
-      <div class="field" style="max-width:200px"><label>WBS JOB/progetto</label><input type="text" id="repExpWbs" maxlength="200" value="${_esc(c.wbs||'')}" placeholder="${prjWbs?_esc(prjWbs):'es. ABC123'}"/></div>
+      <div class="field" style="max-width:200px"><label>WBS JOB/progetto</label><input type="text" id="repExpWbs" maxlength="200" value="${_esc(c.wbs||'')}" placeholder="es. ABC123"/></div>
       <div class="field" style="max-width:200px"><label>SPOC</label><input type="text" id="repExpSpoc" maxlength="200" value="${_esc(c.spoc||'')}"/></div>
       <div class="field" style="max-width:220px"><label>Job/Unit/Progetto</label><input type="text" id="repExpJob" maxlength="200" value="${_esc(c.jobUnit||'')}"/></div>
       <div style="padding-bottom:2px"><button class="btn btn-ghost2 btn-sm" onclick="saveRepExportCfg()"><i class="fa-solid fa-floppy-disk"></i> Salva valori</button></div>
     </div>
-    ${prjWbs?`<div style="font-size:.72rem;color:var(--ink-3);margin:-4px 0 10px">Se "WBS JOB/progetto" resta vuoto, nell'Excel viene usata la WBS del progetto (${_esc(prjWbs)}).</div>`:''}
+    <div style="font-size:.72rem;color:var(--ink-3);margin:-4px 0 10px">I valori lasciati vuoti compaiono nell'Excel come "-".</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px">
       <button class="btn btn-ink" onclick="downloadRepExcel()"><i class="fa-solid fa-file-arrow-down"></i> <span id="repExpDlLbl">${lbl}</span></button>
       <div id="repExpMsg" class="msg"></div>
@@ -964,7 +964,7 @@ async function downloadRepExcel(){
   try{rep=await call('getRepForProject',{progetto,anno:year,mese:month});}
   catch(e){hideSpinner();showMsg('repExpMsg','Errore: '+e.message,'err');return;}
   hideSpinner();
-  const meseLbl=`${MONTHS[month]} ${year}`,wbs=c.wbs||_prjWbsByName[progetto]||'',pad=n=>String(n).padStart(2,'0');
+  const meseLbl=`${MONTHS[month]} ${year}`,pad=n=>String(n).padStart(2,'0'),v=s=>s||'-';
   const rows=[],noEmp=new Set();
   rep.forEach(e=>{
     const r=RESOURCES.find(x=>x.id===e.risorsaId);if(!r)return;
@@ -973,13 +973,17 @@ async function downloadRepExcel(){
   });
   if(!rows.length){showMsg('repExpMsg',`Nessuna reperibilità salvata per ${progetto} in ${meseLbl}.`,'err');return;}
   rows.sort((a,b)=>a.r.cognome.localeCompare(b.r.cognome,'it')||a.r.nome.localeCompare(b.r.nome,'it')||a.d-b.d||a.sistema.localeCompare(b.sistema,'it'));
-  const aoa=[REP_XLS_COLS,...rows.map(({r,d,sistema})=>[r.employeeId||'',c.workforce||'',r.cognome,r.nome,calcRepEarningsFromDays([d],year,month),meseLbl,wbs,c.spoc||'',c.jobUnit||'',`${pad(d)}/${pad(month+1)}/${year}`,sistema])];
+  // Note = data vera di Excel (seriale dal 30/12/1899, senza fuso orario) mostrata come "1-Nov":
+  // [$-409] forza i mesi in inglese anche in un Excel italiano
+  const serial=d=>Date.UTC(year,month,d)/864e5+25569;
+  const aoa=[REP_XLS_COLS,...rows.map(({r,d,sistema})=>[v(r.employeeId),v(c.workforce),v(r.cognome),v(r.nome),calcRepEarningsFromDays([d],year,month),meseLbl,v(c.wbs),v(c.spoc),v(c.jobUnit),serial(d),v(sistema)])];
   const ws=XLSX.utils.aoa_to_sheet(aoa);
+  for(let i=1;i<aoa.length;i++){const cell=ws[XLSX.utils.encode_cell({r:i,c:9})];cell.z='[$-409]d-mmm';cell.w=XLSX.SSF.format(cell.z,cell.v);}
   ws['!cols']=[16,13,18,16,13,18,18,18,22,12,18].map(wch=>({wch}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,meseLbl);
   XLSX.writeFile(wb,`Reperibilita_${progetto.replace(/[^\w-]+/g,'_')}_${year}-${pad(month+1)}.xlsx`);
-  const miss=[!c.workforce&&'Workforce',!wbs&&'WBS JOB/progetto',!c.spoc&&'SPOC',!c.jobUnit&&'Job/Unit/Progetto'].filter(Boolean);
+  const miss=[!c.workforce&&'Workforce',!c.wbs&&'WBS JOB/progetto',!c.spoc&&'SPOC',!c.jobUnit&&'Job/Unit/Progetto'].filter(Boolean);
   const warn=[miss.length?`valori fissi vuoti: ${miss.join(', ')}`:'',noEmp.size?`Employee number mancante per ${[...noEmp].join(', ')}`:''].filter(Boolean);
   const txt=`Excel scaricato: ${rows.length} righe (${meseLbl}).`;
   if(!warn.length){showMsg('repExpMsg',txt,'ok');return;}
