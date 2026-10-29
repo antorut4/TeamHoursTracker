@@ -1262,16 +1262,20 @@ async function saveSoglia(p){
 }
 
 // ── giornata ticket di un Team Lead: aree attive + valori già inseriti per le date richieste ──
-// Aree attive su cui una risorsa può inserire dati: quelle di cui è TL e, se withProjectTL,
-// tutte le aree dei progetti di cui è TL di progetto. progettoId limita a un solo progetto.
+// Aree attive su cui una risorsa può inserire dati: quelle di cui è TL e, se withProjectTL (inserimento
+// dall'app), tutte le aree dei progetti di cui fa parte (TL di progetto o staffata), escluso il Manager.
+// progettoId limita a un solo progetto.
 function _editableAree(tlId, progettoId, withProjectTL){
   const pid = progettoId ? +progettoId : null;
+  const inApp = !!withProjectTL;
   return sql`
     SELECT a.id, a.nome, a.progetto_id, p.nome AS progetto
     FROM aree a JOIN progetti p ON p.id = a.progetto_id
     WHERE a.attiva
       AND (a.team_lead_id=${tlId}
-           OR (${!!withProjectTL}::boolean AND a.progetto_id IN (SELECT progetto_id FROM progetto_team_leads WHERE risorsa_id=${tlId})))
+           OR (${inApp}::boolean AND a.progetto_id IN (SELECT progetto_id FROM progetto_team_leads WHERE risorsa_id=${tlId}
+                                                       UNION SELECT progetto_id FROM allocazioni WHERE risorsa_id=${tlId})))
+      AND (NOT ${inApp}::boolean OR NOT EXISTS (SELECT 1 FROM risorse WHERE id=${tlId} AND is_manager))
       AND (${pid}::int IS NULL OR a.progetto_id=${pid})
     ORDER BY p.nome, a.nome`;
 }

@@ -146,11 +146,11 @@ async function initApp(){
   await populateProgettoSelect('res',getProgettoSelected('res'));
   await populateProgettoSelect('edit',getProgettoSelected('edit'));
   ['resLCField','editLCField','resEmpField','editEmpField'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=(isAdmin||isTeamLead)?'':'none';});
-  // consuntivoRes: visibile solo a manager/admin, permette di filtrare per risorsa
-  const consuntivoResField=document.getElementById('consuntivoResField');
-  if(consuntivoResField)consuntivoResField.style.display=(isAdmin||isTeamLead)?'':'none';
-  if(isAdmin||isTeamLead){
-    const rOpts=[{v:'',l:'Tutte le risorse'},...RESOURCES.map(r=>({v:r.id,l:r.fullName}))];
+  // consuntivoRes: visibile solo a admin/manager/TL di progetto, filtra tra le risorse che possono vedere
+  const consuntivoResField=document.getElementById('consuntivoResField'),consuntivoIds=_consuntivoVisibleIds();
+  if(consuntivoResField)consuntivoResField.style.display=consuntivoIds?'':'none';
+  if(consuntivoIds){
+    const rOpts=[{v:'',l:'Tutte le risorse'},...RESOURCES.filter(r=>consuntivoIds.has(r.id)).map(r=>({v:r.id,l:r.fullName}))];
     popSel('consuntivoRes',rOpts,'');
   }
   if(isAdmin){renderAreaList();renderSoglieList();['adminPrjCard','adminResByPrjCard','adminPwdCard','adminEmailLogCard','adminAreeCard','adminSoglieCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
@@ -898,8 +898,13 @@ function calcRepEarningsFromDays(days,anno,mese){const hol=getHol(anno);return d
 function calcRepEarnings(resourceName,year,month,etichetta){const gd=_repGridData[etichetta]?.[resourceName];if(!gd)return 0;return calcRepEarningsFromDays([...gd.selectedDays],year,month);}
 async function initRepPanel(){
   const now=new Date();
-  if(isProjectTL||isAdmin){
-    document.getElementById('repUserView').style.display='none';document.getElementById('repLeadView').style.display='block';
+  const myTLPrjs=isAdmin?[]:Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p).sort();
+  // Una risorsa può essere TL su un progetto e risorsa standard su un altro: assegna la reperibilità
+  // sui progetti di cui è TL e vede sempre quella che le è stata assegnata (anche su altri progetti)
+  document.getElementById('repUserView').style.display=isAdmin?'none':'block';
+  if(!isAdmin){const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});popSel('repUserMonth',mOpts,now.getMonth());popSel('repUserYear',yOpts,now.getFullYear());await renderRepMine();}
+  if(myTLPrjs.length||isAdmin){
+    document.getElementById('repLeadView').style.display='block';
     const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
     popSel('repMonth',mOpts,now.getMonth());popSel('repYear',yOpts,now.getFullYear());
     const team=isAdmin?RESOURCES:RESOURCES.filter(r=>(r.progetti||[]).some(p=>(_prjTLsByName[p]||[]).includes(currentUser)));
@@ -908,10 +913,10 @@ async function initRepPanel(){
     const mFilt=document.getElementById('repFilterMese');mFilt.innerHTML='<option value="">Tutti i mesi</option>';mOpts.forEach(({v,l})=>{const o=document.createElement('option');o.value=v;o.textContent=l;mFilt.appendChild(o);});
     mFilt.value=now.getMonth();
     yFilt.value=now.getFullYear();
-    const myPrjs=isAdmin?await getProjects():Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p).sort();
+    const myPrjs=isAdmin?await getProjects():myTLPrjs;
     const repPrjSel=document.getElementById('repProgetto');repPrjSel.innerHTML='<option value="">— Seleziona —</option>';myPrjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;repPrjSel.appendChild(o);});
     await buildRepGriglia();await renderRepTeam();
-  }else{document.getElementById('repUserView').style.display='block';document.getElementById('repLeadView').style.display='none';const mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});popSel('repUserMonth',mOpts,now.getMonth());popSel('repUserYear',yOpts,now.getFullYear());await renderRepMine();}
+  }else document.getElementById('repLeadView').style.display='none';
 }
 async function ferieGiorniSet(fullName,year,month){const r=RESOURCES.find(x=>x.fullName===fullName);const mine=r?(_read(K_FER,[])||[]).filter(f=>f.risorsaId===r.id):[];const set=new Set();mine.forEach(e=>{let cur=new Date(e.start+'T12:00:00'),en=new Date(e.end+'T12:00:00');while(cur<=en){if(cur.getFullYear()===year&&cur.getMonth()===month)set.add(cur.getDate());cur.setDate(cur.getDate()+1);}});return set;}
 // ── Export Excel reperibilità: valori fissi per progetto + download del mese selezionato ──
@@ -1567,6 +1572,17 @@ async function toggleDailyReminder(cb){
   }
   hideSpinner();cb.disabled=false;
 }
+// Risorse di cui l'utente vede le ore consuntivate (null = solo le proprie).
+// Admin: tutte. Manager: il suo team. Team Lead di progetto: le risorse staffate sui suoi progetti.
+function _consuntivoVisibleIds(){
+  if(isAdmin)return new Set(RESOURCES.map(r=>r.id));
+  const me=_me();if(!me)return null;
+  const tlPrjs=new Set(Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p));
+  if(!isTeamLead&&!tlPrjs.size)return null;
+  const ids=new Set([me.id]);
+  RESOURCES.forEach(r=>{if((isTeamLead&&r.managerName===currentUser)||(r.progetti||[]).some(p=>tlPrjs.has(p)))ids.add(r.id);});
+  return ids;
+}
 async function loadConsuntivo(){
   _syncNotifChk();
   const month=+document.getElementById('consuntivoMonth').value;
@@ -1578,8 +1594,9 @@ async function loadConsuntivo(){
   let rows;
   try{rows=await call('getConsuntivo',{anno:year,mese:month});}catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
   hideSpinner();
-  if(isAdmin||isTeamLead){
-    _renderConsuntivoTeam(rows,month,year);
+  const visibleIds=_consuntivoVisibleIds();
+  if(visibleIds){
+    _renderConsuntivoTeam(rows.filter(r=>visibleIds.has(+r.risorsa_id)),month,year);
   }else{
     const r=RESOURCES.find(x=>x.fullName===currentUser);
     _renderConsuntivoCollab(rows,month,year,r);
@@ -1776,11 +1793,11 @@ function _canEditAreaSoglia(a){
   const prj=_prjNameById[a.progettoId];
   return a.teamLeadId===me.id||(_prjTLsByName[prj]||[]).includes(currentUser)||(isTeamLead&&_getManagerProjects().includes(prj));
 }
-// Aree su cui l'utente può inserire dati: quelle di cui è TL, oppure tutte se è TL del progetto
+// Aree su cui l'utente può inserire dati: tutte quelle attive dei progetti di cui fa parte
+// (staffato, TL del progetto o di un'area). Il Manager non inserisce dati.
 function _andEditableAree(pid){
-  const me=_me();if(!me)return[];
-  const prjTL=(_prjTLsByName[_prjNameById[pid]]||[]).includes(currentUser);
-  return _prjAree(pid).filter(a=>a.attiva&&(prjTL||a.teamLeadId===me.id));
+  if(!_me()||isTeamLead||!_andInvolvedIds().has(pid))return[];
+  return _prjAree(pid).filter(a=>a.attiva);
 }
 let _andSel={pid:null,areaId:null},_andData=null,_andCharts=[],_andEntryPid=null,_andEeMode=S.get('andEeMode')==='n'?'n':'ore';
 const _AND_EMPTY=Object.freeze({l1:0,l2:0,l3:0,totale:0,giorni:0,ultimo:null,ee:0,een:0,cr:0,crn:0,tk:false});
@@ -1895,13 +1912,13 @@ function _andListHtml(prjs,warn,lbl){
 function _andEntryInit(pid){
   const box=document.getElementById('andEntry');if(!box)return;
   _andEntryPid=pid;
-  if(!pid||_andReadOnly(pid)){box.innerHTML='';return;}
+  // Il Manager vede l'andamento ma non inserisce dati
+  if(!pid||_andReadOnly(pid)||isTeamLead){box.innerHTML='';return;}
   const head=`<div class="card-title"><i class="fa-solid fa-pen-to-square"></i> Inserimento manuale — ticket ed Extra Effort</div>
     <p style="font-size:.8rem;color:var(--ink-3);margin:-8px 0 14px">Per ogni area: numero di ticket aperti nel giorno (L1, L2, L3) e attività di Extra Effort, indicando la tipologia: attività extra in ore oppure CR da scalare a Plafond in MD (Man Day).</p>`;
   const msg=t=>`<div class="card">${head}<p style="font-size:.84rem;color:var(--ink-3)"><i class="fa-solid fa-circle-info" style="margin-right:6px"></i>${t}</p></div>`;
   if(!_prjAree(pid).some(a=>a.attiva)){box.innerHTML=msg('Nessuna area attiva configurata per questo progetto: l\'amministratore può crearle in Admin › Gestione aree.');return;}
-  if(!_me()){box.innerHTML=msg('L\'inserimento è riservato ai Team Lead del progetto o delle aree.');return;}
-  if(!_andEditableAree(pid).length){box.innerHTML=msg('Puoi inserire dati sulle aree di cui sei Team Lead, oppure su tutte le aree se sei Team Lead del progetto.');return;}
+  if(!_me()||!_andEditableAree(pid).length){box.innerHTML=msg('L\'inserimento è riservato alle risorse del progetto.');return;}
   const y=new Date();y.setDate(y.getDate()-1);
   box.innerHTML=`<div class="card">${head}
     <div class="field-row"><div class="field" style="max-width:170px"><label>Data di riferimento</label><input type="date" id="andTicketDate" value="${localDate(y)}" max="${localDate(new Date())}" onchange="loadTicketDay().catch(console.error)"/></div></div>
