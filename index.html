@@ -102,6 +102,7 @@
         <div class="nav-item" id="navPresenze" onclick="showTab('presenze')" style="display:none"><i class="fa-solid fa-building-user"></i> Presenze</div>
         <div class="nav-item" id="navConsuntivo" onclick="showTab('consuntivo')" style="display:none"><i class="fa-solid fa-list-check"></i> Ore Consuntivate</div>
         <div class="nav-item" id="navAndamento" onclick="showTab('andamento')" style="display:none"><i class="fa-solid fa-chart-line"></i> Andamento progetto</div>
+        <div class="nav-item" id="navBenchmark" onclick="showTab('benchmark')" style="display:none"><i class="fa-solid fa-scale-balanced"></i> Benchmark</div>
         <div class="nav-section" id="navSectionTeam" style="display:none">Team</div>
         <div class="nav-item" id="navDashboard" onclick="showTab('dashboard')" style="display:none"><i class="fa-solid fa-gauge-high"></i> Dashboard</div>
         <div class="nav-item" id="navRiepilogo" onclick="showTab('riepilogo')" style="display:none"><i class="fa-solid fa-table-list"></i> Forecast ore</div>
@@ -360,6 +361,11 @@
         </div>
         <div id="andamentoContent"></div>
         <div id="andEntry"></div>
+      </div>
+      <!-- BENCHMARK: valori di riferimento per progetto (FTE venduti, tempi medi ticket, Pyr), modificabili da tutti -->
+      <div class="panel" id="panel-benchmark">
+        <div class="page-header"><h1>Benchmark</h1><p>Valori di riferimento per progetto: FTE venduti, tempi medi dei ticket e Pyr usati per calcolare gli FTE erogati</p></div>
+        <div id="benchmarkContent"></div>
       </div>
       <!-- OVERVIEW REPERIBILITÀ -->
       <div class="panel" id="panel-rep-overview">

@@ -60,7 +60,7 @@ async function bootstrap(){
   await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS employee_id TEXT`;
   await ensureTicketSchema();
 
-  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie, repExpRows] = await Promise.all([
+  const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie, repExpRows, benchRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
           COALESCE(
             ARRAY_AGG(r.full_name ORDER BY r.cognome, r.nome)
@@ -81,8 +81,13 @@ async function bootstrap(){
     sql`SELECT chiave, valore FROM config WHERE left(chiave, 9) = 'rep_tipi_'`,
     sql`SELECT id, progetto_id, nome, team_lead_id, attiva FROM aree ORDER BY nome`,
     sql`SELECT progetto_id, area_id, soglia, soglia_ee::float AS soglia_ee, attiva, destinatari FROM soglie_ticket`,
-    sql`SELECT chiave, valore FROM config WHERE left(chiave, 11) = 'rep_export_'`
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 11) = 'rep_export_'`,
+    sql`SELECT chiave, valore FROM config WHERE left(chiave, 10) = 'benchmark_'`
   ]);
+  const benchmark = {};
+  benchRows.forEach(r => {
+    try { benchmark[r.chiave.substring(10)] = JSON.parse(r.valore); } catch {}
+  });
   const repExport = {};
   repExpRows.forEach(r => {
     try { repExport[r.chiave.substring(11)] = JSON.parse(r.valore); } catch {}
@@ -97,7 +102,7 @@ async function bootstrap(){
     const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
     try { repTipi[pid] = JSON.parse(r.valore); } catch {}
   });
-  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie, repExport };
+  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie, repExport, benchmark };
 }
 
 // ── schema Andamento progetto (idempotente, eseguito a ogni bootstrap) ──
@@ -693,7 +698,11 @@ async function saveProjectLead(p){ /* mantenuto per compatibilità — usa addPr
 async function saveProjectWbs(p){
   await sql`UPDATE progetti SET wbs=${p.wbs||null} WHERE id=${p.id}`;
 }
-async function deleteProject(p){ await sql`DELETE FROM progetti WHERE nome=${p.nome}`; }
+async function deleteProject(p){
+  const [pr] = await sql`SELECT id FROM progetti WHERE nome=${p.nome}`;
+  if (pr) await sql`DELETE FROM config WHERE chiave=${'benchmark_' + pr.id}`;
+  await sql`DELETE FROM progetti WHERE nome=${p.nome}`;
+}
 
 // ── risorse + allocazioni (full_name lo genera il trigger; team_lead è testo) ──
 // Employee number facoltativo: vuoto = null
@@ -821,6 +830,32 @@ async function saveRepExport(p){
   await sql`INSERT INTO config (chiave, valore) VALUES (${'rep_export_' + pid}, ${valore})
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
   return JSON.parse(valore);
+}
+
+// ── Benchmark per progetto (config benchmark_{progettoId}): FTE venduti, tempi medi dei ticket, Pyr.
+//    Modificabile da chiunque; i campi vuoti restano null. ──
+const BENCH_FIELDS = { fteTot: 'FTE venduti TOT', fteCr: 'FTE CR', fteTicket: 'FTE Ticket/Extra', tL1: 'Tempo L1 (h)', tL2: 'Tempo L2 (h)', tL3: 'Tempo L3 (h)', pyr: 'Pyr' };
+function _benchNum(v, label){
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 1000000) throw new Error(`${label}: inserisci un numero maggiore o uguale a zero`);
+  return Math.round(n * 100) / 100;
+}
+async function saveBenchmark(p){
+  const rows = Array.isArray(p.rows) ? p.rows : [];
+  const ids = rows.map(r => +r.progettoId).filter(Boolean);
+  const exist = new Set((await sql`SELECT id FROM progetti WHERE id = ANY(${ids}::int[])`).map(r => +r.id));
+  const out = {};
+  for (const r of rows) {
+    const pid = +r.progettoId;
+    if (!exist.has(pid)) throw new Error('Progetto non trovato');
+    const v = {};
+    Object.entries(BENCH_FIELDS).forEach(([k, label]) => { v[k] = _benchNum(r[k], label); });
+    await sql`INSERT INTO config (chiave, valore) VALUES (${'benchmark_' + pid}, ${JSON.stringify(v)})
+              ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+    out[pid] = v;
+  }
+  return out;
 }
 
 // ── WBS (stored in config as wbs_{risorsaId}_{anno}_{mese}) ──
@@ -1735,7 +1770,7 @@ const ACTIONS = {
   addResource, saveEdit, deleteResource, saveRep, deleteRep, getRepForProject,
   getPresenze, savePresenza, deletePresenza,
   userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs, setResourceManager, toggleIsManager, saveRepTipi, saveRepExport,
+  saveWbs, setResourceManager, toggleIsManager, saveRepTipi, saveRepExport, saveBenchmark,
   getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast,
   saveArea, deleteArea, getAndamento, saveSoglia, getTicketDay, saveTickets,
   getTicketsByToken, saveTicketsByToken

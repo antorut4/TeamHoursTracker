@@ -32,6 +32,7 @@ async function reloadAll(){
   _cache.wbs=d.wbs||{};
   _cache.repTipi=d.repTipi||{};
   _cache.repExport=d.repExport||{};
+  _cache.benchmark=d.benchmark||{};
   _cache.aree=(d.aree||[]).map(a=>({id:+a.id,progettoId:+a.progetto_id,nome:a.nome,teamLeadId:a.team_lead_id?+a.team_lead_id:null,attiva:a.attiva!==false}));
   // Soglie: area_id nullo = soglia di progetto, altrimenti soglia della singola area
   _cache.soglie={};_cache.soglieArea={};(d.soglie||[]).forEach(s=>{const v={soglia:s.soglia!=null?+s.soglia:null,sogliaEe:s.soglia_ee!=null?+s.soglia_ee:null,attiva:s.attiva!==false,destinatari:s.destinatari||''};if(s.area_id)_cache.soglieArea[s.area_id]=v;else _cache.soglie[s.progetto_id]=v;});
@@ -119,6 +120,7 @@ async function launchApp(){
   navVis('navPresenze',true);
   navVis('navConsuntivo',true);
   navVis('navAndamento',isAdmin||_andProjects().length>0);
+  navVis('navBenchmark',true);
   navVis('navSectionTeam',isAdmin||isTeamLead);
   navVis('navDashboard',isAdmin||isTeamLead);
   navVis('navRiepilogo',isAdmin||isTeamLead);
@@ -191,8 +193,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento'];
-const NAV_MAP={andamento:'navAndamento',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento','benchmark'];
+const NAV_MAP={andamento:'navAndamento',benchmark:'navBenchmark',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -212,6 +214,7 @@ async function showTab(t){
   if(t==='presenze')initPresenzePanel();
   if(t==='consuntivo')loadConsuntivo().catch(console.error);
   if(t==='andamento')renderAndamento().catch(console.error);
+  if(t==='benchmark')renderBenchmark();
 }
 // ORE
 async function loadOreForm(){
@@ -1603,7 +1606,7 @@ async function loadConsuntivo(){
   }
 }
 // Formatta ore: 8 → "8", 7.5 → "7.5", 0 → ""
-function _fmtOre(v){return v===0?'':(v%1===0?String(v):v.toFixed(1));}
+function _fmtOreCell(v){return v===0?'':(v%1===0?String(v):v.toFixed(1));}
 function _fmtOreTot(v){return v%1===0?String(v):v.toFixed(1);}
 
 // Griglia calendario stile reperibilità — celle editabili via click
@@ -1645,7 +1648,7 @@ function _buildConsuntivoGrid(rows,month,year,resList){
       const dd=String(d).padStart(2,'0');
       const dateISO=`${year}-${mm}-${dd}`;
       h+=`<td title="Clicca per modificare" style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${bg};cursor:pointer${bdr}" onclick="_consuntivoClickCell(this,${res.id},'${dateISO}',${ore})">`;
-      if(ore)h+=`<span style="font-size:.68rem;font-weight:600;color:var(--ok)">${_fmtOre(ore)}</span>`;
+      if(ore)h+=`<span style="font-size:.68rem;font-weight:600;color:var(--ok)">${_fmtOreCell(ore)}</span>`;
       h+=`</td>`;
     }
     h+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem;color:var(--ink-2);border-left:2px solid var(--stone-3)">${_fmtOreTot(q1)}</td>`;
@@ -1835,15 +1838,15 @@ async function renderAndamento(){
   if(!pid){
     _andData=null;_andCharts=[];_andEntryInit(null);
     // Warning soglie in elenco: totali del mese selezionato per tutti i progetti, in una sola chiamata
-    let warn={};
+    let warn={},get=null;
     if(prjs.length){
       showSpinner();
-      try{const d=await call('getAndamento',{scope:prjs.map(p=>({progettoId:p,areaIds:null})),anno:year,mese:month,mesi:1});warn=_andWarnings(prjs,_andBuild(d),year,month);}
+      try{const d=await call('getAndamento',{scope:prjs.map(p=>({progettoId:p,areaIds:null})),anno:year,mese:month,mesi:1});get=_andBuild(d);warn=_andWarnings(prjs,get,year,month);}
       catch(e){console.error(e);}
       hideSpinner();
     }
     if(_andSel.pid)return;
-    el.innerHTML=_andListHtml(prjs,warn,MONTHS[month]+' '+year);return;
+    el.innerHTML=_andListHtml(prjs,warn,MONTHS[month]+' '+year,get&&(pid=>get(pid,null,year,month)));return;
   }
   showSpinner();let d;
   try{d=await call('getAndamento',{scope:[{progettoId:pid,areaIds:null}],anno:year,mese:month,mesi:n});}
@@ -1893,17 +1896,18 @@ function _andWarnings(prjs,get,y,m){
   });
   return out;
 }
-function _andListHtml(prjs,warn,lbl){
+function _andListHtml(prjs,warn,lbl,monthOf){
   if(!prjs.length)return '<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Non risulti staffato su alcun progetto.</p></div>';
   const me=_me();warn=warn||{};
   const wTxt=w=>{const K=_THR_KIND[w.kind];return `${w.kind==='ee'?'Extra Effort':'Ticket'}${w.area?` (${_esc(w.area)})`:''} ${w.st==='over'?'superata':'raggiunta'}: ${K.n(w.tot)} / ${K.n(w.soglia)}`;};
-  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'} <span style="color:var(--ink-3);font-weight:600;font-size:.78rem">· soglie di ${lbl}</span></div><div class="and-list">${prjs.map(pid=>{
+  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'} <span style="color:var(--ink-3);font-weight:600;font-size:.78rem">· soglie e FTE di ${lbl}</span></div><div class="and-list">${prjs.map(pid=>{
     const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
     const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':_andReadOnly(pid)?'Manager · sola lettura':'';
-    const w=warn[pid];
+    const w=warn[pid],f=monthOf?_fteOf(pid,monthOf(pid)):null;
+    const fteTxt=f?` · FTE erogati <span class="${f.over?'fte-over':''}">${f.over?'<i class="fa-solid fa-triangle-exclamation" style="margin-right:3px"></i>':''}${_fmtFte(f.erog)}</span> / FTE progetto ${f.tot!=null?_fmtFte(f.tot):'—'}`:'';
     return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
       <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
-        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div>
+        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}${fteTxt}</div>
         ${w?`<div class="and-list-warn"><i class="fa-solid fa-triangle-exclamation"></i> Soglia ${w.map(wTxt).join(' · ')}</div>`:''}</div>
       <button class="btn btn-ink btn-sm" onclick="event.stopPropagation();andGo(${pid})">Apri dettaglio <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button>
     </div>`;}).join('')}</div></div>`;
@@ -2106,6 +2110,7 @@ function _andDetailHtml(pid,aid){
     <div class="card">
       <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${ro?'<span class="badge badge-amber"><i class="fa-solid fa-eye" style="margin-right:4px"></i>Sola lettura</span>':''}${_andBadges(pid,aid,r)}</div></div>
       ${tabs}
+      ${_andFteHtml(pid,periods)}
       ${ro?`<div class="and-ro-kpis"><div class="and-sum-title">Ticket ${scopeName?_esc(scopeName)+' — ':''}${D.lbl} · % sul totale del mese</div>${_andKpis(r,true)}</div>`:''}
       <div class="${ro?'':'and-grid'}">
         <div class="and-chart-wrap">
@@ -2139,6 +2144,55 @@ function _andDetailHtml(pid,aid){
     </div>
     ${ro?_andClsHtml(pid,aid,r,scopeName):''}
     ${!ro&&!aid&&multi&&aree.length?`<div class="card">${_andAreaTable(pid,aree)}</div>`:''}`;
+}
+// ── FTE erogati vs FTE progetto (valori di riferimento dalla sezione Benchmark) ──
+function _bench(pid){return _cache.benchmark[String(pid)]||{};}
+function _fmtFte(n){return _r2(n).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});}
+// FTE erogati del mese, sempre sull'intero progetto:
+//   Σ L1..L3 ((n·Tempo)·(Pyr/8))/21/Pyr + ((ore extra)·(Pyr/8))/21/Pyr + ((MD·8)·(240/8))/21/240
+// Pyr si semplifica: ogni termine vale ore/8/21, cioè le ore erogate su 21 giorni da 8 h.
+// FTE progetto = FTE venduti TOT del Benchmark; il valore diventa rosso quando gli erogati lo raggiungono.
+function _fteOf(pid,r){
+  const b=_bench(pid),t=k=>+b[k]||0;
+  const ore=r.l1*t('tL1')+r.l2*t('tL2')+r.l3*t('tL3')+r.ee+r.cr*8;
+  const erog=ore/8/21,tot=b.fteTot!=null?+b.fteTot:null;
+  return{erog,tot,over:tot!=null&&tot>0&&_r2(erog)>=_r2(tot),noTempi:TK_LV.some(s=>r[s.k]>0&&!(+b['t'+s.l]>0))};
+}
+function _andFteHtml(pid,periods){
+  const D=_andData,f=_fteOf(pid,D.get(pid,null,D.year,D.month));
+  const note=f.tot==null?'FTE venduti TOT non configurati':f.noTempi?'Tempi L1/L2/L3 mancanti per alcuni ticket del mese':'';
+  const rows=periods.map(({m,y})=>{const x=_fteOf(pid,D.get(pid,null,y,m));return `<tr><td>${MONTHS[m]} ${y}</td><td class="and-num${x.over?' fte-over':''}">${_fmtFte(x.erog)}</td><td class="and-num">${x.tot!=null?_fmtFte(x.tot):'—'}</td></tr>`;}).join('');
+  return `<div class="and-fte">
+      <div class="and-fte-kpi${f.over?' over':''}"><small>FTE erogati · ${D.lbl}</small><b>${f.over?'<i class="fa-solid fa-triangle-exclamation" style="font-size:.9rem;margin-right:5px"></i>':''}${_fmtFte(f.erog)}</b><span>${f.over?'FTE progetto raggiunti':'intero progetto'}</span></div>
+      <div class="and-fte-kpi"><small>FTE progetto</small><b>${f.tot!=null?_fmtFte(f.tot):'—'}</b><span>FTE venduti TOT</span></div>
+      ${note?`<div class="and-fte-note"><i class="fa-solid fa-circle-info" style="margin-right:4px"></i>${note}: <a href="#" onclick="showTab('benchmark');return false">configura in Benchmark</a></div>`:''}
+    </div>
+    <details style="margin:-6px 0 14px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">FTE erogati per mese</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">FTE erogati</th><th class="and-num">FTE progetto</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+// ── BENCHMARK: una riga per ogni progetto presente a backend, campi modificabili da tutti ──
+const BENCH_COLS=[{k:'fteTot',l:'FTE venduti TOT'},{k:'fteCr',l:'FTE CR'},{k:'fteTicket',l:'FTE Ticket/Extra'},{k:'tL1',l:'Tempo L1 (h)'},{k:'tL2',l:'Tempo L2 (h)'},{k:'tL3',l:'Tempo L3 (h)'},{k:'pyr',l:'Pyr'}];
+function renderBenchmark(){
+  const el=document.getElementById('benchmarkContent');if(!el)return;
+  const prjs=(_cache.prj||[]).slice().sort((a,b)=>a.localeCompare(b,'it'));
+  if(!prjs.length){el.innerHTML='<div class="card"><p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p></div>';return;}
+  el.innerHTML=`<div class="card"><div class="card-title"><i class="fa-solid fa-scale-balanced"></i> Benchmark per progetto</div>
+    <div class="table-wrap"><table><thead><tr><th>Progetto</th>${BENCH_COLS.map(c=>`<th class="and-num">${c.l}</th>`).join('')}</tr></thead><tbody>${prjs.map(p=>{
+      const pid=_prjIdByName[p],b=_bench(pid);
+      return `<tr data-pid="${pid}"><td><b>${_esc(p)}</b></td>${BENCH_COLS.map(c=>`<td class="and-num"><input type="number" class="bench-in" data-k="${c.k}" min="0" step="0.01" value="${b[c.k]!=null?b[c.k]:''}" aria-label="${c.l} — ${_esc(p)}"/></td>`).join('')}</tr>`;}).join('')}</tbody></table></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <button class="btn btn-ink" onclick="saveBenchmark()"><i class="fa-solid fa-floppy-disk"></i> Salva benchmark</button>
+      <div id="benchMsg" class="msg"></div>
+    </div></div>`;
+}
+async function saveBenchmark(){
+  const rows=[...document.querySelectorAll('#benchmarkContent tr[data-pid]')].map(tr=>{const o={progettoId:+tr.dataset.pid};tr.querySelectorAll('.bench-in').forEach(i=>{o[i.dataset.k]=i.value.trim();});return o;});
+  const bad=rows.find(r=>BENCH_COLS.some(c=>r[c.k]!==''&&!(+r[c.k]>=0)));
+  if(bad){showMsg('benchMsg',`Valori non validi per ${_prjNameById[bad.progettoId]}: usa numeri maggiori o uguali a zero.`,'err');return;}
+  showSpinner();let saved;
+  try{saved=await call('saveBenchmark',{rows});}catch(e){hideSpinner();showMsg('benchMsg','Errore: '+e.message,'err');return;}
+  hideSpinner();
+  Object.entries(saved||{}).forEach(([pid,v])=>{_cache.benchmark[pid]=v;});
+  showMsg('benchMsg','Benchmark salvato.','ok');
 }
 // Classificazione dei ticket del mese: per livello, categorie ordinate per numero, con dettaglio attività
 function _andClsHtml(pid,aid,r,scopeName){
