@@ -1,65 +1,28 @@
 // ════════════════════════════════════════════════════════════════════════
 //  Team Hours Tracker — proxy serverless verso Neon Postgres
 //  Netlify Function. La connection string vive SOLO qui (env var DATABASE_URL),
-//  mai nel browser. Il client invia { action, payload }; ogni action esegue
-//  query SQL FISSE e PARAMETRIZZATE: niente SQL arbitrario dal client.
-//  Le tabelle utenti_pwd/config sono accessibili solo da qui (le password
-//  non escono mai: i check ritornano un boolean, mai l'hash).
+//  mai nel browser. Il client invia { action, payload } e, dopo il login, il token
+//  di sessione (header Authorization: Bearer). Ogni action esegue query SQL FISSE e
+//  PARAMETRIZZATE: niente SQL arbitrario dal client. Identità e ruolo sono verificati
+//  qui a ogni richiesta (vedi ../lib/auth.mjs): il client non è mai considerato affidabile.
+//  Le password non escono mai: si salvano solo come hash scrypt.
 // ════════════════════════════════════════════════════════════════════════
 import { neon }    from '@neondatabase/serverless';
 import nodemailer   from 'nodemailer';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { HttpError, deny, hashPassword, verifyPassword, checkPwdPolicy, signSession, readSession, pwdVersion,
+         isElevated, canManageProject, canActOn, canAdminResource } from '../lib/auth.mjs';
+import { ensureSchema } from '../lib/migrations.mjs';
+import * as V from '../lib/validate.mjs';
 
-const sql = neon(process.env.DATABASE_URL);
+let sql = neon(process.env.DATABASE_URL);
+// Solo per i test automatici: sostituisce il client Neon con un database locale
+export function _setSqlForTests(s){ sql = s; }
 
 // ── letture: un'unica bootstrap che restituisce tutto lo stato ──
-async function bootstrap(){
-  // Crea la join table dei TL multipli se non esiste + migrazione one-time
-  await sql`CREATE TABLE IF NOT EXISTS progetto_team_leads (
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    risorsa_id  INTEGER NOT NULL REFERENCES risorse(id)  ON DELETE CASCADE,
-    PRIMARY KEY (progetto_id, risorsa_id)
-  )`;
-  await sql`INSERT INTO progetto_team_leads (progetto_id, risorsa_id)
-    SELECT id, team_lead_id FROM progetti WHERE team_lead_id IS NOT NULL
-    ON CONFLICT DO NOTHING`;
-  await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_inizio TEXT`;
-  await sql`ALTER TABLE ferie ADD COLUMN IF NOT EXISTS ora_fine TEXT`;
-  await sql`ALTER TABLE ferie DROP CONSTRAINT IF EXISTS ferie_tipo_check`;
-  await sql`ALTER TABLE ferie ADD CONSTRAINT ferie_tipo_check CHECK (tipo IN ('Ferie', 'Malattia', 'Permesso/ROL'))`;
-  await sql`ALTER TABLE reperibilita ADD COLUMN IF NOT EXISTS etichetta TEXT DEFAULT ''`;
-  await sql`ALTER TABLE reperibilita DROP CONSTRAINT IF EXISTS reperibilita_risorse_id_progetto_id_anno_mese_key`;
-  await sql`ALTER TABLE reperibilita DROP CONSTRAINT IF EXISTS reperibilita_risorsa_id_progetto_id_anno_mese_key`;
-  await sql`DROP INDEX IF EXISTS reperibilita_risorse_id_progetto_id_anno_mese_key`;
-  await sql`DROP INDEX IF EXISTS reperibilita_risorsa_id_progetto_id_anno_mese_key`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS rep_unique_per_turno ON reperibilita (risorsa_id, progetto_id, anno, mese, COALESCE(etichetta,''))`;
-  await sql`CREATE TABLE IF NOT EXISTS daily_hours (
-    id         BIGSERIAL    PRIMARY KEY,
-    risorsa_id INTEGER      NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
-    data       DATE         NOT NULL,
-    ore        NUMERIC(5,2) NOT NULL,
-    created_at TIMESTAMP    DEFAULT NOW(),
-    updated_at TIMESTAMP    DEFAULT NOW(),
-    UNIQUE (risorsa_id, data)
-  )`;
-  await sql`CREATE TABLE IF NOT EXISTS email_log (
-    id           BIGSERIAL PRIMARY KEY,
-    tipo         TEXT NOT NULL,
-    destinatario TEXT NOT NULL,
-    nome         TEXT,
-    oggetto      TEXT,
-    stato        TEXT NOT NULL,
-    errore       TEXT,
-    meta         JSONB,
-    created_at   TIMESTAMP DEFAULT NOW()
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS email_log_created_idx ON email_log (created_at DESC)`;
-  // Reminder giornaliero: attivo di default per tutti (anche per le righe già esistenti)
-  await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS daily_reminder BOOLEAN NOT NULL DEFAULT TRUE`;
-  // Employee number aziendale (facoltativo), usato nell'export Excel della reperibilità
-  await sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS employee_id TEXT`;
-  await ensureTicketSchema();
-
+// Lo schema è gestito da ../lib/migrations.mjs: qui solo letture.
+// Load cost ed employee number delle altre risorse sono visibili solo ad admin e manager.
+async function bootstrap(ctx){
   const [progetti, risorse, allocazioni, ore, ferie, rep, wbsRows, repTipiRows, aree, soglie, repExpRows, benchRows] = await Promise.all([
     sql`SELECT p.id, p.nome, p.wbs,
           COALESCE(
@@ -102,130 +65,8 @@ async function bootstrap(){
     const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
     try { repTipi[pid] = JSON.parse(r.valore); } catch {}
   });
+  if (!isElevated(ctx)) risorse.forEach(r => { if (+r.id !== ctx.id) { r.load_cost = null; r.employee_id = null; } });
   return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie, repExport, benchmark };
-}
-
-// ── schema Andamento progetto (idempotente, eseguito a ogni bootstrap) ──
-async function ensureTicketSchema(){
-  // Aree: ogni area appartiene a un solo progetto, con un Team Lead responsabile
-  await sql`CREATE TABLE IF NOT EXISTS aree (
-    id           SERIAL  PRIMARY KEY,
-    progetto_id  INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    nome         TEXT    NOT NULL,
-    team_lead_id INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
-    attiva       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at   TIMESTAMP DEFAULT NOW(),
-    UNIQUE (progetto_id, nome)
-  )`;
-  // Ticket giornalieri: dato originale, mai sostituito dagli aggregati.
-  // progetto_id è denormalizzato: lo storico resta sul progetto anche se l'area viene spostata.
-  await sql`CREATE TABLE IF NOT EXISTS ticket_giornalieri (
-    id          BIGSERIAL PRIMARY KEY,
-    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    data        DATE    NOT NULL,
-    l1          INTEGER NOT NULL CHECK (l1 >= 0),
-    l2          INTEGER NOT NULL CHECK (l2 >= 0),
-    l3          INTEGER NOT NULL CHECK (l3 >= 0),
-    totale      INTEGER GENERATED ALWAYS AS (l1 + l2 + l3) STORED,
-    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
-    created_at  TIMESTAMP DEFAULT NOW(),
-    updated_at  TIMESTAMP DEFAULT NOW(),
-    UNIQUE (area_id, data)
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS ticket_giornalieri_prj_data_idx ON ticket_giornalieri (progetto_id, data)`;
-  // Soglia mensile per progetto (sul totale L1+L2+L3). destinatari = email extra in CC, separate da virgola
-  await sql`CREATE TABLE IF NOT EXISTS soglie_ticket (
-    progetto_id INTEGER PRIMARY KEY REFERENCES progetti(id) ON DELETE CASCADE,
-    soglia      INTEGER NOT NULL CHECK (soglia > 0),
-    attiva      BOOLEAN NOT NULL DEFAULT TRUE,
-    destinatari TEXT,
-    updated_by  INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
-    updated_at  TIMESTAMP DEFAULT NOW()
-  )`;
-  // Registro alert: il vincolo UNIQUE garantisce un solo invio per progetto + mese + soglia
-  await sql`CREATE TABLE IF NOT EXISTS ticket_alert_log (
-    id          BIGSERIAL PRIMARY KEY,
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    anno        INTEGER NOT NULL,
-    mese        INTEGER NOT NULL,
-    soglia      INTEGER NOT NULL,
-    totale      INTEGER NOT NULL,
-    l1          INTEGER NOT NULL,
-    l2          INTEGER NOT NULL,
-    l3          INTEGER NOT NULL,
-    stato       TEXT    NOT NULL DEFAULT 'pending',
-    created_at  TIMESTAMP DEFAULT NOW(),
-    UNIQUE (progetto_id, anno, mese, soglia)
-  )`;
-
-  // ── Soglie per area + soglia Extra Effort ──
-  // soglie_ticket diventa la tabella unica delle soglie: area_id NULL = soglia di progetto,
-  // area_id valorizzato = soglia della singola area (progetti con più aree).
-  // soglia (ticket) e soglia_ee (ore Extra Effort) sono entrambe facoltative, una delle due è richiesta.
-  await sql`ALTER TABLE soglie_ticket ADD COLUMN IF NOT EXISTS area_id INTEGER REFERENCES aree(id) ON DELETE CASCADE`;
-  await sql`ALTER TABLE soglie_ticket ADD COLUMN IF NOT EXISTS soglia_ee NUMERIC(8,2) CHECK (soglia_ee > 0)`;
-  await sql`ALTER TABLE soglie_ticket ALTER COLUMN soglia DROP NOT NULL`;
-  await sql`ALTER TABLE soglie_ticket DROP CONSTRAINT IF EXISTS soglie_ticket_pkey`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS soglie_ticket_scope_uq ON soglie_ticket (progetto_id, (COALESCE(area_id, 0)))`;
-  // Alert ticket anche per area: la deduplicazione include l'area (0 = livello progetto)
-  await sql`ALTER TABLE ticket_alert_log ADD COLUMN IF NOT EXISTS area_id INTEGER REFERENCES aree(id) ON DELETE CASCADE`;
-  await sql`ALTER TABLE ticket_alert_log DROP CONSTRAINT IF EXISTS ticket_alert_log_progetto_id_anno_mese_soglia_key`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS ticket_alert_log_scope_uq ON ticket_alert_log (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia)`;
-
-  // Extra Effort: più attività per area e giorno, ognuna con descrizione e ore.
-  // Come per i ticket, progetto_id è denormalizzato per conservare lo storico.
-  await sql`CREATE TABLE IF NOT EXISTS extra_effort (
-    id          BIGSERIAL PRIMARY KEY,
-    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    data        DATE    NOT NULL,
-    attivita    TEXT    NOT NULL,
-    ore         NUMERIC(6,2) NOT NULL CHECK (ore > 0),
-    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
-    created_at  TIMESTAMP DEFAULT NOW()
-  )`;
-  // Tipologia: 'extra' = attività extra in ore (colonna ore); 'cr' = CR da scalare a Plafond in Man Day (colonna md).
-  // Le righe preesistenti diventano 'extra'. Il vincolo garantisce una sola unità di misura per riga.
-  await sql`ALTER TABLE extra_effort ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'extra'`;
-  await sql`ALTER TABLE extra_effort ADD COLUMN IF NOT EXISTS md NUMERIC(6,2) CHECK (md > 0)`;
-  await sql`ALTER TABLE extra_effort ALTER COLUMN ore DROP NOT NULL`;
-  await sql`ALTER TABLE extra_effort DROP CONSTRAINT IF EXISTS extra_effort_tipo_ck`;
-  await sql`ALTER TABLE extra_effort ADD CONSTRAINT extra_effort_tipo_ck CHECK (
-    (tipo = 'extra' AND ore IS NOT NULL AND md IS NULL) OR (tipo = 'cr' AND md IS NOT NULL AND ore IS NULL))`;
-  await sql`CREATE INDEX IF NOT EXISTS extra_effort_prj_data_idx ON extra_effort (progetto_id, data)`;
-  await sql`CREATE INDEX IF NOT EXISTS extra_effort_area_data_idx ON extra_effort (area_id, data)`;
-  // Registro alert Extra Effort: un solo invio per scope + mese + soglia
-  await sql`CREATE TABLE IF NOT EXISTS ee_alert_log (
-    id          BIGSERIAL PRIMARY KEY,
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    area_id     INTEGER REFERENCES aree(id) ON DELETE CASCADE,
-    anno        INTEGER NOT NULL,
-    mese        INTEGER NOT NULL,
-    soglia      NUMERIC(8,2) NOT NULL,
-    totale      NUMERIC(8,2) NOT NULL,
-    attivita    INTEGER NOT NULL,
-    stato       TEXT    NOT NULL DEFAULT 'pending',
-    created_at  TIMESTAMP DEFAULT NOW()
-  )`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS ee_alert_log_scope_uq ON ee_alert_log (progetto_id, (COALESCE(area_id, 0)), anno, mese, soglia)`;
-
-  // Classificazione facoltativa dei ticket del giorno secondo TICKET_TREE (livello › categoria › attività).
-  // Si affianca a ticket_giornalieri senza modificarlo: per livello, la somma di n non supera i ticket dichiarati.
-  await sql`CREATE TABLE IF NOT EXISTS ticket_classificazioni (
-    id          BIGSERIAL PRIMARY KEY,
-    area_id     INTEGER NOT NULL REFERENCES aree(id) ON DELETE CASCADE,
-    progetto_id INTEGER NOT NULL REFERENCES progetti(id) ON DELETE CASCADE,
-    data        DATE    NOT NULL,
-    livello     TEXT    NOT NULL CHECK (livello IN ('L1','L2','L3')),
-    categoria   TEXT    NOT NULL,
-    attivita    TEXT    NOT NULL,
-    n           INTEGER NOT NULL CHECK (n > 0),
-    inserito_da INTEGER REFERENCES risorse(id) ON DELETE SET NULL,
-    created_at  TIMESTAMP DEFAULT NOW(),
-    UNIQUE (area_id, data, livello, categoria, attivita)
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS ticket_class_prj_data_idx ON ticket_classificazioni (progetto_id, data)`;
 }
 
 // Alberatura AMS per la classificazione dei ticket: unica fonte, inviata ai client e usata per validare
@@ -257,6 +98,9 @@ const TICKET_TREE = {
 
 // ── ore (upsert sul vincolo UNIQUE risorsa_id,anno,mese) ──
 async function saveOre(p){
+  p = { risorsaId: V.id(p.risorsaId, 'Risorsa'), anno: V.anno(p.anno), mese: V.mese(p.mese),
+        ore_q1: V.optNum(p.ore_q1, 'Ore I quindicina', 0, 400), note_q1: V.optText(p.note_q1, 'Note I quindicina', 500),
+        ore_q2: V.optNum(p.ore_q2, 'Ore II quindicina', 0, 400), note_q2: V.optText(p.note_q2, 'Note II quindicina', 500) };
   await sql`
     INSERT INTO ore_mensili (risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2)
     VALUES (${p.risorsaId}, ${p.anno}, ${p.mese}, ${p.ore_q1}, ${p.note_q1}, ${p.ore_q2}, ${p.note_q2})
@@ -268,7 +112,12 @@ async function saveOre(p){
 async function deleteOre(p){ await sql`DELETE FROM ore_mensili WHERE id=${p.id}`; }
 
 // ── ferie ──
+const FERIE_TIPI = ['Ferie', 'Malattia', 'Permesso/ROL'];
 async function saveFerie(p){
+  p = { ...p, risorsaId: V.id(p.risorsaId, 'Risorsa'), start: V.isoDate(p.start, 'Data inizio'), end: V.isoDate(p.end, 'Data fine'),
+        tipo: V.oneOf(p.tipo, FERIE_TIPI, 'Tipo assenza'), note: V.optText(p.note, 'Note', 500),
+        oraInizio: V.optTime(p.oraInizio, 'Ora inizio'), oraFine: V.optTime(p.oraFine, 'Ora fine') };
+  if (p.end < p.start) throw new HttpError(400, 'La data di fine precede la data di inizio');
   const oraInizio = (p.tipo === 'Permesso/ROL' && p.oraInizio) ? p.oraInizio : null;
   const oraFine   = (p.tipo === 'Permesso/ROL' && p.oraFine)   ? p.oraFine   : null;
   await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine)
@@ -677,7 +526,8 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
 
 // ── progetti (la DELETE sfrutta ON DELETE CASCADE sulle allocazioni) ──
 async function addProject(p){
-  const wbs = p.wbs || null;
+  p = { ...p, nome: V.text(p.nome, 'Nome progetto', 200), teamLeadNames: V.arr(p.teamLeadNames, 'Team Lead', 50) };
+  const wbs = V.optText(p.wbs, 'WBS', 100);
   const [proj] = await sql`INSERT INTO progetti (nome, wbs) VALUES (${p.nome}, ${wbs}) RETURNING id`;
   for(const name of (p.teamLeadNames || [])){
     const [tl] = await sql`SELECT id FROM risorse WHERE full_name=${name}`;
@@ -711,7 +561,14 @@ function _employeeId(v){
   if (s.length > 50) throw new Error('Employee number troppo lungo (massimo 50 caratteri)');
   return s || null;
 }
+// Campi anagrafici comuni ad aggiunta e modifica
+function _resFields(p){
+  return { ...p, nome: V.text(p.nome, 'Nome', 100), cognome: V.text(p.cognome, 'Cognome', 100), email: V.optEmail(p.email),
+           managerId: p.managerId ? V.id(p.managerId, 'Manager') : null, progetti: V.arr(p.progetti, 'Progetti', 200),
+           loadCost: V.optNum(p.loadCost, 'Load cost', 0, 1000000) };
+}
 async function addResource(p){
+  p = _resFields(p);
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
@@ -724,6 +581,7 @@ async function addResource(p){
   }
 }
 async function saveEdit(p){
+  p = { ..._resFields(p), id: V.id(p.id, 'Risorsa') };
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
@@ -755,6 +613,9 @@ async function setDailyReminder(p){
 }
 
 async function saveRep(p){
+  p = { ...p, risorsaId: V.id(p.risorsaId, 'Risorsa'), anno: V.anno(p.anno), mese: V.mese(p.mese),
+        etichetta: V.optText(p.etichetta, 'Turno', 100) || '', teamLead: V.optText(p.teamLead, 'Team Lead', 200),
+        giorni: V.arr(p.giorni, 'Giorni', 31).map(d => V.int(d, 'Giorno', 1, 31)) };
   const [proj] = await sql`SELECT id FROM progetti WHERE nome=${p.progetto}`;
   if(!proj) throw new Error('Progetto non trovato: ' + p.progetto);
   let tlId = null;
@@ -780,29 +641,95 @@ async function getRepForProject(p){
 
 // ── presenze in ufficio ──
 async function getPresenze(p){
+  p = { from: V.isoDate(p.from, 'Data inizio'), to: V.isoDate(p.to, 'Data fine') };
   const rows = await sql`SELECT risorsa_id, data::text AS data FROM presenze WHERE data BETWEEN ${p.from}::date AND ${p.to}::date ORDER BY data`;
   return rows;
 }
 async function savePresenza(p){
+  V.isoDate(p.data);
   await sql`INSERT INTO presenze (risorsa_id, data) VALUES (${p.risorsaId}, ${p.data}) ON CONFLICT (risorsa_id, data) DO NOTHING`;
 }
 async function deletePresenza(p){
   await sql`DELETE FROM presenze WHERE risorsa_id=${p.risorsaId} AND data=${p.data}`;
 }
 
-// ── password: l'hash entra, ma non esce mai (ritorniamo solo boolean/void) ──
+// ════════════════════════════════════════════════════════════════════════
+//  Login e password. La password viaggia in HTTPS e viene verificata qui (scrypt);
+//  gli hash legacy (djb2 calcolato nel browser) vengono riscritti al primo login riuscito.
+//  Dopo 10 tentativi falliti in 15 minuti l'account (o l'accesso admin) viene bloccato.
+// ════════════════════════════════════════════════════════════════════════
+const MAX_FAILS = 10;
+async function _throttle(chiave){
+  const [r] = await sql`SELECT COUNT(*)::int AS n FROM login_attempts WHERE chiave=${chiave} AND created_at > NOW() - INTERVAL '15 minutes'`;
+  if (r.n >= MAX_FAILS) throw new HttpError(429, 'Troppi tentativi falliti: riprova tra 15 minuti');
+}
+async function _loginFailed(chiave){
+  await sql`INSERT INTO login_attempts (chiave) VALUES (${chiave})`;
+  await sql`DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL '1 day'`;
+}
+async function _loginOk(chiave){ await sql`DELETE FROM login_attempts WHERE chiave=${chiave}`; }
+
+// Primo passo del login: dall'email alla risorsa (nessun altro dato prima dell'autenticazione)
+async function loginLookup(p){
+  const email = V.optEmail(p.email);
+  if (!email) throw new HttpError(400, 'Inserisci un indirizzo email valido.');
+  const [r] = await sql`SELECT r.id, r.full_name, (u.risorsa_id IS NOT NULL) AS has_pwd
+                        FROM risorse r LEFT JOIN utenti_pwd u ON u.risorsa_id = r.id
+                        WHERE lower(r.email) = ${email} ORDER BY r.id LIMIT 1`;
+  return r ? { risorsaId: +r.id, fullName: r.full_name, hasPwd: !!r.has_pwd } : null;
+}
+async function login(p){
+  const rid = V.id(p.risorsaId, 'Risorsa'), key = 'u:' + rid;
+  await _throttle(key);
+  const [u] = await sql`SELECT pwd_hash FROM utenti_pwd WHERE risorsa_id=${rid}`;
+  const v = u ? await verifyPassword(u.pwd_hash, p.password) : { ok: false };
+  if (!v.ok) { await _loginFailed(key); return { ok: false }; }
+  let stored = u.pwd_hash;
+  if (v.legacy) {
+    stored = await hashPassword(p.password);
+    await sql`UPDATE utenti_pwd SET pwd_hash=${stored}, updated_at=NOW() WHERE risorsa_id=${rid}`;
+  }
+  await _loginOk(key);
+  return { ok: true, token: signSession(rid, stored) };
+}
+// Primo accesso: la password si può impostare solo se la risorsa non ne ha ancora una
+async function firstAccess(p){
+  const rid = V.id(p.risorsaId, 'Risorsa');
+  checkPwdPolicy(p.password);
+  const [r] = await sql`SELECT id FROM risorse WHERE id=${rid}`;
+  if (!r) throw new HttpError(404, 'Risorsa non trovata');
+  const stored = await hashPassword(p.password);
+  const ins = await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${rid}, ${stored})
+                        ON CONFLICT (risorsa_id) DO NOTHING RETURNING risorsa_id`;
+  if (!ins.length) throw new HttpError(409, 'Password già impostata: accedi con la tua password');
+  return { ok: true, token: signSession(rid, stored) };
+}
+async function adminLogin(p){
+  await _throttle('admin');
+  const [r] = await sql`SELECT valore FROM config WHERE chiave='admin_pwd'`;
+  const v = r ? await verifyPassword(r.valore, p.password) : { ok: false };
+  if (!v.ok) { await _loginFailed('admin'); return { ok: false }; }
+  let stored = r.valore;
+  if (v.legacy) {
+    stored = await hashPassword(p.password);
+    await sql`UPDATE config SET valore=${stored} WHERE chiave='admin_pwd'`;
+  }
+  await _loginOk('admin');
+  return { ok: true, token: signSession('admin', stored) };
+}
+// Cambio password admin: le altre sessioni admin decadono, quella corrente riceve un nuovo token
+async function setAdminPwd(p){
+  checkPwdPolicy(p.password);
+  const stored = await hashPassword(p.password);
+  await sql`INSERT INTO config (chiave, valore) VALUES ('admin_pwd', ${stored})
+            ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+  return { token: signSession('admin', stored) };
+}
 async function userHasPwd(p){
   const [r] = await sql`SELECT 1 FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`;
   return !!r;
 }
-async function checkUserPwd(p){
-  const [r] = await sql`SELECT 1 FROM utenti_pwd WHERE risorsa_id=${p.risorsaId} AND pwd_hash=${p.hash}`;
-  return !!r;
-}
-async function setUserPwd(p){
-  await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${p.risorsaId}, ${p.hash})
-            ON CONFLICT (risorsa_id) DO UPDATE SET pwd_hash=EXCLUDED.pwd_hash, updated_at=NOW()`;
-}
+// Reset: la risorsa tornerà al "primo accesso" e le sue sessioni aperte decadono
 async function resetUserPwd(p){ await sql`DELETE FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`; }
 
 // ── rep tipi (stored in config as rep_tipi_{progetto_id}) ──
@@ -865,15 +792,6 @@ async function saveWbs(p){
   await sql`INSERT INTO config (chiave, valore) VALUES (${chiave}, ${valore})
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
 }
-async function checkAdminPwd(p){
-  const [r] = await sql`SELECT 1 FROM config WHERE chiave='admin_pwd' AND valore=${p.hash}`;
-  return !!r;
-}
-async function setAdminPwd(p){
-  await sql`INSERT INTO config (chiave, valore) VALUES ('admin_pwd', ${p.hash})
-            ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
-}
-
 // ════════════════════════════════════════════════════════════════════════
 //  Sollecito Forecast — invia email alle risorse con ore mancanti
 // ════════════════════════════════════════════════════════════════════════
@@ -1080,6 +998,8 @@ async function getEmailLog(p){
 // ── consuntivo: scrittura ore giornaliere su daily_hours ──
 // ore null/0/'': cancella la riga; altrimenti upsert
 async function saveConsuntivo(p){
+  V.isoDate(p.data);
+  V.optNum(p.ore, 'Ore', 0, 24);
   const ore=(p.ore!==null&&p.ore!==''&&!isNaN(+p.ore)&&+p.ore>0)?+p.ore:null;
   if(ore===null){
     await sql`DELETE FROM daily_hours WHERE risorsa_id=${p.risorsaId} AND data=${p.data}`;
@@ -1092,8 +1012,8 @@ async function saveConsuntivo(p){
 
 // ── consuntivo: lettura ore giornaliere da daily_hours (sola lettura) ──
 async function getConsuntivo(p){
-  const anno = +p.anno;
-  const mese = +p.mese; // 0-based dal frontend → EXTRACT(MONTH) è 1-based
+  const anno = V.anno(p.anno);
+  const mese = V.mese(p.mese); // 0-based dal frontend → EXTRACT(MONTH) è 1-based
   const rows = await sql`
     SELECT dh.risorsa_id, dh.data::text AS data, dh.ore::float AS ore, r.full_name
     FROM daily_hours dh
@@ -1202,7 +1122,7 @@ async function getAndamento(p){
     else full.push(pid);
   });
   if (!full.length && !areas.length) return { tickets: [], ee: [], cr: [], eeDettaglio: [], alert: [], cls: [] };
-  const anno = +p.anno, mese = +p.mese;               // mese 0-based
+  const anno = V.anno(p.anno), mese = V.mese(p.mese);   // mese 0-based
   const mesi = Math.min(Math.max(+p.mesi || 12, 1), 24);
   const from = new Date(Date.UTC(anno, mese - mesi + 1, 1)).toISOString().slice(0, 10);
   const [mFrom, to] = _monthRange(anno, mese);
@@ -1764,38 +1684,175 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
 }
 
 // ── routing: whitelist esplicita delle action consentite ──
+// ════════════════════════════════════════════════════════════════════════
+//  Sessione e permessi. Ogni richiesta autenticata ricarica dal DB identità e ruoli:
+//  un cambio di ruolo o un reset password ha effetto immediato.
+// ════════════════════════════════════════════════════════════════════════
+const _unauth = () => new HttpError(401, 'Sessione scaduta o non valida: accedi di nuovo');
+const _NO_ROLES = { tlPrj: new Set(), areaTlPrj: new Set(), team: new Set(), mgrPrj: new Set() };
+
+async function loadCtx(token){
+  const s = readSession(token);
+  if (!s) throw _unauth();
+  if (s.sub === 'admin') {
+    const [r] = await sql`SELECT valore FROM config WHERE chiave='admin_pwd'`;
+    if (!r || pwdVersion(r.valore) !== s.pv) throw _unauth();
+    return { admin: true, id: null, manager: false, ..._NO_ROLES };
+  }
+  const [r] = await sql`
+    SELECT r.id, r.is_manager, u.pwd_hash,
+           ARRAY(SELECT progetto_id FROM progetto_team_leads WHERE risorsa_id = r.id) AS tl,
+           ARRAY(SELECT DISTINCT progetto_id FROM aree WHERE team_lead_id = r.id) AS atl,
+           ARRAY(SELECT id FROM risorse WHERE manager_id = r.id) AS team,
+           ARRAY(SELECT DISTINCT a.progetto_id FROM allocazioni a JOIN risorse t ON t.id = a.risorsa_id
+                 WHERE t.manager_id = r.id) AS mgr_prj
+    FROM risorse r LEFT JOIN utenti_pwd u ON u.risorsa_id = r.id
+    WHERE r.id = ${+s.sub || 0}`;
+  if (!r || !r.pwd_hash || pwdVersion(r.pwd_hash) !== s.pv) throw _unauth();
+  const set = a => new Set((a || []).map(Number));
+  return { admin: false, id: +r.id, manager: !!r.is_manager,
+           tlPrj: set(r.tl), areaTlPrj: set(r.atl), team: set(r.team), mgrPrj: set(r.mgr_prj) };
+}
+
+const _prjsOf = async rid => (await sql`SELECT progetto_id FROM allocazioni WHERE risorsa_id=${rid}`).map(r => +r.progetto_id);
+async function _prjIdByName(nome){
+  const [r] = await sql`SELECT id FROM progetti WHERE nome=${String(nome ?? '')}`;
+  if (!r) throw new HttpError(404, 'Progetto non trovato: ' + nome);
+  return +r.id;
+}
+// Dati di una risorsa: vedi canActOn (le allocazioni si leggono solo se servono, per i Team Lead)
+async function mustActOn(ctx, rid){
+  rid = V.id(rid, 'Risorsa');
+  if (canActOn(ctx, rid) || canActOn(ctx, rid, await _prjsOf(rid))) return rid;
+  deny('Non puoi modificare i dati di questa risorsa');
+}
+const mustAdmin    = ctx => { if (!ctx.admin) deny('Operazione riservata all\'amministratore'); };
+const mustElevated = ctx => { if (!isElevated(ctx)) deny('Operazione riservata ad amministratore e manager'); };
+const mustManage   = (ctx, pid) => { if (!canManageProject(ctx, pid)) deny('Non gestisci questo progetto'); };
+// Anagrafica progetti: admin, oppure manager sui progetti delle sue risorse (come l'elenco in Admin)
+const mustMgrPrj   = (ctx, pid) => { if (!ctx.admin && !(ctx.manager && ctx.mgrPrj.has(+pid))) deny('Non gestisci questo progetto'); };
+const mustResAdmin = (ctx, rid) => { if (!canAdminResource(ctx, V.id(rid, 'Risorsa'))) deny('Puoi gestire solo le risorse del tuo team'); };
+const mustPerson   = ctx => { if (ctx.admin) deny('Operazione non disponibile per l\'amministratore'); };
+function _found(rows){
+  if (!rows.length) throw new HttpError(404, 'Elemento non trovato (forse già eliminato)');
+  return rows[0];
+}
+
+// Azioni senza login: accesso e link email (protetti dal proprio token firmato)
+const PUBLIC = { loginLookup, login, firstAccess, adminLogin, getTicketsByToken, saveTicketsByToken };
+
+// Azioni con login: (payload, ctx). Il controllo dei permessi precede sempre l'esecuzione.
 const ACTIONS = {
-  bootstrap, saveOre, deleteOre, saveFerie, deleteFerie, addProject, deleteProject, saveProjectLead, saveProjectWbs,
-  addProjectTL, removeProjectTL,
-  addResource, saveEdit, deleteResource, saveRep, deleteRep, getRepForProject,
-  getPresenze, savePresenza, deletePresenza,
-  userHasPwd, checkUserPwd, setUserPwd, resetUserPwd, checkAdminPwd, setAdminPwd,
-  saveWbs, setResourceManager, toggleIsManager, saveRepTipi, saveRepExport, saveBenchmark,
-  getConsuntivo, saveConsuntivo, getEmailLog, setDailyReminder, sollecitaForecast,
-  saveArea, deleteArea, getAndamento, saveSoglia, getTicketDay, saveTickets,
-  getTicketsByToken, saveTicketsByToken
+  bootstrap: (p, c) => bootstrap(c),
+
+  // ── dati personali ──
+  saveOre:        async (p, c) => { await mustActOn(c, p.risorsaId); return saveOre(p); },
+  deleteOre:      async (p, c) => { const o = _found(await sql`SELECT risorsa_id FROM ore_mensili WHERE id=${V.id(p.id)}`); await mustActOn(c, o.risorsa_id); return deleteOre(p); },
+  saveFerie:      async (p, c) => { await mustActOn(c, p.risorsaId); return saveFerie(p); },
+  deleteFerie:    async (p, c) => { const o = _found(await sql`SELECT risorsa_id FROM ferie WHERE id=${V.id(p.id)}`); await mustActOn(c, o.risorsa_id); return deleteFerie(p); },
+  getPresenze:    (p) => getPresenze(p),
+  savePresenza:   async (p, c) => { await mustActOn(c, p.risorsaId); return savePresenza(p); },
+  deletePresenza: async (p, c) => { await mustActOn(c, p.risorsaId); return deletePresenza(p); },
+  getConsuntivo:  (p) => getConsuntivo(p),
+  saveConsuntivo: async (p, c) => { await mustActOn(c, p.risorsaId); return saveConsuntivo(p); },
+  setDailyReminder: (p, c) => { const rid = V.id(p.risorsaId, 'Risorsa'); if (rid !== c.id) mustResAdmin(c, rid); return setDailyReminder(p); },
+
+  // ── reperibilità: la risorsa, chi può agire su di lei, o chi gestisce il progetto ──
+  getRepForProject: (p) => getRepForProject(p),
+  saveRep: async (p, c) => { const pid = await _prjIdByName(p.progetto); if (!canManageProject(c, pid)) await mustActOn(c, p.risorsaId); return saveRep(p); },
+  deleteRep: async (p, c) => {
+    const o = _found(await sql`SELECT risorsa_id, progetto_id FROM reperibilita WHERE id=${V.id(p.id)}`);
+    if (!canManageProject(c, o.progetto_id)) await mustActOn(c, o.risorsa_id);
+    return deleteRep(p);
+  },
+  saveRepTipi:   (p, c) => { mustManage(c, V.id(p.id, 'Progetto')); return saveRepTipi(p); },
+  // L'export è configurabile anche dalle risorse staffate sul progetto (card visibile nella loro Reperibilità)
+  saveRepExport: async (p, c) => {
+    const pid = V.id(p.id, 'Progetto');
+    if (!canManageProject(c, pid) && !(c.id && (await _prjsOf(c.id)).includes(pid))) deny('Non fai parte di questo progetto');
+    return saveRepExport(p);
+  },
+
+  // ── andamento progetto ──
+  getAndamento: (p) => getAndamento(p),
+  saveSoglia:   (p, c) => { mustManage(c, V.id(p.progettoId, 'Progetto')); return saveSoglia({ ...p, risorsaId: c.id }); },
+  // Ticket ed Extra Effort si inseriscono sempre a proprio nome: la risorsa arriva dalla sessione
+  getTicketDay: (p, c) => { mustPerson(c); return getTicketDay({ ...p, risorsaId: c.id }); },
+  saveTickets:  (p, c) => { mustPerson(c); return saveTickets({ ...p, risorsaId: c.id }); },
+  saveBenchmark: (p) => saveBenchmark(p),   // modificabile da tutti gli utenti autenticati
+  saveArea:   (p, c) => { mustAdmin(c); return saveArea(p); },
+  deleteArea: (p, c) => { mustAdmin(c); return deleteArea(p); },
+
+  // ── team (admin e manager) ──
+  saveWbs: (p, c) => { mustResAdmin(c, p.risorsaId); return saveWbs(p); },
+  sollecitaForecast: (p, c) => { mustElevated(c); return sollecitaForecast({ ...p, managerId: c.admin ? p.managerId : c.id }); },
+  userHasPwd:   (p, c) => { mustElevated(c); return userHasPwd(p); },
+  resetUserPwd: (p, c) => { mustResAdmin(c, p.risorsaId); return resetUserPwd(p); },
+  // Il manager aggiunge e modifica solo risorse del proprio team, di cui resta il manager
+  addResource:    (p, c) => { mustElevated(c); return addResource(c.admin ? p : { ...p, managerId: c.id }); },
+  saveEdit:       (p, c) => { mustResAdmin(c, p.id); return saveEdit(c.admin ? p : { ...p, managerId: c.id }); },
+  deleteResource: (p, c) => { mustResAdmin(c, p.id); return deleteResource(p); },
+  setResourceManager: (p, c) => { mustAdmin(c); return setResourceManager(p); },
+  toggleIsManager:    (p, c) => { mustAdmin(c); return toggleIsManager(p); },
+
+  // ── progetti ──
+  addProject:      (p, c) => { mustElevated(c); return addProject(p); },
+  deleteProject:   async (p, c) => { mustMgrPrj(c, await _prjIdByName(p.nome)); return deleteProject(p); },
+  addProjectTL:    (p, c) => { mustMgrPrj(c, V.id(p.progettoId, 'Progetto')); return addProjectTL(p); },
+  removeProjectTL: (p, c) => { mustMgrPrj(c, V.id(p.progettoId, 'Progetto')); return removeProjectTL(p); },
+  saveProjectWbs:  (p, c) => { mustMgrPrj(c, V.id(p.id, 'Progetto')); return saveProjectWbs(p); },
+  saveProjectLead: () => null,   // deprecata, mantenuta per compatibilità
+
+  // ── solo admin ──
+  setAdminPwd: (p, c) => { mustAdmin(c); return setAdminPwd(p); },
+  getEmailLog: (p, c) => { mustAdmin(c); return getEmailLog(p); }
 };
 
-export async function handler(event){
-  const headers = { 'Content-Type': 'application/json' };
-  if(event.httpMethod !== 'POST'){
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+// Errori: il dettaglio tecnico va nei log, al client un messaggio comprensibile
+function _errorResponse(err, action){
+  if (err instanceof HttpError) return { status: err.status, msg: err.message };
+  if (err && typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) {
+    console.error(JSON.stringify({ level: 'error', action, kind: 'db', code: err.code, error: err.message }));
+    if (err.code === '23505') return { status: 409, msg: 'Valore già esistente' };
+    if (err.code === '23503') return { status: 409, msg: 'Operazione non possibile: il dato è collegato ad altri elementi o non esiste più' };
+    if (['23514', '22P02', '22003', '22007', '22008'].includes(err.code)) return { status: 400, msg: 'Valore non valido' };
+    return { status: 500, msg: 'Errore del database: riprova tra poco' };
   }
+  // I messaggi di validazione esistenti usano Error semplice; gli errori di programma (TypeError…) restano interni
+  if (err && err.constructor === Error) return { status: 400, msg: err.message };
+  console.error(JSON.stringify({ level: 'error', action, kind: 'internal', error: String((err && err.stack) || err) }));
+  return { status: 500, msg: 'Errore interno del server' };
+}
+
+export async function handler(event){
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+  const reply = (statusCode, body) => ({ statusCode, headers, body: JSON.stringify(body) });
+  if(event.httpMethod !== 'POST') return reply(405, { error: 'Method Not Allowed' });
   let action, payload;
   try {
     const parsed = JSON.parse(event.body || '{}');
     action = parsed.action; payload = parsed.payload || {};
+    if (typeof payload !== 'object' || Array.isArray(payload)) throw new Error();
   } catch {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Body JSON non valido' }) };
+    return reply(400, { error: 'Body JSON non valido' });
   }
-  const fn = ACTIONS[action];
-  if(!fn){
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Action sconosciuta: ' + action }) };
-  }
+  const pub = Object.hasOwn(PUBLIC, action) ? PUBLIC[action] : null;
+  const fn  = Object.hasOwn(ACTIONS, action) ? ACTIONS[action] : null;
+  if(!pub && !fn) return reply(400, { error: 'Action sconosciuta: ' + action });
+  const t0 = Date.now();
   try {
-    const result = await fn(payload);
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: true, data: result ?? null }) };
+    await ensureSchema(sql);
+    let result;
+    if (pub) result = await pub(payload);
+    else {
+      const h = event.headers || {}, auth = String(h.authorization || h.Authorization || '');
+      const ctx = await loadCtx(auth.startsWith('Bearer ') ? auth.slice(7) : '');
+      result = await fn(payload, ctx);
+    }
+    return reply(200, { ok: true, data: result ?? null });
   } catch (err) {
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+    const { status, msg } = _errorResponse(err, action);
+    if (status >= 400 && status < 500 && status !== 401) console.warn(JSON.stringify({ level: 'warn', action, status, error: msg, ms: Date.now() - t0 }));
+    return reply(status, { error: msg });
   }
 }

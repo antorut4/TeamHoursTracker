@@ -44,7 +44,7 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
-      const event = { httpMethod: 'POST', body };
+      const event = { httpMethod: 'POST', body, headers: req.headers };
       try {
         const result = await handler(event);
         res.writeHead(result.statusCode, result.headers || { 'Content-Type': 'application/json' });

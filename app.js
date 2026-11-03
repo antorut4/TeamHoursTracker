@@ -2,11 +2,19 @@
 function showSpinner(){_busy++;const e=document.getElementById('netSpinner');if(e)e.style.display='flex';}
 function hideSpinner(){_busy=Math.max(0,_busy-1);if(_busy===0){const e=document.getElementById('netSpinner');if(e)e.style.display='none';}}
 const FN_URL='/api/db';
+// Token di sessione rilasciato dal server al login: identità e ruolo sono verificati lato server a ogni chiamata
+let _token=null,_expiredShown=false;
 async function call(action,payload){
-  const res=await fetch(FN_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,payload:payload||{}})});
+  const headers={'Content-Type':'application/json'};if(_token)headers.Authorization='Bearer '+_token;
+  const res=await fetch(FN_URL,{method:'POST',headers,body:JSON.stringify({action,payload:payload||{}})});
   let j=null;try{j=await res.json();}catch{}
+  if(res.status===401&&_token)_sessionExpired();
   if(!res.ok||!j||j.error)throw new Error((j&&j.error)?j.error:('Errore di rete '+res.status));
   return j.data;
+}
+function _sessionExpired(){
+  doLogout();
+  if(!_expiredShown){_expiredShown=true;setTimeout(()=>{alert('La sessione è scaduta: accedi di nuovo.');_expiredShown=false;},0);}
 }
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
 let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};
@@ -46,10 +54,8 @@ const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':'#007A4C';
 const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
 const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
 let currentUser=null,isAdmin=false,isTeamLead=false,isProjectTL=false,RESOURCES=[];
-function simpleHash(str){let h=5381;for(let i=0;i<str.length;i++)h=((h<<5)+h)+str.charCodeAt(i);return(h>>>0).toString(36);}
 function _resByName(name){return RESOURCES.find(x=>x.fullName===name);}
-function _resByEmail(email){const e=(email||'').toLowerCase().trim();return RESOURCES.find(x=>x.email===e);}
-let _loginRisorsaId=null;
+let _loginRisorsaId=null,_loginFullName='';
 function getMembers(manager){return manager?RESOURCES.filter(r=>r.managerName===manager).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
 function getLeadTeam(){return RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);}
 function getLeads(){return RESOURCES.filter(r=>r.isManager).map(r=>r.fullName).sort();}
@@ -76,11 +82,10 @@ async function goStepPwdByEmail(){
   const email=document.getElementById('loginEmail').value.trim();
   const errEl=document.getElementById('errEmail');
   if(!email||!email.includes('@')){errEl.textContent='Inserisci un indirizzo email valido.';errEl.style.display='block';return;}
-  const r=_resByEmail(email);
+  let r=null;showSpinner();try{r=await call('loginLookup',{email});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
   if(!r){errEl.textContent='Nessun account trovato per questa email.';errEl.style.display='block';return;}
-  errEl.style.display='none';_loginRisorsaId=r.id;
-  let has=false;showSpinner();try{has=await call('userHasPwd',{risorsaId:r.id});}catch(e){hideSpinner();alert('Errore di connessione: '+e.message);return;}hideSpinner();
-  if(!has){document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';}
+  errEl.style.display='none';_loginRisorsaId=r.risorsaId;_loginFullName=r.fullName;
+  if(!r.hasPwd){document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';}
   else{document.getElementById('loginSub').textContent='Bentornato/a';document.getElementById('loginWhoLabel').textContent=r.fullName;showStep('stepPwd');document.getElementById('pwdInput').value='';document.getElementById('errPwd').style.display='none';setTimeout(()=>document.getElementById('pwdInput').focus(),100);}
 }
 async function doFirstAccess(){
@@ -89,23 +94,31 @@ async function doFirstAccess(){
   if(p1.length<6){errEl.textContent='Minimo 6 caratteri.';errEl.style.display='block';return;}
   if(p1!==p2){errEl.textContent='Le password non coincidono.';errEl.style.display='block';return;}
   errEl.style.display='none';
-  showSpinner();try{await call('setUserPwd',{risorsaId:_loginRisorsaId,hash:simpleHash(p1)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
-  const r=RESOURCES.find(x=>x.id===_loginRisorsaId);currentUser=r?r.fullName:'';isAdmin=false;await launchApp();
+  let res;showSpinner();try{res=await call('firstAccess',{risorsaId:_loginRisorsaId,password:p1});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
+  await _startSession(res.token,_loginFullName,false);
+}
+// Dopo il login: carica i dati (ora protetti dal token) e apre l'app
+async function _startSession(token,user,admin){
+  _token=token;
+  showSpinner();try{await reloadAll();}catch(e){hideSpinner();_token=null;alert('Impossibile caricare i dati.\n\nDettaglio: '+e.message);return;}hideSpinner();
+  currentUser=user;isAdmin=admin;refreshDropdowns();await launchApp();
 }
 async function doUserLogin(){
   if(!_loginRisorsaId)return;
-  const pwd=document.getElementById('pwdInput').value;let ok=false;
-  showSpinner();try{ok=await call('checkUserPwd',{risorsaId:_loginRisorsaId,hash:simpleHash(pwd)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
-  if(!ok){document.getElementById('errPwd').style.display='block';return;}
-  document.getElementById('errPwd').style.display='none';
-  const r=RESOURCES.find(x=>x.id===_loginRisorsaId);currentUser=r?r.fullName:'';isAdmin=false;await launchApp();
+  const pwd=document.getElementById('pwdInput').value,errEl=document.getElementById('errPwd');let res;
+  showSpinner();try{res=await call('login',{risorsaId:_loginRisorsaId,password:pwd});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
+  if(!res.ok){errEl.textContent='Password errata.';errEl.style.display='block';return;}
+  errEl.style.display='none';document.getElementById('pwdInput').value='';
+  await _startSession(res.token,_loginFullName,false);
 }
 async function doAdminLogin(){
-  const pwd=document.getElementById('adminPwd').value;let ok=false;
-  showSpinner();try{ok=await call('checkAdminPwd',{hash:simpleHash(pwd)});}catch(e){hideSpinner();alert('Errore: '+e.message);return;}hideSpinner();
-  if(!ok){document.getElementById('errAdmin').style.display='block';return;}document.getElementById('errAdmin').style.display='none';document.getElementById('adminPwd').value='';currentUser='ADMIN';isAdmin=true;await launchApp();
+  const pwd=document.getElementById('adminPwd').value,errEl=document.getElementById('errAdmin');let res;
+  showSpinner();try{res=await call('adminLogin',{password:pwd});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
+  if(!res.ok){errEl.textContent='Password errata.';errEl.style.display='block';return;}
+  errEl.style.display='none';document.getElementById('adminPwd').value='';
+  await _startSession(res.token,'ADMIN',true);
 }
-function doLogout(){currentUser=null;isAdmin=false;_loginRisorsaId=null;document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
+function doLogout(){_token=null;currentUser=null;isAdmin=false;isTeamLead=false;isProjectTL=false;_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
 async function launchApp(){
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
@@ -839,7 +852,7 @@ async function saveEdit(){
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}
-async function changeAdminPwd(){const p1=document.getElementById('newPwd1').value,p2=document.getElementById('newPwd2').value;if(!p1){showMsg('pwdMsg','Inserisci la nuova password.','err');return;}if(p1!==p2){showMsg('pwdMsg','Le password non coincidono.','err');return;}if(p1.length<6){showMsg('pwdMsg','Minimo 6 caratteri.','err');return;}showSpinner();try{await call('setAdminPwd',{hash:simpleHash(p1)});}catch(e){hideSpinner();showMsg('pwdMsg','Errore: '+e.message,'err');return;}hideSpinner();document.getElementById('newPwd1').value='';document.getElementById('newPwd2').value='';showMsg('pwdMsg','Password aggiornata','ok');}
+async function changeAdminPwd(){const p1=document.getElementById('newPwd1').value,p2=document.getElementById('newPwd2').value;if(!p1){showMsg('pwdMsg','Inserisci la nuova password.','err');return;}if(p1!==p2){showMsg('pwdMsg','Le password non coincidono.','err');return;}if(p1.length<6){showMsg('pwdMsg','Minimo 6 caratteri.','err');return;}showSpinner();try{const r=await call('setAdminPwd',{password:p1});_token=r.token;}catch(e){hideSpinner();showMsg('pwdMsg','Errore: '+e.message,'err');return;}hideSpinner();document.getElementById('newPwd1').value='';document.getElementById('newPwd2').value='';showMsg('pwdMsg','Password aggiornata','ok');}
 // EXPORT
 async function exportExcel(){
   const msgEl=document.getElementById('exportMsg');
@@ -2576,9 +2589,4 @@ async function loadEmailLog(){
   h+='</tbody></table></div>';
   el.innerHTML=h;
 }
-// AVVIO
-(async function init(){
-  showSpinner();
-  try{await reloadAll();}catch(e){hideSpinner();alert('Impossibile contattare il database.\n\nDettaglio: '+e.message+'\n\nVerifica che il sito sia pubblicato su Netlify con la function attiva e la variabile DATABASE_URL impostata.');return;}
-  hideSpinner();refreshDropdowns();
-})();
+// AVVIO: nessun dato viene caricato prima del login (bootstrap richiede la sessione)

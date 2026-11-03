@@ -3,6 +3,14 @@
   publish = "."
   functions = "netlify/functions"
 
+# Moduli condivisi (auth, migrazioni, validazione) importati dalle functions
+[functions]
+  included_files = ["netlify/lib/**"]
+
+# Node 22 per build e functions (nodemailer 10 richiede Node >= 20)
+[build.environment]
+  NODE_VERSION = "22"
+
 [[redirects]]
   from = "/api/db"
   to = "/.netlify/functions/db"
