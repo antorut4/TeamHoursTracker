@@ -57,8 +57,8 @@ function getWbsForMember(risorsaId,anno,mese){return _cache.wbs[`${risorsaId}_${
 function getRepTipiForPrj(progetto){const pid=_prjIdByName[progetto];const tipi=pid&&_cache.repTipi[String(pid)];return(tipi&&tipi.length)?tipi:[''];}
 const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 // 'Assenza' = assenza di un collega senza dettaglio (il server non invia il tipo Malattia né le note)
-const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':t==='Assenza'?'#8C8C8C':'#007A4C';
-const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
+const TIPO_C=t=>t==='Ferie'?'#7C5CFC':t==='Malattia'?'#E0245E':t==='Assenza'?'#9AA0BC':'#0E9F6E';
+const PAL=['#7C5CFC','#4F8CFF','#0E9F6E','#F25C9A','#22B8CF','#F59E0B','#8B5CF6','#3B6FE0','#14B8A6','#E0245E','#6366F1','#EC4899'];
 const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
 let currentUser=null,isAdmin=false,isTeamLead=false,isProjectTL=false,RESOURCES=[];
 function _resByName(name){return RESOURCES.find(x=>x.fullName===name);}
@@ -67,7 +67,7 @@ function getMembers(manager){return manager?RESOURCES.filter(r=>r.managerName===
 function getLeadTeam(){return RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);}
 function getLeads(){return RESOURCES.filter(r=>r.isManager).map(r=>r.fullName).sort();}
 function getLeadForMember(fullName){const r=RESOURCES.find(x=>x.fullName===fullName);return r?.managerName||'—';}
-function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#A100FF';}
+function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#7C5CFC';}
 const HC={};
 function easterSunday(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),month=Math.floor((h+l-7*m+114)/31)-1,day=((h+l-7*m+114)%31)+1;return new Date(year,month,day);}
 function getHol(year){if(HC[year])return HC[year];const fd=d=>{const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;};const pa=easterSunday(year),pk=new Date(year,pa.getMonth(),pa.getDate()+1);HC[year]=new Set([`${year}-01-01`,`${year}-01-06`,fd(pa),fd(pk),`${year}-04-25`,`${year}-05-01`,`${year}-06-02`,`${year}-08-15`,`${year}-11-01`,`${year}-12-08`,`${year}-12-25`,`${year}-12-26`]);return HC[year];}

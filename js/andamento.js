@@ -2,9 +2,9 @@
 // ANDAMENTO PROGETTO
 // Serie L1/L2/L3: colori validati (dataviz) + forma del marker come codifica secondaria.
 // Il Totale è una somma, non una categoria: linea neutra in inchiostro con marker a rombo.
-const TK_LV=[{k:'l1',l:'L1',c:'#A100FF',m:'circle'},{k:'l2',l:'L2',c:'#1f6fc9',m:'square'},{k:'l3',l:'L3',c:'#d95926',m:'triangle'}];
+const TK_LV=[{k:'l1',l:'L1',c:'#7C5CFC',m:'circle'},{k:'l2',l:'L2',c:'#1f6fc9',m:'square'},{k:'l3',l:'L3',c:'#d95926',m:'triangle'}];
 const TK_TOT={k:'totale',l:'Totale',c:'#3D3D3D',m:'diamond',tot:true};
-const EE_C='#A100FF',EE_C_HOVER='#7500C0',THR_C='#C9003C';
+const EE_C='#7C5CFC',EE_C_HOVER='#5B3FE0',THR_C='#E0245E';
 function _fmtNum(n){return Number(n).toLocaleString('it-IT');}
 function _r2(n){return Math.round(Number(n)*100)/100;}
 function _fmtOre(n){return _r2(n).toLocaleString('it-IT',{maximumFractionDigits:2})+' h';}

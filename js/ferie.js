@@ -128,7 +128,7 @@ function renderFerieCalendar(){
   const sumData=[];
   members.forEach((m,mi)=>{
     const isMe=m===currentUser;
-    h+=`<tr style="background:${isMe?'rgba(161,0,255,.07)':mi%2?'var(--stone)':'var(--white)'}"><td style="padding:6px 10px;font-weight:600;font-size:.76rem;color:${isMe?'var(--amber)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap">${_esc(m.split(' ')[0])}${isMe?' ★':''}<br><span style="font-weight:400;color:var(--ink-3);font-size:.66rem">${_esc(m.split(' ').slice(1).join(' '))}</span></td>`;
+    h+=`<tr style="background:${isMe?'rgba(124,92,252,.07)':mi%2?'var(--stone)':'var(--white)'}"><td style="padding:6px 10px;font-weight:600;font-size:.76rem;color:${isMe?'var(--amber)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap">${_esc(m.split(' ')[0])}${isMe?' ★':''}<br><span style="font-weight:400;color:var(--ink-3);font-size:.66rem">${_esc(m.split(' ').slice(1).join(' '))}</span></td>`;
     let tot=0;const bt={};
     for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,tipo=md[m][ds];let cb='',dot='';if(tipo){const c=TIPO_C(tipo);cb=`background:${c}18`;dot=`<div style="width:8px;height:8px;border-radius:2px;background:${c};margin:0 auto" title="${_esc(tipo)}"></div>`;if(!iw&&!ih){tot++;bt[tipo]=(bt[tipo]||0)+1;}}else if(ih)cb='background:var(--amber-bg)';else if(iw)cb='background:var(--stone-2)';if(isMe&&!ih&&(!iw||tipo)){const ph=dot||`<div style="width:6px;height:6px;border-radius:50%;border:1.5px dashed rgba(0,0,0,.18);margin:0 auto"></div>`;h+=`<td style="padding:3px 1px;text-align:center;${cb};cursor:pointer" onclick="toggleFerieDay('${ds}')" title="${tipo?tipo+' — clicca per eliminare':'Aggiungi assenza'}">${ph}</td>`;}else{h+=`<td style="padding:3px 1px;text-align:center;${cb}">${dot}</td>`;}}
     h+=`<td style="padding:5px 6px;text-align:center;font-weight:700;color:var(--ink);border-left:2px solid var(--stone-3)">${tot}</td></tr>`;
@@ -136,7 +136,7 @@ function renderFerieCalendar(){
   });
   el.innerHTML=h+'</tbody></table>';
   const _monthStr=`${year}-${String(month+1).padStart(2,'0')}`;
-  const _tipiDef=[{tp:'Ferie',color:'#A100FF',bg:'rgba(161,0,255,.08)'},{tp:'Permesso/ROL',color:'var(--ok)',bg:'var(--ok-bg)'},{tp:'Malattia',color:'var(--danger)',bg:'var(--danger-bg)'}];
+  const _tipiDef=[{tp:'Ferie',color:'#7C5CFC',bg:'rgba(124,92,252,.08)'},{tp:'Permesso/ROL',color:'var(--ok)',bg:'var(--ok-bg)'},{tp:'Malattia',color:'var(--danger)',bg:'var(--danger-bg)'}];
   let _cardsHtml='';
   // Global dayMap across ALL tipos — so cross-type overlaps (es. Ferie + Malattia) vengono rilevate
   const _allMonthEntries=allFer.filter(e=>members.includes(e.user)&&e.end>=_monthStr+'-01'&&e.start<=_monthStr+'-'+String(dim).padStart(2,'0'));
