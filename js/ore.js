@@ -28,8 +28,8 @@ function checkOreStrao(){
   const h1=wHours(year,month,1),h2=wHours(year,month,2);
   const v1=parseFloat(document.getElementById('ore1').value),v2=parseFloat(document.getElementById('ore2').value);
   const w1=document.getElementById('oreWarn1'),w2=document.getElementById('oreWarn2');
-  if(w1){if(!isNaN(v1)&&v1>h1){w1.style.display='block';document.getElementById('oreWarn1Txt').textContent=`Straordinari: +${Math.round((v1-h1)*10)/10}h rispetto alle ${h1}h previste`;}else{w1.style.display='none';}}
-  if(w2){if(!isNaN(v2)&&v2>h2){w2.style.display='block';document.getElementById('oreWarn2Txt').textContent=`Straordinari: +${Math.round((v2-h2)*10)/10}h rispetto alle ${h2}h previste`;}else{w2.style.display='none';}}
+  if(w1){if(!isNaN(v1)&&v1>h1){w1.style.display='block';document.getElementById('oreWarn1Txt').textContent=`Ore extra: +${Math.round((v1-h1)*10)/10}h rispetto alle ${h1}h previste`;}else{w1.style.display='none';}}
+  if(w2){if(!isNaN(v2)&&v2>h2){w2.style.display='block';document.getElementById('oreWarn2Txt').textContent=`Ore extra: +${Math.round((v2-h2)*10)/10}h rispetto alle ${h2}h previste`;}else{w2.style.display='none';}}
 }
 async function saveOre(){
   const month=+document.getElementById('oreMonth').value,year=+document.getElementById('oreYear').value;
@@ -47,7 +47,7 @@ async function renderMyOre(){
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.83rem">Nessuna ora inserita.</p>';return;}
   let h='<div class="table-wrap"><table><thead><tr><th>Mese</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th></th></tr></thead><tbody>';
   rows.forEach(e=>{const tot=(+e.ore_q1||0)+(+e.ore_q2||0),av=wHours(e.anno,e.mese,1)+wHours(e.anno,e.mese,2);const extra=tot-av;
-    const straoBadge=extra>0?` <span style="font-size:.69rem;font-weight:700;color:var(--warn);background:var(--warn-bg);border-radius:10px;padding:1px 7px;white-space:nowrap"><i class="fa-solid fa-bolt" style="margin-right:3px"></i>+${Math.round(extra*10)/10}h strao</span>`:'';
+    const straoBadge=extra>0?` <span style="font-size:.69rem;font-weight:700;color:var(--warn);background:var(--warn-bg);border-radius:10px;padding:1px 7px;white-space:nowrap"><i class="fa-solid fa-bolt" style="margin-right:3px"></i>+${Math.round(extra*10)/10}h extra</span>`:'';
     h+=`<tr style="${extra>0?'background:var(--warn-bg)':''}"><td><b>${MONTHS[e.mese]} ${e.anno}</b></td><td>${e.ore_q1!=null?e.ore_q1+'h':'—'}${e.note_q1?` <span style="color:var(--ink-3);font-size:.73rem">(${_esc(e.note_q1)})</span>`:''}</td><td>${e.ore_q2!=null?e.ore_q2+'h':'—'}${e.note_q2?` <span style="color:var(--ink-3);font-size:.73rem">(${_esc(e.note_q2)})</span>`:''}</td><td><b>${tot}h</b>${straoBadge}</td><td style="color:var(--ink-3)">${av}h</td><td><button class="btn-icon danger" onclick="deleteMyOre(${e.id},'${MONTHS[e.mese]} ${e.anno}')" title="Elimina inserimento"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button></td></tr>`;
   });
   el.innerHTML=h+'</tbody></table></div>';

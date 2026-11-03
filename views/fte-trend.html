@@ -1,0 +1,17 @@
+<!-- ANDAMENTO FTE: per ogni progetto, FTE erogati mese per mese con gli FTE progetto come soglia -->
+<div class="panel" id="panel-fte-trend">
+  <div class="page-header"><h1>Andamento FTE</h1><p>FTE erogati mese per mese per ogni progetto, confrontati con gli FTE progetto (FTE venduti TOT del Benchmark)</p></div>
+  <div class="card" id="fteFilters">
+    <div class="field-row" style="margin-bottom:0">
+      <div class="field" style="max-width:170px"><label>Fino al mese</label><select id="fteMonth" onchange="renderFteTrend().catch(console.error)"></select></div>
+      <div class="field" style="max-width:100px"><label>Anno</label><select id="fteYear" onchange="renderFteTrend().catch(console.error)"></select></div>
+      <div class="field" style="flex:0 0 auto;min-width:0"><label>Periodo</label>
+        <div class="and-seg" role="group" aria-label="Periodo">
+          <button type="button" data-n="12" onclick="fteSetPeriod(12)">12 mesi</button><button type="button" data-n="6" onclick="fteSetPeriod(6)">6 mesi</button>
+        </div>
+      </div>
+      <div><button class="btn btn-ghost2" onclick="renderFteTrend().catch(console.error)"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+    </div>
+  </div>
+  <div id="fteTrendContent"></div>
+</div>

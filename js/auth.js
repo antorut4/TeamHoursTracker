@@ -115,6 +115,7 @@ async function launchApp(){
   navVis('navPresenze',true);
   navVis('navConsuntivo',true);
   navVis('navAndamento',isAdmin||_andProjects().length>0);
+  navVis('navFteTrend',isAdmin||_andProjects().length>0);
   navVis('navBenchmark',true);
   navVis('navSectionTeam',isAdmin||isTeamLead);
   navVis('navDashboard',isAdmin||isTeamLead);

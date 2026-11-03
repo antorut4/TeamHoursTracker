@@ -48,7 +48,7 @@ function _drawThrLine(ctx,P,pw,y,label){
   ctx.strokeStyle=THR_C;ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.setLineDash([]);
   ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='left';ctx.textBaseline='bottom';
   const w=ctx.measureText(label).width;ctx.fillStyle='rgba(255,255,255,.85)';ctx.fillRect(P.l+4,y-15,w+6,13);
-  ctx.fillStyle='#3D3D3D';ctx.fillText(label,P.l+7,y-3);
+  ctx.fillStyle='#1F2937';ctx.fillText(label,P.l+7,y-3);
 }
 function _drawTicketChart(c){
   const cv=document.getElementById(c.id);if(!cv)return;
@@ -61,10 +61,10 @@ function _drawTicketChart(c){
   // griglia recessiva + asse Y
   ctx.font='11px DM Sans,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
   const div=mx%4===0?4:5; // tick interi: i ticket non hanno decimali
-  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#8C8C8C';ctx.fillText(_fmtNum(v),P.l-8,y);}
+  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#454C5E';ctx.fillText(_fmtNum(v),P.l-8,y);}
   // asse X (salta etichette se lo spazio è poco)
   const every=step&&step<44?2:1;ctx.textAlign='center';ctx.textBaseline='alphabetic';
-  c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#3D3D3D':'#8C8C8C';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,X(i),H-8);});
+  c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#111827':'#454C5E';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,X(i),H-8);});
   if(c.thr)_drawThrLine(ctx,P,pw,Y(c.thr),'Soglia '+_fmtNum(c.thr));
   if(c.hover!=null){ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(Math.round(X(c.hover))+.5,P.t);ctx.lineTo(Math.round(X(c.hover))+.5,P.t+ph);ctx.stroke();ctx.setLineDash([]);}
   c.series.forEach(s=>{
@@ -88,7 +88,7 @@ function _drawTicketChart(c){
   for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<13)ends[i].y=ends[i-1].y+13;
   // se le etichette sforano in basso, risalgono mantenendo la spaziatura
   const yMax=P.t+ph+4;for(let i=ends.length-1;i>=0;i--)ends[i].y=Math.min(ends[i].y,yMax-(ends.length-1-i)*13);
-  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#3D3D3D';
+  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#1F2937';
   ends.forEach(e=>ctx.fillText(e.l,X(n-1)+10,e.y));
 }
 function _showTicketTip(c,i){
@@ -122,16 +122,16 @@ function _drawEeChart(c){
   const Y=v=>P.t+ph*(1-v/mx),BX=i=>P.l+band*i+(band-bw)/2;
   ctx.font='11px DM Sans,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
   const div=mx%4===0?4:5;
-  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#8C8C8C';ctx.fillText(_fmtNum(_r2(v))+(isOre?' '+u:''),P.l-8,y);}
+  for(let i=0;i<=div;i++){const v=mx*i/div,y=Y(v);ctx.strokeStyle=i===0?'rgba(0,0,0,.18)':'rgba(0,0,0,.06)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(P.l,Math.round(y)+.5);ctx.lineTo(P.l+pw,Math.round(y)+.5);ctx.stroke();ctx.fillStyle='#454C5E';ctx.fillText(_fmtNum(_r2(v))+(isOre?' '+u:''),P.l-8,y);}
   const every=band<44?2:1;ctx.textAlign='center';ctx.textBaseline='alphabetic';
-  c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#3D3D3D':'#8C8C8C';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,BX(i)+bw/2,H-8);});
+  c.labels.forEach((lb,i)=>{if(i%every&&i!==n-1)return;ctx.fillStyle=i===n-1?'#111827':'#454C5E';ctx.font=(i===n-1?'600 ':'')+'11px DM Sans,sans-serif';ctx.fillText(lb,BX(i)+bw/2,H-8);});
   if(c.hover!=null){ctx.fillStyle='rgba(0,0,0,.04)';ctx.fillRect(P.l+band*c.hover,P.t,band,ph);}
   // barre sottili ancorate alla base, angoli superiori arrotondati
   vals.forEach((v,i)=>{if(!v)return;const y=Y(v);_barPath(ctx,BX(i),y,bw,P.t+ph-y,4);ctx.fillStyle=c.hover===i?EE_C_HOVER:EE_C;ctx.fill();});
   if(thr)_drawThrLine(ctx,P,pw,Y(thr),'Soglia '+_fmtU(thr,u));
   // etichetta diretta solo sul mese selezionato (ultima barra)
   const last=vals[n-1];
-  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#3D3D3D';
+  ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#1F2937';
   ctx.fillText(last?fv(last):(isOre?'0 '+u:'0'),BX(n-1)+bw/2,(last?Y(last):P.t+ph)-4);
 }
 function _showEeTip(c,i){

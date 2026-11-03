@@ -2,8 +2,8 @@
 // INIT
 async function initApp(){
   const now=new Date(),mOpts=MONTHS.map((m,i)=>({v:i,l:m})),yOpts=[-1,0,1].map(d=>{const y=now.getFullYear()+d;return{v:y,l:y};});
-  ['oreMonth','riepilogoMonth','ovMonth','adminFerMonth','ferieCalMonth','consuntivoMonth','andMonth'].forEach(id=>popSel(id,mOpts,now.getMonth()));
-  ['oreYear','riepilogoYear','ovYear','adminFerYear','ferieCalYear','consuntivoYear','andYear'].forEach(id=>popSel(id,yOpts,now.getFullYear()));
+  ['oreMonth','riepilogoMonth','ovMonth','adminFerMonth','ferieCalMonth','consuntivoMonth','andMonth','fteMonth'].forEach(id=>popSel(id,mOpts,now.getMonth()));
+  ['oreYear','riepilogoYear','ovYear','adminFerYear','ferieCalYear','consuntivoYear','andYear','fteYear'].forEach(id=>popSel(id,yOpts,now.getFullYear()));
   popSel('filterAnno',[{v:'',l:'Tutti gli anni'},...yOpts],'');
   refreshDropdowns();
   if(!isAdmin){await loadOreForm();await renderMyOre();checkAlerts();}
@@ -56,8 +56,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento','benchmark'];
-const NAV_MAP={andamento:'navAndamento',benchmark:'navBenchmark',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento','fte-trend','benchmark'];
+const NAV_MAP={andamento:'navAndamento','fte-trend':'navFteTrend',benchmark:'navBenchmark',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -78,5 +78,6 @@ async function showTab(t){
   if(t==='presenze')initPresenzePanel();
   if(t==='consuntivo')loadConsuntivo().catch(console.error);
   if(t==='andamento')renderAndamento().catch(console.error);
+  if(t==='fte-trend')renderFteTrend().catch(console.error);
   if(t==='benchmark')renderBenchmark();
 }
