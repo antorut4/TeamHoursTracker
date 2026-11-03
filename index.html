@@ -353,7 +353,7 @@
             <div class="field" style="min-width:220px;max-width:300px"><label>Progetto / area</label><select id="andNav" onchange="andNavChange(this.value)"></select></div>
             <div class="field" style="max-width:170px"><label>Mese</label><select id="andMonth" onchange="renderAndamento().catch(console.error)"></select></div>
             <div class="field" style="max-width:100px"><label>Anno</label><select id="andYear" onchange="renderAndamento().catch(console.error)"></select></div>
-            <div class="field" style="max-width:140px"><label>Periodo grafico</label>
+            <div class="field" id="andMesiField" style="max-width:140px"><label>Periodo grafico</label>
               <select id="andMesi" onchange="renderAndamento().catch(console.error)"><option value="6">6 mesi</option><option value="12" selected>12 mesi</option></select>
             </div>
             <div><button class="btn btn-ghost2" onclick="renderAndamento().catch(console.error)"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>

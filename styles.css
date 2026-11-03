@@ -340,6 +340,15 @@ tbody tr:hover td{background:var(--stone)}
 .and-list-name{font-family:var(--f-display);font-weight:700;font-size:.98rem;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .and-list-name .fa-folder-open{color:var(--amber)}
 .and-list-meta{font-size:.78rem;color:var(--ink-3);margin-top:2px}
+/* Elenco progetti raggruppato per stato FTE: da verificare / in linea / non configurati */
+.and-grp-hd{display:flex;align-items:center;gap:7px;font-size:.78rem;font-weight:700;margin:6px 0 4px;padding:0 2px}
+.and-grp-hd~.and-grp-hd{margin-top:18px}
+.and-grp-dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.and-grp-check{color:var(--danger)}.and-grp-ok{color:var(--ok)}.and-grp-none{color:var(--ink-3)}
+.and-st{flex:none;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;font-size:.95rem;color:var(--white)}
+.and-st-check{background:var(--danger)}.and-st-ok{background:var(--ok)}.and-st-none{background:var(--stone-3);color:var(--ink-3)}
+.and-st-txt{font-size:.78rem;font-weight:600;margin-top:2px}
+.and-st-txt-check{color:var(--danger)}.and-st-txt-ok{color:var(--ok)}.and-st-txt-none{color:var(--ink-3)}
 .and-row-link{cursor:pointer}
 .and-row-link:hover td,.and-row-link:focus-visible td{background:var(--amber-bg)}
 .and-row-link:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}

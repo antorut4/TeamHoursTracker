@@ -1831,8 +1831,10 @@ async function renderAndamento(){
   const el=document.getElementById('andamentoContent');if(!el)return;
   const prjs=_andProjectIds();
   if(_andSel.pid&&!prjs.includes(_andSel.pid))_andSel={pid:null,areaId:null};
-  const pid=_andSel.pid,fc=document.getElementById('andFilters');
-  if(fc)fc.style.display=pid?'':'none';
+  const pid=_andSel.pid,fc=document.getElementById('andFilters'),mf=document.getElementById('andMesiField');
+  // Mese/anno anche nell'elenco (FTE e soglie del mese); il periodo del grafico serve solo nel dettaglio
+  if(fc)fc.style.display=prjs.length?'':'none';
+  if(mf)mf.style.display=pid?'':'none';
   _andNavOpts(prjs);
   const month=+document.getElementById('andMonth').value,year=+document.getElementById('andYear').value,n=+document.getElementById('andMesi').value;
   if(!pid){
@@ -1900,16 +1902,36 @@ function _andListHtml(prjs,warn,lbl,monthOf){
   if(!prjs.length)return '<div class="card"><p style="color:var(--ink-3);text-align:center;padding:24px 0">Non risulti staffato su alcun progetto.</p></div>';
   const me=_me();warn=warn||{};
   const wTxt=w=>{const K=_THR_KIND[w.kind];return `${w.kind==='ee'?'Extra Effort':'Ticket'}${w.area?` (${_esc(w.area)})`:''} ${w.st==='over'?'superata':'raggiunta'}: ${K.n(w.tot)} / ${K.n(w.soglia)}`;};
-  return `<div class="card"><div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'} <span style="color:var(--ink-3);font-weight:600;font-size:.78rem">· soglie e FTE di ${lbl}</span></div><div class="and-list">${prjs.map(pid=>{
+  const row=(pid,f,st)=>{
     const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
     const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':_andReadOnly(pid)?'Manager · sola lettura':'';
-    const w=warn[pid],f=monthOf?_fteOf(pid,monthOf(pid)):null;
+    const w=warn[pid],G=st?_AND_GRP[st]:null;
     return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
-      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${f?_fteBoxes(f,lbl):''}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
+      ${G?`<span class="and-st and-st-${st}" aria-hidden="true"><i class="fa-solid ${G.ic}"></i></span>`:''}
+      <div style="min-width:0;flex:1"><div class="and-list-name">${G?'':'<i class="fa-solid fa-folder-open"></i> '}${_esc(p)}${f?_fteBoxes(f,lbl):''}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
+        ${G?`<div class="and-st-txt and-st-txt-${st}">${_andStTxt(f,st)}</div>`:''}
         <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div>
         ${w?`<div class="and-list-warn"><i class="fa-solid fa-triangle-exclamation"></i> Soglia ${w.map(wTxt).join(' · ')}</div>`:''}</div>
       <button class="btn btn-ink btn-sm" onclick="event.stopPropagation();andGo(${pid})">Apri dettaglio <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button>
-    </div>`;}).join('')}</div></div>`;
+    </div>`;};
+  const title=`<div class="card-title"><i class="fa-solid fa-folder-tree"></i> ${isAdmin?'Progetti':'I tuoi progetti'} <span style="color:var(--ink-3);font-weight:600;font-size:.78rem">· soglie e FTE di ${lbl}</span></div>`;
+  // Dati del mese non disponibili: elenco semplice in ordine alfabetico
+  if(!monthOf)return `<div class="card">${title}<div class="and-list">${prjs.map(pid=>row(pid,null,null)).join('')}</div></div>`;
+  // Gruppi: prima i progetti da verificare (FTE erogati ≥ FTE progetto, dal più sforato), poi quelli in linea
+  const grp={check:[],ok:[],none:[]};
+  prjs.forEach(pid=>{const f=_fteOf(pid,monthOf(pid));grp[_andFteSt(f)].push({pid,f});});
+  grp.check.sort((a,b)=>(b.f.erog-b.f.tot)-(a.f.erog-a.f.tot));
+  return `<div class="card">${title}${['check','ok','none'].filter(k=>grp[k].length).map(k=>
+    `<div class="and-grp-hd and-grp-${k}"><span class="and-grp-dot"></span>${_AND_GRP[k].l} · ${grp[k].length}</div><div class="and-list">${grp[k].map(x=>row(x.pid,x.f,k)).join('')}</div>`).join('')}</div>`;
+}
+const _AND_GRP={check:{l:'Da verificare',ic:'fa-xmark'},ok:{l:'In linea',ic:'fa-check'},none:{l:'FTE progetto non configurati',ic:'fa-minus'}};
+// Da verificare quando gli FTE erogati raggiungono o superano gli FTE progetto (confronto a 2 decimali)
+function _andFteSt(f){return f.tot==null?'none':f.over?'check':'ok';}
+function _andStTxt(f,st){
+  if(st==='none')return 'Configura gli FTE venduti TOT in Benchmark';
+  const d=_r2(_r2(f.erog)-_r2(f.tot)),pct=f.tot?Math.round(Math.abs(d)/f.tot*100):null,p=pct!=null?` (${d>0?'+':'−'}${pct}%)`:'';
+  if(st==='check')return d>0?`Sopra di ${_fmtFte(d)} FTE${p}`:'Pari agli FTE progetto';
+  return `In linea · margine di ${_fmtFte(-d)} FTE${p}`;
 }
 // ── inserimento manuale in fondo al dettaglio: per area, ticket del giorno + attività di Extra Effort ──
 function _andEntryInit(pid){
@@ -2150,17 +2172,17 @@ function _fmtFte(n){return _r2(n).toLocaleString('it-IT',{minimumFractionDigits:
 // FTE erogati del mese, sempre sull'intero progetto:
 //   Σ L1..L3 ((n·Tempo)·(Pyr/8))/21/Pyr + ((ore extra)·(Pyr/8))/21/Pyr + ((MD·8)·(240/8))/21/240
 // Pyr si semplifica: ogni termine vale ore/8/21, cioè le ore erogate su 21 giorni da 8 h.
-// FTE progetto = FTE venduti TOT del Benchmark; gli erogati diventano rossi quando lo superano.
+// FTE progetto = FTE venduti TOT del Benchmark; gli erogati diventano rossi quando lo raggiungono o superano.
 function _fteOf(pid,r){
   const b=_bench(pid),t=k=>+b[k]||0;
   const ore=r.l1*t('tL1')+r.l2*t('tL2')+r.l3*t('tL3')+r.ee+r.cr*8;
   const erog=ore/8/21,tot=b.fteTot!=null?+b.fteTot:null;
-  return{erog,tot,over:tot!=null&&_r2(erog)>_r2(tot),noTempi:TK_LV.some(s=>r[s.k]>0&&!(+b['t'+s.l]>0))};
+  return{erog,tot,over:tot!=null&&_r2(erog)>=_r2(tot),noTempi:TK_LV.some(s=>r[s.k]>0&&!(+b['t'+s.l]>0))};
 }
 // Due box accanto al nome del progetto (elenco e dettaglio), sempre sull'intero progetto
 function _fteBoxes(f,lbl){
   return `<span class="and-fte">
-      <span class="and-fte-kpi${f.over?' over':''}" title="FTE erogati in ${lbl}${f.over?' — superano gli FTE progetto':''}"><small>FTE erogati</small><b>${f.over?'<i class="fa-solid fa-triangle-exclamation" style="font-size:.75rem;margin-right:4px"></i>':''}${_fmtFte(f.erog)}</b></span>
+      <span class="and-fte-kpi${f.over?' over':''}" title="FTE erogati in ${lbl}${f.over?' — raggiungono o superano gli FTE progetto':''}"><small>FTE erogati</small><b>${f.over?'<i class="fa-solid fa-triangle-exclamation" style="font-size:.75rem;margin-right:4px"></i>':''}${_fmtFte(f.erog)}</b></span>
       <span class="and-fte-kpi" title="FTE venduti TOT (Benchmark)"><small>FTE progetto</small><b>${f.tot!=null?_fmtFte(f.tot):'—'}</b></span>
     </span>`;
 }
