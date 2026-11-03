@@ -18,7 +18,7 @@ async function initApp(){
     const rOpts=[{v:'',l:'Tutte le risorse'},...RESOURCES.filter(r=>consuntivoIds.has(r.id)).map(r=>({v:r.id,l:r.fullName}))];
     popSel('consuntivoRes',rOpts,'');
   }
-  if(isAdmin){renderAreaList();renderSoglieList();['adminPrjCard','adminResByPrjCard','adminPwdCard','adminEmailLogCard','adminAreeCard','adminSoglieCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead')].forEach(el=>{if(el)el.style.display='';});await renderResourceList();await renderProjectList();await populateSearchByProject();}
+  if(isAdmin){renderAreaList();renderSoglieList();['adminPrjCard','adminResByPrjCard','adminPwdCard','adminEmailLogCard','adminAreeCard','adminSoglieCard'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='';});[document.getElementById('resManagerSel')?.closest('.field'),document.getElementById('editManagerSel')?.closest('.field'),document.getElementById('filterResLead'),...document.querySelectorAll('.senior-only')].forEach(el=>{if(el)el.style.display='';});_setSeniorFields('res',null);await renderResourceList();await renderProjectList();await populateSearchByProject();}
   else if(isTeamLead){
     const sfBtn=document.getElementById('sollecitaForecastBtn');if(sfBtn)sfBtn.style.display='';
     await renderResourceList();
@@ -28,9 +28,9 @@ async function initApp(){
     // Nascondi il filtro team lead nell'elenco risorse (il manager vede solo il suo team)
     const flEl=document.getElementById('filterResLead');if(flEl)flEl.closest('.search-row') && (flEl.style.display='none');
     // Nascondi il selettore manager nel form aggiungi risorsa (sarà auto-assegnato)
-    const mgrFieldRes=document.getElementById('resManagerSel')?.closest('.field');if(mgrFieldRes)mgrFieldRes.style.display='none';
+    const mgrFieldRes=document.getElementById('resManagerSel')?.closest('.field');if(mgrFieldRes)mgrFieldRes.style.display=isSeniorManager?'':'none';
     // Nascondi il selettore manager nel form modifica risorsa
-    const mgrFieldEdit=document.getElementById('editManagerSel')?.closest('.field');if(mgrFieldEdit)mgrFieldEdit.style.display='none';
+    const mgrFieldEdit=document.getElementById('editManagerSel')?.closest('.field');if(mgrFieldEdit)mgrFieldEdit.style.display=isSeniorManager?'':'none';
     // Aggiorna intestazione pannello admin
     const ph=document.querySelector('#panel-admin .page-header p');if(ph)ph.textContent='Gestione delle tue risorse';
   }
@@ -42,8 +42,11 @@ function refreshDropdowns(){
   const tlOpts=[{v:'',l:'— Nessuno —'},...RESOURCES.map(r=>({v:r.fullName,l:r.fullName}))];
   popSel('newPrjTLSel',tlOpts,'');
   // selettori manager nel form aggiungi/modifica risorsa
-  const mgrOpts=[{v:'',l:'— Nessun manager —'},...leads.map(l=>({v:l,l:l}))];
-  ['resManagerSel','editManagerSel'].forEach(id=>popSel(id,mgrOpts,''));
+  const team=new Set(getLeadTeam());
+  const mgrOpts=isSeniorManager?[{v:currentUser,l:currentUser+' (tu)'},...leads.filter(l=>team.has(l)).map(l=>({v:l,l:l}))]
+    :[{v:'',l:'— Nessun manager —'},...leads.map(l=>({v:l,l:l}))];
+  ['resManagerSel','editManagerSel'].forEach(id=>popSel(id,mgrOpts,isSeniorManager?currentUser:''));
+  if(isAdmin)_setSeniorFields('res',null);
 }
 // ALERT
 async function checkAlerts(){

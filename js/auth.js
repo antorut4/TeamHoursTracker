@@ -99,15 +99,16 @@ async function doAdminLogin(){
   errEl.style.display='none';document.getElementById('adminPwd').value='';
   await _startSession(res.token,'ADMIN',true);
 }
-function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isProjectTL=false;_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
+function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isSeniorManager=false;isProjectTL=false;_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
 async function launchApp(){
   let lastTab=null;try{lastTab=sessionStorage.getItem(TAB_KEY);}catch{}
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
   const initials=isAdmin?'AD':currentUser.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
   document.getElementById('userAvatar').textContent=initials;document.getElementById('hUser').textContent=isAdmin?'Admin':currentUser;
   isTeamLead=!isAdmin&&(RESOURCES.find(r=>r.fullName===currentUser)?.isManager||false);
+  isSeniorManager=!isAdmin&&(RESOURCES.find(r=>r.fullName===currentUser)?.isSenior||false);
   isProjectTL=!isAdmin&&(Object.values(_prjTLsByName).some(tls=>tls.includes(currentUser))||_myAree().length>0);
-  document.getElementById('hRole').textContent=isAdmin?'Amministratore':(isTeamLead?'Manager':(isProjectTL?'Team Leader':'Collaboratore'));
+  document.getElementById('hRole').textContent=isAdmin?'Amministratore':isSeniorManager?'Senior Manager':(isTeamLead?'Manager':(isProjectTL?'Team Leader':'Collaboratore'));
   const navVis=(id,show)=>{const el=document.getElementById(id);if(!el)return;el.classList.toggle('nav-hidden',!show);el.style.display=show?'':'none';};
   navVis('navOre',!isAdmin);
   navVis('navFerie',!isAdmin);

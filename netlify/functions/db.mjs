@@ -36,7 +36,7 @@ async function bootstrap(ctx){
         LEFT JOIN risorse r ON ptl.risorsa_id = r.id
         GROUP BY p.id, p.nome, p.wbs
         ORDER BY p.nome`,
-    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, load_cost, daily_reminder, employee_id FROM risorse ORDER BY cognome, nome`,
+    sql`SELECT id, nome, cognome, full_name, email, manager_id, is_manager, is_senior, load_cost, daily_reminder, employee_id FROM risorse ORDER BY cognome, nome`,
     sql`SELECT risorsa_id, progetto_id FROM allocazioni`,
     sql`SELECT id, risorsa_id, anno, mese, ore_q1, note_q1, ore_q2, note_q2 FROM ore_mensili`,
     sql`SELECT id, risorsa_id, data_inizio, data_fine, tipo, note, ora_inizio, ora_fine FROM ferie`,
@@ -571,16 +571,33 @@ function _employeeId(v){
 function _resFields(p){
   return { ...p, nome: V.text(p.nome, 'Nome', 100), cognome: V.text(p.cognome, 'Cognome', 100), email: V.optEmail(p.email),
            managerId: p.managerId ? V.id(p.managerId, 'Manager') : null, progetti: V.arr(p.progetti, 'Progetti', 200),
-           loadCost: V.optNum(p.loadCost, 'Load cost', 0, 1000000) };
+           loadCost: V.optNum(p.loadCost, 'Load cost', 0, 1000000),
+           managerIds: V.arr(p.managerIds, 'Manager associati', 500).map(x => V.id(x, 'Manager')) };
+}
+// Senior Manager: i manager associati hanno lui come manager; quelli tolti dall'elenco restano senza manager.
+// Non si può associare chi sta sopra di lui nella gerarchia (si creerebbe un ciclo).
+async function _setSeniorTeam(smId, ids){
+  ids = [...new Set(ids)].filter(id => id !== smId);
+  if (ids.length) {
+    const up = await sql`
+      WITH RECURSIVE a(id) AS (
+        SELECT manager_id FROM risorse WHERE id = ${smId} AND manager_id IS NOT NULL
+        UNION SELECT r.manager_id FROM risorse r JOIN a ON r.id = a.id WHERE r.manager_id IS NOT NULL
+      ) SELECT r.full_name FROM risorse r WHERE r.id IN (SELECT id FROM a) AND r.id = ANY(${ids}::int[])`;
+    if (up.length) throw new Error(`${up[0].full_name} è sopra questo Senior Manager nella gerarchia: non può esserne un manager associato`);
+  }
+  await sql`UPDATE risorse SET manager_id = NULL WHERE manager_id = ${smId} AND is_manager AND id <> ALL(${ids}::int[])`;
+  if (ids.length) await sql`UPDATE risorse SET manager_id = ${smId} WHERE id = ANY(${ids}::int[]) AND is_manager`;
 }
 async function addResource(p){
   p = _resFields(p);
   const managerId = p.managerId || null;
-  const isManager = !!p.isManager;
+  const isSenior = p.isSenior === true, isManager = !!p.isManager || isSenior;   // il Senior Manager è anche manager
   const email = p.email || null;
   const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
   const employeeId = _employeeId(p.employeeId);
-  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager, load_cost, employee_id) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}, ${loadCost}, ${employeeId}) RETURNING id`;
+  const [r] = await sql`INSERT INTO risorse (nome, cognome, email, manager_id, is_manager, is_senior, load_cost, employee_id) VALUES (${p.nome}, ${p.cognome}, ${email}, ${managerId}, ${isManager}, ${isSenior}, ${loadCost}, ${employeeId}) RETURNING id`;
+  if (isSenior) await _setSeniorTeam(+r.id, p.managerIds);
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
               SELECT ${r.id}, id FROM progetti WHERE nome=${nome}`;
@@ -592,13 +609,19 @@ async function saveEdit(p){
   await sql`DELETE FROM password_invites WHERE risorsa_id=${p.id}
             AND EXISTS (SELECT 1 FROM risorse WHERE id=${p.id} AND lower(COALESCE(email,'')) <> ${p.email || ''})`;
   const managerId = p.managerId || null;
-  const isManager = !!p.isManager;
+  if (managerId === p.id) throw new Error('Una risorsa non può essere manager di sé stessa');
+  // isSenior non inviato (modifica da parte di un manager) = ruolo invariato
+  const keepSenior = typeof p.isSenior !== 'boolean', isSenior = p.isSenior === true;
+  const isManager = !!p.isManager || isSenior;
   const email = p.email || null;
   const loadCost = (p.loadCost != null && p.loadCost !== '') ? +p.loadCost : null;
   // employeeId non inviato = valore invariato
   const keepEmp = p.employeeId === undefined, employeeId = keepEmp ? null : _employeeId(p.employeeId);
-  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId}, is_manager=${isManager}, load_cost=${loadCost},
+  await sql`UPDATE risorse SET nome=${p.nome}, cognome=${p.cognome}, email=${email}, manager_id=${managerId},
+            is_senior = CASE WHEN ${keepSenior}::boolean THEN is_senior ELSE ${isSenior} END,
+            is_manager = ${isManager} OR (${keepSenior}::boolean AND is_senior), load_cost=${loadCost},
             employee_id = CASE WHEN ${keepEmp}::boolean THEN employee_id ELSE ${employeeId} END WHERE id=${p.id}`;
+  if (!keepSenior && isSenior) await _setSeniorTeam(p.id, p.managerIds);
   await sql`DELETE FROM allocazioni WHERE risorsa_id=${p.id}`;
   for(const nome of (p.progetti || [])){
     await sql`INSERT INTO allocazioni (risorsa_id, progetto_id)
@@ -655,7 +678,7 @@ async function getPresenze(p, ctx){
   const me = ctx.id || 0, all = !!ctx.admin;
   const rows = await sql`SELECT risorsa_id, data::text AS data FROM presenze
     WHERE data BETWEEN ${p.from}::date AND ${p.to}::date
-      AND (${all}::boolean OR risorsa_id = ${me} OR risorsa_id IN (SELECT id FROM risorse WHERE manager_id = ${me})
+      AND (${all}::boolean OR risorsa_id = ${me} OR risorsa_id = ANY(${[...ctx.team]}::int[])
            OR risorsa_id IN (SELECT a2.risorsa_id FROM allocazioni a1 JOIN allocazioni a2 ON a2.progetto_id = a1.progetto_id WHERE a1.risorsa_id = ${me}))
     ORDER BY data`;
   return rows;
@@ -904,9 +927,10 @@ async function sollecitaForecast(p) {
   const meseLabel = `${_MESI_IT[mese]} ${anno}`;
 
   // Risorse del manager con email
+  const teamIds = (await _teamOf(p.managerId)).team;
   const risorse = await sql`
     SELECT id, full_name, email FROM risorse
-    WHERE manager_id = ${p.managerId}
+    WHERE id = ANY(${teamIds}::int[])
       AND email IS NOT NULL AND email <> ''
     ORDER BY cognome, nome`;
 
@@ -917,7 +941,7 @@ async function sollecitaForecast(p) {
     SELECT risorsa_id, ore_q1, ore_q2
     FROM ore_mensili
     WHERE anno = ${anno} AND mese = ${mese}
-      AND risorsa_id IN (SELECT id FROM risorse WHERE manager_id = ${p.managerId})`;
+      AND risorsa_id = ANY(${teamIds}::int[])`;
   const oreByRes = {};
   oreRows.forEach(r => { oreByRes[r.risorsa_id] = r; });
 
@@ -1113,7 +1137,7 @@ async function getConsuntivo(p, ctx){
     JOIN risorse r ON r.id = dh.risorsa_id
     WHERE EXTRACT(YEAR  FROM dh.data) = ${anno}
       AND EXTRACT(MONTH FROM dh.data) = ${mese + 1}
-      AND (${all}::boolean OR dh.risorsa_id = ${me} OR (${mgr}::boolean AND r.manager_id = ${me})
+      AND (${all}::boolean OR dh.risorsa_id = ${me} OR (${mgr}::boolean AND dh.risorsa_id = ANY(${[...ctx.team]}::int[]))
            OR dh.risorsa_id IN (SELECT risorsa_id FROM allocazioni WHERE progetto_id = ANY(${tlPrj}::int[])))
     ORDER BY dh.risorsa_id, dh.data`;
   return rows;
@@ -1785,6 +1809,21 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
 // ════════════════════════════════════════════════════════════════════════
 const _unauth = () => new HttpError(401, 'Sessione scaduta o non valida: accedi di nuovo');
 const _NO_ROLES = { tlPrj: new Set(), areaTlPrj: new Set(), team: new Set(), mgrPrj: new Set() };
+// Team di un manager: i suoi riporti diretti. Se è Senior Manager anche i team dei suoi riporti
+// (i manager associati), e così via finché nella catena c'è un Senior Manager.
+// Riga (id, ps): ps = il manager di questa risorsa è Senior, quindi anche i suoi riporti fanno parte del team.
+async function _teamOf(mid){
+  mid = +mid || 0;
+  const [r] = await sql`
+    WITH RECURSIVE t(id, ps) AS (
+      SELECT c.id, COALESCE((SELECT is_senior FROM risorse WHERE id = ${mid}), FALSE) FROM risorse c WHERE c.manager_id = ${mid}
+      UNION
+      SELECT c.id, p.is_senior FROM t JOIN risorse p ON p.id = t.id JOIN risorse c ON c.manager_id = t.id WHERE t.ps
+    )
+    SELECT ARRAY(SELECT DISTINCT id FROM t WHERE id <> ${mid}) AS team,
+           ARRAY(SELECT DISTINCT progetto_id FROM allocazioni WHERE risorsa_id IN (SELECT id FROM t WHERE id <> ${mid})) AS prj`;
+  return { team: (r.team || []).map(Number), prj: (r.prj || []).map(Number) };
+}
 
 async function loadCtx(token){
   const s = readSession(token);
@@ -1794,19 +1833,16 @@ async function loadCtx(token){
     if (!r || pwdVersion(r.valore) !== s.pv) throw _unauth();
     return { admin: true, id: null, manager: false, ..._NO_ROLES };
   }
-  const [r] = await sql`
-    SELECT r.id, r.is_manager, u.pwd_hash,
+  const [[r], tm] = await Promise.all([sql`
+    SELECT r.id, r.is_manager, r.is_senior, u.pwd_hash,
            ARRAY(SELECT progetto_id FROM progetto_team_leads WHERE risorsa_id = r.id) AS tl,
-           ARRAY(SELECT DISTINCT progetto_id FROM aree WHERE team_lead_id = r.id) AS atl,
-           ARRAY(SELECT id FROM risorse WHERE manager_id = r.id) AS team,
-           ARRAY(SELECT DISTINCT a.progetto_id FROM allocazioni a JOIN risorse t ON t.id = a.risorsa_id
-                 WHERE t.manager_id = r.id) AS mgr_prj
+           ARRAY(SELECT DISTINCT progetto_id FROM aree WHERE team_lead_id = r.id) AS atl
     FROM risorse r LEFT JOIN utenti_pwd u ON u.risorsa_id = r.id
-    WHERE r.id = ${+s.sub || 0}`;
+    WHERE r.id = ${+s.sub || 0}`, _teamOf(s.sub)]);
   if (!r || !r.pwd_hash || pwdVersion(r.pwd_hash) !== s.pv) throw _unauth();
   const set = a => new Set((a || []).map(Number));
-  return { admin: false, id: +r.id, manager: !!r.is_manager,
-           tlPrj: set(r.tl), areaTlPrj: set(r.atl), team: set(r.team), mgrPrj: set(r.mgr_prj) };
+  return { admin: false, id: +r.id, manager: !!r.is_manager || !!r.is_senior, senior: !!r.is_senior,
+           tlPrj: set(r.tl), areaTlPrj: set(r.atl), team: set(tm.team), mgrPrj: set(tm.prj) };
 }
 
 const _prjsOf = async rid => (await sql`SELECT progetto_id FROM allocazioni WHERE risorsa_id=${rid}`).map(r => +r.progetto_id);
@@ -1826,6 +1862,11 @@ const mustElevated = ctx => { if (!isElevated(ctx)) deny('Operazione riservata a
 const mustManage   = (ctx, pid) => { if (!canManageProject(ctx, pid)) deny('Non gestisci questo progetto'); };
 // Anagrafica progetti: admin, oppure manager sui progetti delle sue risorse (come l'elenco in Admin)
 const mustMgrPrj   = (ctx, pid) => { if (!ctx.admin && !(ctx.manager && ctx.mgrPrj.has(+pid))) deny('Non gestisci questo progetto'); };
+async function _byManager(p, c, edit){
+  const mid = +p.managerId;
+  const ok = mid && (mid === c.id || (c.team.has(mid) && (await sql`SELECT 1 FROM risorse WHERE id=${mid} AND is_manager`).length));
+  return { ...p, managerId: ok ? mid : c.id, isSenior: edit ? undefined : false, managerIds: [] };
+}
 const mustResAdmin = (ctx, rid) => { if (!canAdminResource(ctx, V.id(rid, 'Risorsa'))) deny('Puoi gestire solo le risorse del tuo team'); };
 const mustPerson   = ctx => { if (ctx.admin) deny('Operazione non disponibile per l\'amministratore'); };
 function _found(rows){
@@ -1885,8 +1926,10 @@ const ACTIONS = {
   userHasPwd:   (p, c) => { mustElevated(c); return userHasPwd(p); },
   resetUserPwd: (p, c) => { mustResAdmin(c, p.risorsaId); return resetUserPwd(p); },
   // Il manager aggiunge e modifica solo risorse del proprio team, di cui resta il manager
-  addResource:    (p, c) => { mustElevated(c); return addResource(c.admin ? p : { ...p, managerId: c.id }); },
-  saveEdit:       (p, c) => { mustResAdmin(c, p.id); return saveEdit(c.admin ? p : { ...p, managerId: c.id }); },
+  // Il manager aggiunge e modifica solo risorse del proprio team: ne resta manager lui o, per il Senior Manager,
+  // uno dei manager associati. Il ruolo Senior Manager e i manager associati li gestisce solo l'admin.
+  addResource:    async (p, c) => { mustElevated(c); return addResource(c.admin ? p : await _byManager(p, c, false)); },
+  saveEdit:       async (p, c) => { mustResAdmin(c, p.id); return saveEdit(c.admin ? p : await _byManager(p, c, true)); },
   deleteResource: (p, c) => { mustResAdmin(c, p.id); return deleteResource(p); },
   setResourceManager: (p, c) => { mustAdmin(c); return setResourceManager(p); },
   toggleIsManager:    (p, c) => { mustAdmin(c); return toggleIsManager(p); },

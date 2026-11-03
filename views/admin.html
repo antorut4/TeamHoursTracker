@@ -23,9 +23,11 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <label class="mgr-check-label"><input type="checkbox" id="resIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+          <label class="mgr-check-label senior-only" style="display:none"><input type="checkbox" id="resIsSenior" onchange="toggleSeniorBox('res')"/> <span><i class="fa-solid fa-crown"></i> È Senior Manager</span></label>
           <button class="btn btn-amber" onclick="addResource()"><i class="fa-solid fa-plus"></i> Aggiungi</button>
         </div>
       </div>
+      <div class="senior-box" id="resSeniorBox" style="display:none"><label>Manager associati</label><p class="senior-hint">Il Senior Manager diventa il manager di questi manager e ottiene i loro stessi permessi sulle loro risorse.</p><div class="senior-mgrs" id="resSeniorMgrs"></div></div>
       <div id="addResMsg" class="msg"></div>
     </div>
   </div>
@@ -66,12 +68,14 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <label class="mgr-check-label"><input type="checkbox" id="editIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+          <label class="mgr-check-label senior-only" style="display:none"><input type="checkbox" id="editIsSenior" onchange="toggleSeniorBox('edit')"/> <span><i class="fa-solid fa-crown"></i> È Senior Manager</span></label>
           <div style="display:flex;gap:7px">
             <button class="btn btn-amber" onclick="saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
             <button class="btn btn-ghost2" onclick="cancelEdit()">Annulla</button>
           </div>
         </div>
       </div>
+      <div class="senior-box" id="editSeniorBox" style="display:none"><label>Manager associati</label><p class="senior-hint">Il Senior Manager diventa il manager di questi manager e ottiene i loro stessi permessi sulle loro risorse.</p><div class="senior-mgrs" id="editSeniorMgrs"></div></div>
       <div id="editMsg" class="msg"></div>
     </div>
   </div>

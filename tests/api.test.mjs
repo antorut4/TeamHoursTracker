@@ -338,3 +338,53 @@ test('richieste malformate', async () => {
   assert.equal((await db.handler({ httpMethod: 'POST', body: '{"action":"bootstrap","payload":[1]}' })).statusCode, 400);
   assert.equal((await call('toString', {}, T.admin)).status, 400, 'niente accesso a proprietà ereditate');
 });
+
+// ── Senior Manager: eredita i team dei manager associati ──
+test('senior manager: associazione dei manager, permessi ereditati, niente cicli', async () => {
+  const mgrOf = async id => (await sql`SELECT manager_id FROM risorse WHERE id=${id}`)[0].manager_id;
+  // L'admin crea la Senior Manager e le associa Mario (manager di Anna)
+  const add = await call('addResource', { nome: 'Silvia', cognome: 'Alti', email: 'silvia@x.it', progetti: [], isSenior: true, managerIds: [ID.mario] }, T.admin);
+  assert.equal(add.status, 200, add.error);
+  const [sv] = await sql`SELECT id, is_manager, is_senior FROM risorse WHERE email='silvia@x.it'`;
+  assert.equal(sv.is_senior, true);
+  assert.equal(sv.is_manager, true, 'il Senior Manager è anche manager');
+  assert.equal(await mgrOf(ID.mario), sv.id);
+  await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${sv.id}, ${await hashPassword(PASS)})`;
+  const ts = (await call('login', { risorsaId: sv.id, password: PASS })).data.token;
+
+  // Vede e gestisce le risorse di Mario come se fosse il loro manager, e Mario stesso
+  assert.equal((await call('setDailyReminder', { risorsaId: ID.anna, value: true }, ts)).status, 200);
+  assert.equal((await call('setDailyReminder', { risorsaId: ID.mario, value: true }, ts)).status, 200);
+  assert.equal((await call('setDailyReminder', { risorsaId: ID.sara, value: true }, ts)).status, 403, 'Sara non è nel suo team');
+  await sql`INSERT INTO ore_mensili (risorsa_id, anno, mese, ore_q1) VALUES (${ID.anna}, 2026, 11, 80), (${ID.sara}, 2026, 11, 80) ON CONFLICT DO NOTHING`;
+  const boot = (await call('bootstrap', {}, ts)).data;
+  assert.ok(boot.ore.some(o => o.risorsa_id === ID.anna && o.mese === 11), 'vede le ore delle risorse ereditate');
+  assert.ok(!boot.ore.some(o => o.risorsa_id === ID.sara), 'non quelle di chi è fuori dal suo team');
+  await sql`INSERT INTO presenze (risorsa_id, data) VALUES (${ID.anna}, '2026-12-01'), (${ID.sara}, '2026-12-01')`;
+  const pres = (await call('getPresenze', { from: '2026-12-01', to: '2026-12-01' }, ts)).data.map(r => r.risorsa_id);
+  assert.deepEqual(pres, [ID.anna]);
+  await sql`INSERT INTO daily_hours (risorsa_id, data, ore) VALUES (${ID.anna}, '2026-12-01', 8)`;
+  assert.deepEqual((await call('getConsuntivo', { anno: 2026, mese: 11 }, ts)).data.map(r => r.risorsa_id), [ID.anna]);
+  // Mario resta un manager normale: non gestisce la sua Senior Manager
+  assert.equal((await call('setDailyReminder', { risorsaId: sv.id, value: true }, T.mario)).status, 403);
+
+  // Nuova risorsa: la Senior Manager può assegnarla a un suo manager, non a una risorsa qualsiasi
+  await call('addResource', { nome: 'Nuovo', cognome: 'Uno', email: 'n1@x.it', progetti: [], managerId: ID.mario }, ts);
+  await call('addResource', { nome: 'Nuovo', cognome: 'Due', email: 'n2@x.it', progetti: [], managerId: ID.anna, isSenior: true }, ts);
+  const [n1] = await sql`SELECT manager_id, is_senior FROM risorse WHERE email='n1@x.it'`;
+  const [n2] = await sql`SELECT manager_id, is_senior FROM risorse WHERE email='n2@x.it'`;
+  assert.equal(n1.manager_id, ID.mario);
+  assert.equal(n2.manager_id, sv.id, 'Anna non è manager: la risorsa resta alla Senior Manager');
+  assert.equal(n2.is_senior, false, 'solo l\'admin assegna il ruolo Senior Manager');
+
+  // Ciclo: Mario non può diventare Senior Manager di chi gli sta sopra
+  const cyc = await call('saveEdit', { id: ID.mario, nome: 'Mario', cognome: 'Rossi', email: 'mario@x.it', progetti: [], managerId: sv.id, isManager: true, isSenior: true, managerIds: [sv.id] }, T.admin);
+  assert.equal(cyc.status, 400);
+  assert.match(cyc.error, /sopra/);
+
+  // Tolto Mario dall'elenco, la Senior Manager perde il suo team
+  const rm = await call('saveEdit', { id: sv.id, nome: 'Silvia', cognome: 'Alti', email: 'silvia@x.it', progetti: [], isManager: true, isSenior: true, managerIds: [] }, T.admin);
+  assert.equal(rm.status, 200, rm.error);
+  assert.equal(await mgrOf(ID.mario), null);
+  assert.equal((await call('setDailyReminder', { risorsaId: ID.anna, value: true }, ts)).status, 403);
+});

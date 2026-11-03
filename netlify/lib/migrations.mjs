@@ -224,6 +224,14 @@ export const MIGRATIONS = [
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       )`
     ]
+  },
+  {
+    version: 6,
+    name: 'risorse.is_senior: Senior Manager, eredita i team dei manager associati',
+    up: sql => [
+      sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS is_senior BOOLEAN NOT NULL DEFAULT FALSE`,
+      sql`UPDATE risorse SET is_manager = TRUE WHERE is_senior AND NOT is_manager`
+    ]
   }
 ];
 

@@ -71,7 +71,7 @@ async function renderResourcesByProject(){
   el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${_esc(prj)} · TL: ${_esc(tlLabel)}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${_esc(r.fullName)}</div><div class="rmeta">${_esc((r.progetti||[]).join(', ')||'—')}</div></div></div>`).join('');
 }
 async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(isTeamLead&&!isAdmin)?_getManagerProjects():(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
-function _getManagerProjects(){const myResPrjs=new Set(RESOURCES.filter(r=>r.managerName===currentUser).flatMap(r=>r.progetti||[]));return(_cache.prj||[]).filter(p=>myResPrjs.has(p)).sort();}
+function _getManagerProjects(){const team=new Set(getLeadTeam()),myResPrjs=new Set(RESOURCES.filter(r=>team.has(r.fullName)).flatMap(r=>r.progetti||[]));return(_cache.prj||[]).filter(p=>myResPrjs.has(p)).sort();}
 async function renderProjectList(){
   const prjsFull=(isTeamLead&&!isAdmin)?_getManagerProjects():(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
   if(!prjsFull.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
@@ -124,7 +124,7 @@ async function addResource(){
   addProgettoTag('res');
   const nome=document.getElementById('resNome').value.trim(),cognome=document.getElementById('resCognome').value.trim();
   const progetti=getProgettoSelected('res');
-  const managerName=isTeamLead?currentUser:(document.getElementById('resManagerSel')?.value||'');
+  const managerName=(isTeamLead&&!isSeniorManager)?currentUser:(document.getElementById('resManagerSel')?.value||'');
   const managerRes=managerName?RESOURCES.find(r=>r.fullName===managerName):null;
   const managerId=managerRes?managerRes.id:null;
   const isManager=!!(document.getElementById('resIsManager')?.checked);
@@ -134,12 +134,14 @@ async function addResource(){
   const fn=nome+' '+cognome;if(RESOURCES.find(r=>r.fullName.toLowerCase()===fn.toLowerCase())){showMsg('addResMsg','Risorsa già presente.','err');return;}
   const loadCost=(document.getElementById('resLC')?.value||'').replace(/,/g,'.');
   const employeeId=(document.getElementById('resEmpId')?.value||'').trim();
-  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  const sr=isAdmin?_seniorFields('res'):{};
+  showSpinner();try{await call('addResource',{nome,cognome,email,progetti,managerId,isManager,...sr,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('addResMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('resNome').value='';document.getElementById('resCognome').value='';
   if(document.getElementById('resEmail'))document.getElementById('resEmail').value='';
   if(document.getElementById('resLC'))document.getElementById('resLC').value='';
   if(document.getElementById('resEmpId'))document.getElementById('resEmpId').value='';
   if(document.getElementById('resIsManager'))document.getElementById('resIsManager').checked=false;
+  _setSeniorFields('res',null);
   populateProgettoSelect('res',[]);
   await renderResourceList();refreshDropdowns();checkAlerts();showMsg('addResMsg',fn+' aggiunto/a','ok');
 }
@@ -148,8 +150,9 @@ async function renderResourceList(){
   const fl=document.getElementById('filterResLead');if(fl){const pv=fl.value;fl.innerHTML='<option value="">Tutti i team lead</option>';getLeads().forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;if(l===pv)o.selected=true;fl.appendChild(o);});}
   const el=document.getElementById('resourceList');if(!el)return;
   if(!RESOURCES.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa ancora.</p>';return;}
+  const myTeam=new Set(getLeadTeam());
   let filtered=RESOURCES.filter(r=>{
-    if(isTeamLead&&!isAdmin&&r.managerName!==currentUser)return false;
+    if(isTeamLead&&!isAdmin&&!myTeam.has(r.fullName))return false;
     if(lf&&!r.progetti.some(p=>(_prjTLsByName[p]||[]).includes(lf)))return false;
     if(search&&!r.fullName.toLowerCase().includes(search))return false;
     return true;
@@ -160,12 +163,15 @@ async function renderResourceList(){
   filtered.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName)).forEach(r=>{
     const idx=RESOURCES.indexOf(r),hasPwd=!!pwds[r.id];
     const prjMeta=_esc((r.progetti||[]).join(' · ')||'—');
-    const mgrBadge=r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
+    const assoc=r.isSenior?RESOURCES.filter(x=>x.managerId===r.id&&x.isManager).map(x=>x.fullName):[];
+    const mgrBadge=r.isSenior?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-crown" style="margin-right:3px"></i>Senior Manager</span> `
+      :r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
+    const assocMeta=r.isSenior?`<span style="color:var(--ink-2);font-size:.72rem"><i class="fa-solid fa-people-group" style="margin-right:3px"></i>Manager associati: ${assoc.length?_esc(assoc.join(', ')):'nessuno'}</span> · `:'';
     const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${_esc(r.managerName)}</span> · `:'';
     const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${_esc(r.email)}</span> · `:'';
     const lcMeta=(isAdmin||isTeamLead)&&r.loadCost!=null?`<span style="color:var(--amber);font-size:.72rem;font-weight:600"><i class="fa-solid fa-euro-sign" style="margin-right:2px"></i>LC: ${_esc(r.loadCost)}</span> · `:'';
     const empMeta=(isAdmin||isTeamLead)&&r.employeeId?`<span style="color:var(--ink-2);font-size:.72rem;font-weight:600"><i class="fa-solid fa-id-badge" style="margin-right:3px"></i>Emp. ${_esc(r.employeeId)}</span> · `:'';
-    h+=`<div class="resource-row"><div><div class="rname">${_esc(r.fullName)} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${empMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},${_jsa(r.fullName)})">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},${_jsa(r.fullName)})"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    h+=`<div class="resource-row"><div><div class="rname">${_esc(r.fullName)} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${assocMeta}${lcMeta}${empMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},${_jsa(r.fullName)})">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},${_jsa(r.fullName)})"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
@@ -180,12 +186,34 @@ function startEdit(idx){
   const eeEl=document.getElementById('editEmail');if(eeEl)eeEl.value=r.email||'';
   const emSel=document.getElementById('editManagerSel');if(emSel)emSel.value=r.managerName||'';
   const emChk=document.getElementById('editIsManager');if(emChk)emChk.checked=!!r.isManager;
+  _setSeniorFields('edit',r);
   const elcEl=document.getElementById('editLC');if(elcEl)elcEl.value=r.loadCost!=null?r.loadCost:'';
   const eempEl=document.getElementById('editEmpId');if(eempEl)eempEl.value=r.employeeId||'';
   const ec=document.getElementById('editCard');ec.style.display='block';
   const eb=ec.querySelector('.acc-body'),ebtn=ec.querySelector('.acc-toggle');
   if(eb&&!eb.classList.contains('open')){eb.classList.add('open');if(ebtn)ebtn.innerHTML='<i class="fa-solid fa-chevron-up"></i>';}
   ec.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+// Senior Manager (solo admin): spunta del ruolo ed elenco dei manager associati, che ereditano lui come manager
+function _setSeniorFields(prefix,r){
+  const chk=document.getElementById(prefix+'IsSenior');if(!chk)return;
+  chk.checked=!!r?.isSenior;
+  const box=document.getElementById(prefix+'SeniorMgrs');
+  const cands=RESOURCES.filter(x=>x.isManager&&(!r||x.id!==r.id)).sort((a,b)=>a.fullName.localeCompare(b.fullName,'it'));
+  box.innerHTML=cands.length?cands.map(x=>`<label class="mgr-check-label"><input type="checkbox" value="${x.id}"${r&&x.managerId===r.id?' checked':''}/> <span>${_esc(x.fullName)}${x.isSenior?' <small>(Senior)</small>':''}</span></label>`).join('')
+    :'<span style="font-size:.8rem;color:var(--ink-3)">Nessun manager disponibile: prima segna come manager le risorse da associare.</span>';
+  toggleSeniorBox(prefix);
+}
+function toggleSeniorBox(prefix){
+  const chk=document.getElementById(prefix+'IsSenior'),wrap=document.getElementById(prefix+'SeniorBox');
+  if(chk&&wrap)wrap.style.display=chk.checked?'':'none';
+  // Il Senior Manager è sempre anche manager
+  const mgr=document.getElementById(prefix+'IsManager');if(chk?.checked&&mgr)mgr.checked=true;
+}
+function _seniorFields(prefix){
+  const chk=document.getElementById(prefix+'IsSenior');if(!chk)return{};
+  const ids=chk.checked?[...document.querySelectorAll('#'+prefix+'SeniorMgrs input:checked')].map(i=>+i.value):[];
+  return{isSenior:chk.checked,managerIds:ids};
 }
 function cancelEdit(){document.getElementById('editCard').style.display='none';}
 async function saveEdit(){
@@ -201,7 +229,8 @@ async function saveEdit(){
   const loadCost=(document.getElementById('editLC')?.value||'').replace(/,/g,'.');
   // campo nascosto (stessa visibilità del LC) → employeeId non inviato, il server lo lascia invariato
   const empEl=document.getElementById('editEmpId'),employeeId=empEl&&document.getElementById('editEmpField')?.style.display!=='none'?empEl.value.trim():undefined;
-  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
+  const sr=isAdmin?_seniorFields('edit'):{};
+  showSpinner();try{await call('saveEdit',{id:rid,nome,cognome,email,progetti,managerId,isManager,...sr,loadCost:loadCost!==''?+loadCost:null,employeeId});await reloadAll();}catch(e){hideSpinner();showMsg('editMsg','Errore: '+e.message,'err');return;}hideSpinner();
   document.getElementById('editCard').style.display='none';await renderResourceList();refreshDropdowns();showMsg('resourceMsg',newFN+' aggiornato/a','ok');
 }
 async function deleteResource(idx,name){openModal('Elimina risorsa','Eliminare "'+name+'"? Verranno rimossi ore, ferie e reperibilità associati.',async()=>{const rid=RESOURCES[idx].id;showSpinner();try{await call('deleteResource',{id:rid});await reloadAll();}catch(e){hideSpinner();showMsg('resourceMsg','Errore: '+e.message,'err');return;}hideSpinner();await renderResourceList();refreshDropdowns();showMsg('resourceMsg',name+' eliminato/a.','ok');},'Elimina');}

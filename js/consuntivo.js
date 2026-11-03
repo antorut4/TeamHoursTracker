@@ -31,8 +31,8 @@ function _consuntivoVisibleIds(){
   const me=_me();if(!me)return null;
   const tlPrjs=new Set(Object.entries(_prjTLsByName).filter(([,tls])=>tls.includes(currentUser)).map(([p])=>p));
   if(!isTeamLead&&!tlPrjs.size)return null;
-  const ids=new Set([me.id]);
-  RESOURCES.forEach(r=>{if((isTeamLead&&r.managerName===currentUser)||(r.progetti||[]).some(p=>tlPrjs.has(p)))ids.add(r.id);});
+  const ids=new Set([me.id]),team=new Set(getLeadTeam());
+  RESOURCES.forEach(r=>{if((isTeamLead&&team.has(r.fullName))||(r.progetti||[]).some(p=>tlPrjs.has(p)))ids.add(r.id);});
   return ids;
 }
 async function loadConsuntivo(){

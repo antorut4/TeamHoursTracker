@@ -114,7 +114,7 @@ export const deny = (msg = 'Operazione non consentita per il tuo profilo') => { 
 // ctx = { admin, id, manager, tlPrj:Set, areaTlPrj:Set, team:Set, mgrPrj:Set }
 //   tlPrj     progetti di cui è Team Lead
 //   areaTlPrj progetti in cui è Team Lead di almeno un'area
-//   team      risorse di cui è manager
+//   team      risorse di cui è manager; per il Senior Manager anche i manager associati e i loro team
 //   mgrPrj    progetti su cui sono allocate le risorse del suo team
 export const isElevated = ctx => ctx.admin || ctx.manager;
 

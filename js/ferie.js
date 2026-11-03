@@ -108,7 +108,7 @@ function renderAdminFerieCalendar(){
   el.innerHTML=h+'</tbody></table>';
 }
 function getMyTeamMembers(){
-  if(isTeamLead){const t=RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);return t.includes(currentUser)?t:[currentUser,...t];}
+  if(isTeamLead){const t=getLeadTeam();return t.includes(currentUser)?t:[currentUser,...t];}
   return getMyProjectColleagues();
 }
 function _shareProject(a,b){const pa=new Set(RESOURCES.find(r=>r.fullName===a)?.progetti||[]);return(RESOURCES.find(r=>r.fullName===b)?.progetti||[]).some(p=>pa.has(p));}

@@ -38,7 +38,7 @@ async function reloadAll(){
     if(!byRes[a.risorsa_id])byRes[a.risorsa_id]=[];
     byRes[a.risorsa_id].push(_prjNameById[a.progetto_id]);
   });
-  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager,loadCost:r.load_cost!=null?+r.load_cost:null,dailyReminder:r.daily_reminder!==false,employeeId:r.employee_id||''}));
+  RESOURCES=(d.risorse||[]).map(r=>({id:r.id,nome:r.nome,cognome:r.cognome,fullName:r.full_name,email:(r.email||'').toLowerCase(),progetti:(byRes[r.id]||[]).filter(Boolean),managerId:r.manager_id||null,managerName:r.manager_id?nameById[r.manager_id]||null:null,isManager:!!r.is_manager||!!r.is_senior,isSenior:!!r.is_senior,loadCost:r.load_cost!=null?+r.load_cost:null,dailyReminder:r.daily_reminder!==false,employeeId:r.employee_id||''}));
   _cache.res=RESOURCES;
   _cache.hrs=(d.ore||[]).map(o=>({id:o.id,risorsaId:o.risorsa_id,anno:+o.anno,mese:+o.mese,ore_q1:o.ore_q1!=null?+o.ore_q1:null,note_q1:o.note_q1,ore_q2:o.ore_q2!=null?+o.ore_q2:null,note_q2:o.note_q2}));
   _cache.fer=(d.ferie||[]).map(f=>({id:f.id,risorsaId:f.risorsa_id,start:(f.data_inizio||'').slice(0,10),end:(f.data_fine||'').slice(0,10),tipo:f.tipo,note:f.note,oraInizio:f.ora_inizio||null,oraFine:f.ora_fine||null}));
@@ -60,11 +60,19 @@ const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','
 const TIPO_C=t=>t==='Ferie'?'#6D28D9':t==='Malattia'?'#BE123C':t==='Assenza'?'#6B7280':'#047857';
 const PAL=['#6D28D9','#1D4ED8','#047857','#DB2777','#0E7490','#B45309','#7C3AED','#2563EB','#0F766E','#BE123C','#4F46E5','#C026D3'];
 const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
-let currentUser=null,isAdmin=false,isTeamLead=false,isProjectTL=false,RESOURCES=[];
+let currentUser=null,isAdmin=false,isTeamLead=false,isSeniorManager=false,isProjectTL=false,RESOURCES=[];
 function _resByName(name){return RESOURCES.find(x=>x.fullName===name);}
 let _loginRisorsaId=null,_loginFullName='';
-function getMembers(manager){return manager?RESOURCES.filter(r=>r.managerName===manager).map(r=>r.fullName):RESOURCES.map(r=>r.fullName);}
-function getLeadTeam(){return RESOURCES.filter(r=>r.managerName===currentUser).map(r=>r.fullName);}
+// Team di un manager: i suoi riporti diretti; per il Senior Manager anche i team dei manager associati
+// (e via così finché nella catena c'è un Senior Manager). Stessa regola usata dal server per i permessi.
+function getTeamOf(manager){
+  const out=[],seen=new Set([manager]);
+  const walk=n=>{const senior=!!RESOURCES.find(r=>r.fullName===n)?.isSenior;
+    RESOURCES.filter(r=>r.managerName===n).forEach(r=>{if(seen.has(r.fullName))return;seen.add(r.fullName);out.push(r.fullName);if(senior)walk(r.fullName);});};
+  walk(manager);return out;
+}
+function getMembers(manager){return manager?getTeamOf(manager):RESOURCES.map(r=>r.fullName);}
+function getLeadTeam(){return getTeamOf(currentUser);}
 function getLeads(){return RESOURCES.filter(r=>r.isManager).map(r=>r.fullName).sort();}
 function getLeadForMember(fullName){const r=RESOURCES.find(x=>x.fullName===fullName);return r?.managerName||'—';}
 function colorFor(name){const i=RESOURCES.findIndex(r=>r.fullName===name);return PAL[i%PAL.length]||'#6D28D9';}
