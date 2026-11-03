@@ -1,0 +1,52 @@
+<!-- REPERIBILITA -->
+<div class="panel" id="panel-reperibilita">
+  <div class="page-header"><h1>Reperibilità</h1></div>
+  <div id="repUserView">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-tower-broadcast"></i> Le mie reperibilità</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+        <select id="repUserMonth" onchange="renderRepMine()" style="font-size:.83rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink)"></select>
+        <select id="repUserYear" onchange="renderRepMine()" style="font-size:.83rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink)"></select>
+      </div>
+      <div id="repMyList"></div>
+    </div>
+  </div>
+  <div id="repLeadView" style="display:none">
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-plus"></i> Inserisci reperibilità</div>
+      <div class="field-row" style="flex-wrap:wrap">
+        <div class="field" style="max-width:210px"><label>Progetto *</label><select id="repProgetto" onchange="buildRepGriglia()"><option value="">— Seleziona —</option></select></div>
+        <div class="field" style="max-width:220px"><label>Mese / Anno</label>
+          <div style="display:flex;gap:6px"><select id="repMonth" onchange="buildRepGriglia()" style="flex:1"></select><select id="repYear" onchange="buildRepGriglia()" style="flex:1"></select></div>
+        </div>
+      </div>
+      <div style="font-size:.75rem;color:var(--ink-3);margin-bottom:6px"><i class="fa-solid fa-circle-info" style="margin-right:4px"></i>Sabato/Domenica <b style="color:var(--amber)">€40</b> · Giorni feriali <b>€25</b> · <span style="color:var(--amber);font-weight:600">F</span> = in ferie (clicca per assegnare comunque)</div>
+      <div style="margin:10px 0 4px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)">Range rapido</div>
+      <div class="field-row">
+        <div class="field" style="max-width:150px"><label>Dal</label><input type="date" id="repRangeStart"/></div>
+        <div class="field" style="max-width:150px"><label>Al</label><input type="date" id="repRangeEnd"/></div>
+        <div><button class="btn btn-amber btn-sm" onclick="applyRepRange()">Applica range</button></div>
+        <div><button class="btn btn-ghost2 btn-sm" onclick="clearRepGriglia()">Deseleziona tutto</button></div>
+      </div>
+      <div class="rep-grid-wrap" id="repGrigliaWrap" style="display:none"><div id="repGriglia"></div></div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ink" onclick="saveReperibilita()"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
+        <div id="repMsg" class="msg"></div>
+      </div>
+    </div>
+    <div class="card" id="repExportCard" style="display:none">
+      <div class="card-title"><i class="fa-solid fa-file-excel"></i> Export Excel reperibilità</div>
+      <p style="font-size:.78rem;color:var(--ink-3);margin:-8px 0 14px">Progetto e mese sono quelli selezionati sopra. Una riga per risorsa, giorno e sistema; il foglio prende il nome del mese.</p>
+      <div id="repExportBody"></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fa-solid fa-list"></i> Reperibilità del team</div>
+      <div class="search-row">
+        <select id="repFilterRisorsa" onchange="renderRepTeam()"><option value="">Tutte le risorse</option></select>
+        <select id="repFilterAnno" onchange="renderRepTeam()"><option value="">Tutti gli anni</option></select>
+        <select id="repFilterMese" onchange="renderRepTeam()"><option value="">Tutti i mesi</option></select>
+      </div>
+      <div id="repTeamList"><p style="color:var(--ink-3);font-size:.84rem">Nessuna reperibilità inserita.</p></div>
+    </div> 
+  </div>
+</div>

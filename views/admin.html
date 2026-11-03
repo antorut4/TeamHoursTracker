@@ -1,0 +1,181 @@
+<!-- ADMIN -->
+<div class="panel" id="panel-admin">
+  <div class="page-header"><h1>Amministrazione</h1><p>Gestione risorse, progetti e configurazione</p></div>
+  <div class="card">
+    <div class="acc-header open">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-user-plus"></i> Aggiungi risorsa</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-up"></i></button>
+    </div>
+    <div class="acc-body open">
+      <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
+        <div class="field"><label>Nome *</label><input type="text" id="resNome" placeholder="Mario" onkeydown="if(event.key==='Enter')addResource()"/></div>
+        <div class="field"><label>Cognome *</label><input type="text" id="resCognome" placeholder="Rossi" onkeydown="if(event.key==='Enter')addResource()"/></div>
+        <div class="field" style="min-width:210px"><label>Email *</label><input type="email" id="resEmail" placeholder="nome.cognome@accenture.com"/></div>
+        <div class="field" style="max-width:130px" id="resLCField"><label>LC (€)</label><input type="text" id="resLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
+        <div class="field" style="max-width:150px" id="resEmpField"><label>Employee ID</label><input type="text" id="resEmpId" maxlength="50" placeholder="facoltativo"/></div>
+        <div class="field" style="min-width:180px"><label>Manager</label><select id="resManagerSel"><option value="">— Nessun manager —</option></select></div>
+        <div class="field" style="min-width:240px"><label>Progetti</label>
+          <div style="display:flex;gap:5px;margin-bottom:5px">
+            <select id="resProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
+            <button type="button" class="btn btn-ghost2 btn-sm" onclick="addProgettoTag('res')" title="Aggiungi progetto"><i class="fa-solid fa-plus"></i></button>
+          </div>
+          <div class="prj-tags" id="resProgettoTags"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="mgr-check-label"><input type="checkbox" id="resIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+          <button class="btn btn-amber" onclick="addResource()"><i class="fa-solid fa-plus"></i> Aggiungi</button>
+        </div>
+      </div>
+      <div id="addResMsg" class="msg"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-users"></i> Risorse attive</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="search-row" style="margin-top:14px">
+        <input type="text" id="searchRes" placeholder="Cerca risorsa..." oninput="renderResourceList()"/>
+        <select id="filterResLead" onchange="renderResourceList()"><option value="">Tutti i team lead</option></select>
+      </div>
+      <div id="resourceList"></div>
+      <div id="resourceMsg" class="msg"></div>
+    </div>
+  </div>
+  <div class="card" id="editCard" style="display:none">
+    <div class="acc-header open">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-pen"></i> Modifica risorsa</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-up"></i></button>
+    </div>
+    <div class="acc-body open">
+      <input type="hidden" id="editIdx"/>
+      <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
+        <div class="field"><label>Nome *</label><input type="text" id="editNome"/></div>
+        <div class="field"><label>Cognome *</label><input type="text" id="editCognome"/></div>
+        <div class="field" style="min-width:210px"><label>Email</label><input type="email" id="editEmail" placeholder="nome.cognome@accenture.com"/></div>
+        <div class="field" style="max-width:130px" id="editLCField"><label>LC (€)</label><input type="text" id="editLC" inputmode="decimal" placeholder="es. 29.9" oninput="this.value=this.value.replace(/,/g,'.')"/></div>
+        <div class="field" style="max-width:150px" id="editEmpField"><label>Employee ID</label><input type="text" id="editEmpId" maxlength="50" placeholder="facoltativo"/></div>
+        <div class="field" style="min-width:180px"><label>Manager</label><select id="editManagerSel"><option value="">— Nessun manager —</option></select></div>
+        <div class="field" style="min-width:240px"><label>Progetti</label>
+          <div style="display:flex;gap:5px;margin-bottom:5px">
+            <select id="editProgettoSel" style="flex:1"><option value="">— Progetto —</option></select>
+            <button type="button" class="btn btn-ghost2 btn-sm" onclick="addProgettoTag('edit')" title="Aggiungi progetto"><i class="fa-solid fa-plus"></i></button>
+          </div>
+          <div class="prj-tags" id="editProgettoTags"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="mgr-check-label"><input type="checkbox" id="editIsManager"/> <span><i class="fa-solid fa-user-tie"></i> È manager</span></label>
+          <div style="display:flex;gap:7px">
+            <button class="btn btn-amber" onclick="saveEdit()"><i class="fa-solid fa-floppy-disk"></i> Salva</button>
+            <button class="btn btn-ghost2" onclick="cancelEdit()">Annulla</button>
+          </div>
+        </div>
+      </div>
+      <div id="editMsg" class="msg"></div>
+    </div>
+  </div>
+  <div class="card" id="adminPrjCard">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-folder"></i> Gestione progetti</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="field-row" style="align-items:flex-end;margin-top:14px">
+        <div class="field"><label>Nome progetto *</label><input type="text" id="newPrjName" placeholder="es. NUOVO AMS" onkeydown="if(event.key==='Enter')addProject()"/></div>
+        <div class="field" style="min-width:220px"><label>Team Lead (multipli)</label><div style="display:flex;flex-direction:column;gap:5px"><div id="newPrjTLTags" style="display:flex;flex-wrap:wrap;gap:4px;min-height:0"></div><select id="newPrjTLSel" onchange="addNewPrjTL()"><option value="">+ Aggiungi Team Lead</option></select></div></div>
+        <div class="field" style="max-width:160px"><label>WBS</label><input type="text" id="newPrjWbs" placeholder="Codice WBS (opz.)"/></div>
+        <div><button class="btn btn-amber" onclick="addProject()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
+      </div>
+      <div id="addPrjMsg" class="msg"></div>
+      <div id="prjList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="card" id="adminResByPrjCard">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-magnifying-glass"></i> Risorse per progetto</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="field-row" style="margin-top:14px">
+        <div class="field"><label>Seleziona progetto</label><select id="searchByProject" onchange="renderResourcesByProject()"><option value="">— Seleziona —</option></select></div>
+      </div>
+      <div id="resourcesByProjectList"></div>
+    </div>
+  </div>
+  <div class="card" id="adminAreeCard" style="display:none">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-sitemap"></i> Gestione aree</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
+        <div class="field" style="min-width:180px"><label>Progetto *</label><select id="newAreaPrj"><option value="">— Seleziona —</option></select></div>
+        <div class="field" style="min-width:180px"><label>Nome area *</label><input type="text" id="newAreaNome" placeholder="es. Area Tecnica" onkeydown="if(event.key==='Enter')addArea()"/></div>
+        <div class="field" style="min-width:180px"><label>Team Lead responsabile</label><select id="newAreaTL"><option value="">— Nessuno —</option></select></div>
+        <div><button class="btn btn-amber" onclick="addArea()"><i class="fa-solid fa-plus"></i> Aggiungi</button></div>
+      </div>
+      <div id="areaMsg" class="msg"></div>
+      <div id="areaList" style="margin-top:12px"></div>
+    </div>
+  </div>
+  <div class="card" id="adminSoglieCard" style="display:none">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-gauge-high"></i> Soglie ticket ed Extra Effort</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <p style="font-size:.78rem;color:var(--ink-3);margin:12px 0">Soglie mensili sul totale ticket (L1+L2+L3) e sulle ore di Extra Effort. Progetto senza aree multiple: soglia a livello di progetto. Progetto con più aree: soglia per singola area (la soglia complessiva di progetto resta facoltativa). Al primo raggiungimento nel mese l'alert va ai Team Lead dell'area e del progetto, con in CC i loro manager e gli eventuali destinatari aggiuntivi.</p>
+      <div id="soglieMsg" class="msg"></div>
+      <div id="soglieList"></div>
+    </div>
+  </div>
+  <div class="card" id="adminPwdCard">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-lock"></i> Password admin</div>
+      <button class="acc-toggle" onclick="toggleAcc(this)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="field-row" style="align-items:flex-end;margin-top:14px">
+        <div class="field" style="max-width:200px"><label>Nuova password</label><input type="password" id="newPwd1" placeholder="Min. 6 caratteri"/></div>
+        <div class="field" style="max-width:200px"><label>Conferma</label><input type="password" id="newPwd2" placeholder="Conferma"/></div>
+        <div><button class="btn btn-amber" onclick="changeAdminPwd()">Aggiorna</button></div>
+      </div>
+      <div id="pwdMsg" class="msg"></div>
+    </div>
+  </div>
+  <div class="card" id="adminEmailLogCard">
+    <div class="acc-header">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-solid fa-envelope-open-text"></i> Log invii email</div>
+      <button class="acc-toggle" onclick="toggleAcc(this);loadEmailLog()"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <div class="acc-body">
+      <div class="field-row" style="align-items:flex-end;margin-top:14px;flex-wrap:wrap">
+        <div class="field" style="max-width:170px"><label>Tipo</label>
+          <select id="emailLogTipo" onchange="loadEmailLog()">
+            <option value="">Tutti</option>
+            <option value="daily_reminder">Reminder ore</option>
+            <option value="assenza">Notifica assenza</option>
+            <option value="sollecito_forecast">Sollecito Forecast</option>
+            <option value="ticket_reminder">Reminder ticket</option>
+            <option value="alert_soglia_ticket">Alert soglia ticket</option>
+            <option value="alert_soglia_ee">Alert soglia Extra Effort</option>
+          </select>
+        </div>
+        <div class="field" style="max-width:150px"><label>Stato</label>
+          <select id="emailLogStato" onchange="loadEmailLog()">
+            <option value="">Tutti</option>
+            <option value="sent">Inviata</option>
+            <option value="error">Errore</option>
+            <option value="skipped">Saltata</option>
+            <option value="run_start">Avvio run</option>
+            <option value="run_end">Fine run</option>
+            <option value="run_error">Crash run</option>
+          </select>
+        </div>
+        <div><button class="btn btn-ghost2" onclick="loadEmailLog()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+      </div>
+      <div id="emailLogContent" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>

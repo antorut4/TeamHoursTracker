@@ -112,6 +112,20 @@ test('blocco dopo 10 tentativi falliti', async () => {
   await sql`DELETE FROM login_attempts`;
 });
 
+// ── ripresa della sessione (refresh della pagina) ──
+test('session: identità e token rinnovato', async () => {
+  const me = await call('session', {}, T.sara);
+  assert.equal(me.status, 200);
+  assert.equal(me.data.admin, false);
+  assert.equal(me.data.risorsaId, ID.sara);
+  assert.equal(me.data.fullName, 'Sara Neri');
+  assert.equal((await call('bootstrap', {}, me.data.token)).status, 200, 'il token rinnovato è valido');
+  const adm = await call('session', {}, T.admin);
+  assert.deepEqual([adm.data.admin, adm.data.fullName], [true, 'ADMIN']);
+  assert.equal((await call('session', {})).status, 401);
+  assert.equal((await call('session', {}, 'scaduto.x')).status, 401);
+});
+
 // ── permessi ──
 test('collaboratore: solo i propri dati', async () => {
   const mine = await call('saveOre', { risorsaId: ID.sara, anno: 2026, mese: 9, ore_q1: 80, ore_q2: 88 }, T.sara);

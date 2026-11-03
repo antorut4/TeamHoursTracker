@@ -725,6 +725,16 @@ async function setAdminPwd(p){
             ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
   return { token: signSession('admin', stored) };
 }
+// Ripresa della sessione (refresh della pagina, nuova scheda): chi è l'utente + token rinnovato,
+// così chi usa l'app con continuità non deve rifare il login ogni 12 ore
+async function session(ctx){
+  if (ctx.admin) {
+    const [r] = await sql`SELECT valore FROM config WHERE chiave='admin_pwd'`;
+    return { admin: true, risorsaId: null, fullName: 'ADMIN', token: signSession('admin', r.valore) };
+  }
+  const [r] = await sql`SELECT r.full_name, u.pwd_hash FROM risorse r JOIN utenti_pwd u ON u.risorsa_id = r.id WHERE r.id=${ctx.id}`;
+  return { admin: false, risorsaId: ctx.id, fullName: r.full_name, token: signSession(ctx.id, r.pwd_hash) };
+}
 async function userHasPwd(p){
   const [r] = await sql`SELECT 1 FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`;
   return !!r;
@@ -1744,6 +1754,7 @@ const PUBLIC = { loginLookup, login, firstAccess, adminLogin, getTicketsByToken,
 // Azioni con login: (payload, ctx). Il controllo dei permessi precede sempre l'esecuzione.
 const ACTIONS = {
   bootstrap: (p, c) => bootstrap(c),
+  session:   (p, c) => session(c),
 
   // ── dati personali ──
   saveOre:        async (p, c) => { await mustActOn(c, p.risorsaId); return saveOre(p); },

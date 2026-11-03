@@ -15,7 +15,7 @@ function _scrypt(pwd, salt) {
   return new Promise((res, rej) => scrypt(pwd, salt, KEYLEN, SCRYPT, (e, k) => e ? rej(e) : res(k)));
 }
 
-// Stessa funzione usata in passato dal client (app.js): serve solo a verificare gli hash legacy
+// Stessa funzione usata in passato dal client (vecchio app.js): serve solo a verificare gli hash legacy
 export function legacyHash(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
