@@ -1,5 +1,5 @@
 /* Classificazione ticket ad alberatura a pulsanti (ticket-cls.js) */
-.tc{--tc-ink:#111827;--tc-mut:#6b7280;--tc-line:#e5e7eb;--tc-acc:#7C5CFC;--tc-acc2:#5B3FE0;--tc-accbg:#EFEBFF;
+.tc{--tc-ink:#111827;--tc-mut:#6b7280;--tc-line:#e5e7eb;--tc-acc:#6D28D9;--tc-acc2:#5B21B6;--tc-accbg:#F1EBFD;
     margin-top:12px;border-top:1px dashed var(--tc-line);padding-top:10px;font-family:inherit}
 .tc-hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
 .tc-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--tc-mut)}
@@ -17,7 +17,7 @@
 .tc-b:disabled{opacity:.45;cursor:not-allowed}
 .tc button:focus-visible{outline:2px solid var(--tc-acc);outline-offset:2px}
 .tc-b.tc-lv{min-width:96px;justify-content:space-between;font-size:14px;font-weight:700;border-left-width:5px}
-.tc-lv.L1{border-left-color:#7C5CFC}
+.tc-lv.L1{border-left-color:#6D28D9}
 .tc-lv.L2{border-left-color:#1f6fc9}
 .tc-lv.L3{border-left-color:#d95926}
 .tc-b.tc-cat::after{content:'›';color:var(--tc-mut);font-size:15px;margin-left:-2px}
@@ -28,7 +28,7 @@
 .tc-list{margin-top:10px;display:flex;flex-direction:column;gap:4px}
 .tc-it{display:flex;align-items:center;gap:8px;padding:4px 4px 4px 8px;border:1px solid var(--tc-line);border-radius:8px;font-size:12.5px;background:#fff}
 .tc-tag{font-size:10.5px;font-weight:700;color:#fff;border-radius:4px;padding:1px 6px;flex-shrink:0}
-.tc-tag.L1{background:#7C5CFC}
+.tc-tag.L1{background:#6D28D9}
 .tc-tag.L2{background:#1f6fc9}
 .tc-tag.L3{background:#b8461b}
 .tc-txt{flex:1;min-width:0;color:var(--tc-ink);font-weight:600}
