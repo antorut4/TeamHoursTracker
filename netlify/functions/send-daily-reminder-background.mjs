@@ -7,6 +7,8 @@
 import { neon }       from '@neondatabase/serverless';
 import { createHmac } from 'crypto';
 import nodemailer      from 'nodemailer';
+import { ensureSchema } from '../lib/migrations.mjs';
+import { claimDailyRun } from '../lib/jobs.mjs';
 
 const sql       = neon(process.env.DATABASE_URL);
 const SECRET    = process.env.DAILY_TOKEN_SECRET;
@@ -95,6 +97,15 @@ export const handler = async () => {
     await logEmail(RUN, null, null, 'skipped', 'Weekend — esecuzione saltata',
                    { giorno: today.toISOString().split('T')[0], dow });
     return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: 'weekend' }) };
+  }
+
+  // Una sola esecuzione al giorno, nella fascia della schedulazione: niente invii ripetuti via URL
+  await ensureSchema(sql);
+  const claim = await claimDailyRun(sql, 'daily-reminder', today);
+  if (!claim.ok) {
+    console.warn('[daily-reminder]', claim.reason);
+    await logEmail(RUN, null, null, 'skipped', claim.reason, { giorno: today.toISOString().split('T')[0] });
+    return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: 'guard' }) };
   }
 
   const dataISO = getPreviousWorkday(today);

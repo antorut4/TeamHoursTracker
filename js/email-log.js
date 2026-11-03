@@ -8,7 +8,7 @@ async function loadEmailLog(){
   showSpinner();
   let rows;
   try{rows=await call('getEmailLog',{tipo:tipo||null,stato:stato||null,limit:200});}
-  catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
+  catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.82rem;padding:14px 0">Nessun invio registrato.</p>';return;}
   const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza',sollecito_forecast:'Sollecito Forecast',ticket_reminder:'Reminder ticket',alert_soglia_ticket:'Alert soglia ticket',alert_soglia_ee:'Alert soglia Extra Effort'};
@@ -28,20 +28,20 @@ async function loadEmailLog(){
   rows.forEach((r,i)=>{
     const m=r.meta||{};
     let det='';
-    if(r.stato==='run_start')det=`<span style="color:var(--ink-3)">Avvio invio reminder del ${m.giorno||(m.giorni||[]).join(', ')}</span>`;
-    else if(r.stato==='run_end')det=`<span style="color:var(--ink-3)">${m.destinatari||0} destinatari — <strong style="color:var(--ok)">${m.inviate||0} inviate</strong>${m.errori?`, <strong style="color:var(--danger)">${m.errori} errori</strong>`:''}</span>`;
-    else if(r.stato==='run_error')det=`<span style="color:var(--danger)">Crash: ${r.errore||''}</span>`;
-    else if(r.stato==='error')det=`<span style="color:var(--danger)">${r.errore||''}${m.responseCode?` (SMTP ${m.responseCode})`:''}</span>`;
-    else if(r.stato==='skipped')det=`<span style="color:var(--ink-3)">${r.errore||''}</span>`;
-    else if(r.tipo==='alert_soglia_ee')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?MONTHS[m.mese]:''} ${m.anno||''}: <strong style="color:var(--danger)">${_fmtOre(m.totale||0)} / ${_fmtOre(m.soglia||0)}</strong> (${m.attivita||0} attività)${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
-    else if(r.tipo==='alert_soglia_ticket')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?MONTHS[m.mese]:''} ${m.anno||''}: <strong style="color:var(--danger)">${m.totale}/${m.soglia}</strong> (L1 ${m.l1} · L2 ${m.l2} · L3 ${m.l3})${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
-    else if(r.tipo==='ticket_reminder')det=`<span style="color:var(--ink-3)">giorni ${(m.giorni||[]).join(', ')}${m.aree?` · ${_esc(m.aree.join(', '))}`:''}</span>`;
-    else if(r.tipo==='assenza')det=`<span style="color:var(--ink-3)">${m.risorsa||''} — ${m.tipo||''} ${m.dal||''}${m.al&&m.al!==m.dal?'→'+m.al:''}${m.overlap?' <strong style="color:var(--amber)">⚠ overlap</strong>':''}</span>`;
-    else det=`<span style="color:var(--ink-3)">giorno ${m.giorno||''}${m.response?` · <span title="${String(m.response).replace(/"/g,'&quot;')}">${String(m.response).slice(0,28)}</span>`:''}</span>`;
+    if(r.stato==='run_start')det=`<span style="color:var(--ink-3)">Avvio invio reminder del ${_esc(m.giorno||(m.giorni||[]).join(', '))}</span>`;
+    else if(r.stato==='run_end')det=`<span style="color:var(--ink-3)">${_esc(m.destinatari||0)} destinatari — <strong style="color:var(--ok)">${_esc(m.inviate||0)} inviate</strong>${m.errori?`, <strong style="color:var(--danger)">${_esc(m.errori)} errori</strong>`:''}</span>`;
+    else if(r.stato==='run_error')det=`<span style="color:var(--danger)">Crash: ${_esc(r.errore||'')}</span>`;
+    else if(r.stato==='error')det=`<span style="color:var(--danger)">${_esc(r.errore||'')}${m.responseCode?` (SMTP ${_esc(m.responseCode)})`:''}</span>`;
+    else if(r.stato==='skipped')det=`<span style="color:var(--ink-3)">${_esc(r.errore||'')}</span>`;
+    else if(r.tipo==='alert_soglia_ee')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?_esc(MONTHS[m.mese]):''} ${_esc(m.anno||'')}: <strong style="color:var(--danger)">${_esc(_fmtOre(m.totale||0))} / ${_esc(_fmtOre(m.soglia||0))}</strong> (${_esc(m.attivita||0)} attività)${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
+    else if(r.tipo==='alert_soglia_ticket')det=`<span style="color:var(--ink-3)">${_esc(m.progetto||'')}${m.area?' / '+_esc(m.area):''} — ${m.mese!=null?_esc(MONTHS[m.mese]):''} ${_esc(m.anno||'')}: <strong style="color:var(--danger)">${_esc(m.totale)}/${_esc(m.soglia)}</strong> (L1 ${_esc(m.l1)} · L2 ${_esc(m.l2)} · L3 ${_esc(m.l3)})${m.cc&&m.cc.length?` · CC: ${_esc(m.cc.join(', '))}`:''}</span>`;
+    else if(r.tipo==='ticket_reminder')det=`<span style="color:var(--ink-3)">giorni ${_esc((m.giorni||[]).join(', '))}${m.aree?` · ${_esc(m.aree.join(', '))}`:''}</span>`;
+    else if(r.tipo==='assenza')det=`<span style="color:var(--ink-3)">${_esc(m.risorsa||'')} — ${_esc(m.tipo||'')} ${_esc(m.dal||'')}${m.al&&m.al!==m.dal?'→'+_esc(m.al):''}${m.overlap?' <strong style="color:var(--amber)">⚠ overlap</strong>':''}</span>`;
+    else det=`<span style="color:var(--ink-3)">giorno ${_esc(m.giorno||'')}${m.response?` · <span title="${_esc(m.response)}">${_esc(String(m.response).slice(0,28))}</span>`:''}</span>`;
     h+=`<tr style="background:${i%2?'var(--stone)':'var(--white)'}">`;
-    h+=`<td style="padding:5px 10px;white-space:nowrap;color:var(--ink-3)">${r.quando||''}</td>`;
-    h+=`<td style="padding:5px 10px;white-space:nowrap">${TIPO_LBL[r.tipo]||r.tipo}</td>`;
-    h+=`<td style="padding:5px 10px;white-space:nowrap"><div style="font-weight:600;color:var(--ink)">${r.nome||'—'}</div><div style="font-size:.66rem;color:var(--ink-3)">${r.destinatario}</div></td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap;color:var(--ink-3)">${_esc(r.quando||'')}</td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap">${_esc(TIPO_LBL[r.tipo]||r.tipo)}</td>`;
+    h+=`<td style="padding:5px 10px;white-space:nowrap"><div style="font-weight:600;color:var(--ink)">${_esc(r.nome||'—')}</div><div style="font-size:.66rem;color:var(--ink-3)">${_esc(r.destinatario)}</div></td>`;
     h+=`<td style="padding:5px 10px;white-space:nowrap">${badge(r.stato)}</td>`;
     h+=`<td style="padding:5px 10px">${det}</td></tr>`;
   });

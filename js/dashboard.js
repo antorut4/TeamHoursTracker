@@ -54,11 +54,11 @@ function renderDashboard(){
       if(tot>av)hrsStatus=`<span class="badge badge-warn" style="gap:5px"><i class="fa-solid fa-bolt" style="font-size:.62rem"></i>+${tot-av}h extra</span>`;
       else hrsStatus=`<span class="badge badge-ok" style="gap:5px"><i class="fa-solid fa-check" style="font-size:.62rem"></i>${tot}h</span>`;}
     else hrsStatus=`<span class="badge badge-danger" style="gap:5px"><i class="fa-solid fa-xmark" style="font-size:.62rem"></i>Mancanti</span>`;
-    const projChips=(r.progetti||[]).map(p=>`<span style="background:var(--stone-2);border-radius:4px;padding:2px 8px;font-size:.71rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${p}</span>`).join('');
+    const projChips=(r.progetti||[]).map(p=>`<span style="background:var(--stone-2);border-radius:4px;padding:2px 8px;font-size:.71rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px">${_esc(p)}</span>`).join('');
     return `<div class="card" style="margin:0;padding:18px 20px;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div style="width:40px;height:40px;border-radius:50%;background:${color}22;border:2px solid ${color}55;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:${color};flex-shrink:0">${initials}</div>
-        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.9rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.fullName}</div><div style="font-size:.73rem;color:var(--ink-3);margin-top:1px">${r.managerName||'—'}</div></div>
+        <div style="width:40px;height:40px;border-radius:50%;background:${color}22;border:2px solid ${color}55;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:${color};flex-shrink:0">${_esc(initials)}</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.9rem;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(r.fullName)}</div><div style="font-size:.73rem;color:var(--ink-3);margin-top:1px">${_esc(r.managerName||'—')}</div></div>
         <div style="font-size:.72rem;font-weight:700;background:${color}18;color:${color};border-radius:20px;padding:3px 9px;white-space:nowrap;flex-shrink:0">${nProj} ${nProj===1?'progetto':'progetti'}</div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;min-height:22px;margin-bottom:12px;flex:1">${projChips||'<span style="font-size:.74rem;color:var(--ink-3)">Nessun progetto</span>'}</div>
@@ -87,13 +87,13 @@ async function renderTrend(){
     pts.forEach(p=>{if(!p)return;if(!st){ctx.moveTo(p.x,p.y);st=true;}else ctx.lineTo(p.x,p.y);});ctx.stroke();
     pts.forEach(p=>{if(!p)return;ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fillStyle=d.color;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();});
   });
-  document.getElementById('trendLegend').innerHTML=ds.map((d,i)=>`<span><span class="tdot" style="background:${d.color}"></span>${members[i]}</span>`).join('');
+  document.getElementById('trendLegend').innerHTML=ds.map((d,i)=>`<span><span class="tdot" style="background:${d.color}"></span>${_esc(members[i])}</span>`).join('');
   const warns=[];
   periods.forEach(({m,y})=>members.forEach(mem=>{const e=allHrs[`${mem}||${y}||${m}`];if(!e)warns.push({mem,m,y,t:'m'});else{const tot=(+e.ore1||0)+(+e.ore2||0),av=wHours(y,m,1)+wHours(y,m,2);if(tot>av)warns.push({mem,m,y,t:'x',tot,av});}}));
   const ae=document.getElementById('trendAlerts');
   if(!warns.length){ae.innerHTML='<p style="color:var(--ok);font-size:.84rem"><i class="fa-solid fa-check" style="margin-right:6px"></i>Nessun avviso.</p>';return;}
   ae.innerHTML=warns.slice(0,12).map(w=>w.t==='m'
-    ?`<div style="padding:8px 12px;background:var(--danger-bg);border-radius:var(--r);margin-bottom:6px;font-size:.82rem;color:var(--danger)"><i class="fa-solid fa-xmark" style="margin-right:6px"></i><b>${w.mem.split(' ')[0]}</b> — ore mancanti per <b>${MONTHS[w.m]} ${w.y}</b></div>`
-    :`<div style="padding:8px 12px;background:var(--warn-bg);border-radius:var(--r);margin-bottom:6px;font-size:.82rem;color:var(--warn)"><i class="fa-solid fa-bolt" style="margin-right:6px"></i><b>${w.mem.split(' ')[0]}</b> — ore extra in <b>${MONTHS[w.m]} ${w.y}</b>: ${w.tot}h / ${w.av}h</div>`
+    ?`<div style="padding:8px 12px;background:var(--danger-bg);border-radius:var(--r);margin-bottom:6px;font-size:.82rem;color:var(--danger)"><i class="fa-solid fa-xmark" style="margin-right:6px"></i><b>${_esc(w.mem.split(' ')[0])}</b> — ore mancanti per <b>${MONTHS[w.m]} ${w.y}</b></div>`
+    :`<div style="padding:8px 12px;background:var(--warn-bg);border-radius:var(--r);margin-bottom:6px;font-size:.82rem;color:var(--warn)"><i class="fa-solid fa-bolt" style="margin-right:6px"></i><b>${_esc(w.mem.split(' ')[0])}</b> — ore extra in <b>${MONTHS[w.m]} ${w.y}</b>: ${w.tot}h / ${w.av}h</div>`
   ).join('');
 }

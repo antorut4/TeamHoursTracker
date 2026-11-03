@@ -9,9 +9,10 @@
 // ════════════════════════════════════════════════════════════════════════
 import { neon }    from '@neondatabase/serverless';
 import nodemailer   from 'nodemailer';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { HttpError, deny, hashPassword, verifyPassword, checkPwdPolicy, signSession, readSession, pwdVersion,
-         isElevated, canManageProject, canActOn, canAdminResource } from '../lib/auth.mjs';
+         isElevated, canManageProject, canActOn, canAdminResource, seesPersonalDetail, maskFerie,
+         signInvite, readInvite, INVITE_TTL } from '../lib/auth.mjs';
 import { ensureSchema } from '../lib/migrations.mjs';
 import * as V from '../lib/validate.mjs';
 
@@ -65,8 +66,13 @@ async function bootstrap(ctx){
     const pid = r.chiave.substring(9); // strip 'rep_tipi_' prefix → progetto_id
     try { repTipi[pid] = JSON.parse(r.valore); } catch {}
   });
-  if (!isElevated(ctx)) risorse.forEach(r => { if (+r.id !== ctx.id) { r.load_cost = null; r.employee_id = null; } });
-  return { progetti, risorse, allocazioni, ore, ferie, rep, wbs, repTipi, aree, soglie, repExport, benchmark };
+  // Dati personali filtrati per ruolo (vedi seesPersonalDetail): l'interfaccia mostra già solo questi,
+  // ma senza filtro sul server ogni utente riceveva ore, note e malattie di tutti
+  const sees = rid => seesPersonalDetail(ctx, rid);
+  if (!isElevated(ctx)) risorse.forEach(r => { if (+r.id !== ctx.id) { r.load_cost = null; r.employee_id = null; r.email = null; } });
+  Object.keys(wbs).forEach(k => { if (!sees(k.split('_')[0])) delete wbs[k]; });
+  return { progetti, risorse, allocazioni, ore: ore.filter(o => sees(o.risorsa_id)),
+           ferie: ferie.map(f => sees(f.risorsa_id) ? f : maskFerie(f)), rep, wbs, repTipi, aree, soglie, repExport, benchmark };
 }
 
 // Alberatura AMS per la classificazione dei ticket: unica fonte, inviata ai client e usata per validare
@@ -335,7 +341,7 @@ function buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap) 
     Object.entries(overlapMap).forEach(([prog, byDay]) => {
       ovBody += `
         <tr><td colspan="2" style="padding:10px 0 4px;font-family:Arial,Helvetica,sans-serif;
-            font-size:13px;font-weight:700;color:#92400e;">${prog}</td></tr>`;
+            font-size:13px;font-weight:700;color:#92400e;">${_esc(prog)}</td></tr>`;
       Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b)).forEach(([day, people]) => {
         ovBody += `
         <tr><td colspan="2" style="padding:4px 0 2px;font-family:Arial,Helvetica,sans-serif;
@@ -345,10 +351,10 @@ function buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap) 
           ovBody += `
         <tr>
           <td style="padding:2px 0 2px 12px;font-family:Arial,Helvetica,sans-serif;
-              font-size:12px;color:#451a03;">• ${x.name}</td>
+              font-size:12px;color:#451a03;">• ${_esc(x.name)}</td>
           <td style="padding:2px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;">
             <span style="background:${pc.bg};color:${pc.text};border-radius:3px;
-                padding:1px 6px;font-weight:600;">${x.tipo}</span>
+                padding:1px 6px;font-weight:600;">${_esc(x.tipo)}</span>
           </td>
         </tr>`;
         });
@@ -405,7 +411,7 @@ function buildAbsenceEmailHtml(personName, p, progetti, overlapMap, hasOverlap) 
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<title>Nuova assenza — ${personName}</title>
+<title>Nuova assenza — ${_esc(personName)}</title>
 <!--[if mso]>
 <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
 <style>table{border-collapse:collapse;}</style>
@@ -582,6 +588,9 @@ async function addResource(p){
 }
 async function saveEdit(p){
   p = { ..._resFields(p), id: V.id(p.id, 'Risorsa') };
+  // Cambio email: un invito già inviato al vecchio indirizzo non deve più valere
+  await sql`DELETE FROM password_invites WHERE risorsa_id=${p.id}
+            AND EXISTS (SELECT 1 FROM risorse WHERE id=${p.id} AND lower(COALESCE(email,'')) <> ${p.email || ''})`;
   const managerId = p.managerId || null;
   const isManager = !!p.isManager;
   const email = p.email || null;
@@ -640,9 +649,15 @@ async function getRepForProject(p){
 }
 
 // ── presenze in ufficio ──
-async function getPresenze(p){
+// Presenze: admin tutte; gli altri le proprie, del proprio team e dei colleghi di progetto (come la griglia)
+async function getPresenze(p, ctx){
   p = { from: V.isoDate(p.from, 'Data inizio'), to: V.isoDate(p.to, 'Data fine') };
-  const rows = await sql`SELECT risorsa_id, data::text AS data FROM presenze WHERE data BETWEEN ${p.from}::date AND ${p.to}::date ORDER BY data`;
+  const me = ctx.id || 0, all = !!ctx.admin;
+  const rows = await sql`SELECT risorsa_id, data::text AS data FROM presenze
+    WHERE data BETWEEN ${p.from}::date AND ${p.to}::date
+      AND (${all}::boolean OR risorsa_id = ${me} OR risorsa_id IN (SELECT id FROM risorse WHERE manager_id = ${me})
+           OR risorsa_id IN (SELECT a2.risorsa_id FROM allocazioni a1 JOIN allocazioni a2 ON a2.progetto_id = a1.progetto_id WHERE a1.risorsa_id = ${me}))
+    ORDER BY data`;
   return rows;
 }
 async function savePresenza(p){
@@ -692,17 +707,79 @@ async function login(p){
   await _loginOk(key);
   return { ok: true, token: signSession(rid, stored) };
 }
-// Primo accesso: la password si può impostare solo se la risorsa non ne ha ancora una
-async function firstAccess(p){
-  const rid = V.id(p.risorsaId, 'Risorsa');
-  checkPwdPolicy(p.password);
-  const [r] = await sql`SELECT id FROM risorse WHERE id=${rid}`;
+// ── Primo accesso e reset: la password si imposta solo dal link d'invito inviato all'email aziendale.
+//    Prima bastava conoscere l'email di un account senza password per impostarla al posto del titolare.
+let _mailer = null;
+// Solo per i test automatici: sostituisce l'SMTP con un trasporto finto
+export function _setMailerForTests(m){ _mailer = m; }
+function _mail(){
+  if (_mailer) return _mailer;
+  return process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD ? _absenceTransporter() : null;
+}
+const MAX_INVITES = 3;   // per risorsa ogni 15 minuti
+function _maskEmail(e){ const [u, d] = String(e).split('@'); return (u.length <= 2 ? u[0] + '*' : u.slice(0, 2) + '***') + '@' + d; }
+
+async function _sendInvite(rid){
+  const [r] = await sql`SELECT id, full_name, email FROM risorse WHERE id=${rid}`;
   if (!r) throw new HttpError(404, 'Risorsa non trovata');
+  if (!r.email) throw new HttpError(400, 'Nessun indirizzo email configurato per questo account: contatta il tuo manager');
+  const site = (process.env.SITE_URL || '').replace(/\/$/, ''), mailer = _mail();
+  if (!site || !mailer) throw new HttpError(503, 'Invio email non configurato: contatta l\'amministratore');
+  const nonce = randomBytes(16).toString('hex');
+  // Un nuovo invito sostituisce il precedente: i link già inviati non valgono più
+  await sql`INSERT INTO password_invites (risorsa_id, nonce, expires_at) VALUES (${rid}, ${nonce}, NOW() + make_interval(secs => ${INVITE_TTL}))
+            ON CONFLICT (risorsa_id) DO UPDATE SET nonce=EXCLUDED.nonce, expires_at=EXCLUDED.expires_at, created_at=NOW()`;
+  const link = `${site}/?invite=${encodeURIComponent(signInvite(rid, nonce))}`;
+  const subject = 'Team Hours Tracker — imposta la tua password';
+  const ore = INVITE_TTL / 3600;
+  const text = `Ciao ${r.full_name},\n\nper impostare la password di Team Hours Tracker apri questo link (valido ${ore} ore, utilizzabile una sola volta):\n${link}\n\nSe non hai richiesto tu questo link, ignora questa email.`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1a1a1a;max-width:520px">
+    <p>Ciao <strong>${_esc(r.full_name)}</strong>,</p>
+    <p>per impostare la password di <strong>Team Hours Tracker</strong> usa il pulsante qui sotto.</p>
+    <p style="margin:24px 0"><a href="${_esc(link)}" style="background:#a100ff;color:#fff;text-decoration:none;padding:12px 22px;border-radius:6px;font-weight:700">Imposta la password</a></p>
+    <p style="font-size:13px;color:#666">Il link è valido ${ore} ore e si può usare una sola volta. Se non hai richiesto tu questo link, ignora questa email.</p></div>`;
+  try {
+    const info = await mailer.sendMail({ from: `${process.env.FROM_NAME || 'Team Hours Tracker'} <${process.env.GMAIL_USER || 'noreply@localhost'}>`, to: r.email, subject, text, html });
+    await _logEmail('invito', r.email, r.full_name, subject, 'sent', null, { messageId: info && info.messageId });
+  } catch (err) {
+    await _logEmail('invito', r.email, r.full_name, subject, 'error', err.message, null);
+    throw new HttpError(502, 'Invio dell\'email non riuscito: riprova tra poco');
+  }
+  return { sent: true, email: _maskEmail(r.email) };
+}
+// Dalla pagina di accesso: chi non ha ancora una password chiede il link d'invito
+async function requestInvite(p){
+  const rid = V.id(p.risorsaId, 'Risorsa'), key = 'inv:' + rid;
+  const [u] = await sql`SELECT 1 FROM utenti_pwd WHERE risorsa_id=${rid}`;
+  if (u) throw new HttpError(409, 'Password già impostata: accedi con la tua password');
+  const [c] = await sql`SELECT COUNT(*)::int AS n FROM login_attempts WHERE chiave=${key} AND created_at > NOW() - INTERVAL '15 minutes'`;
+  if (c.n >= MAX_INVITES) throw new HttpError(429, 'Hai già richiesto il link più volte: controlla la posta o riprova tra 15 minuti');
+  const res = await _sendInvite(rid);
+  await sql`INSERT INTO login_attempts (chiave) VALUES (${key})`;
+  return res;
+}
+async function _validInvite(token){
+  const inv = readInvite(token);
+  const bad = () => new HttpError(400, 'Link non valido o scaduto: richiedine uno nuovo dalla pagina di accesso');
+  if (!inv) throw bad();
+  const [row] = await sql`SELECT r.full_name FROM password_invites i JOIN risorse r ON r.id = i.risorsa_id
+                          WHERE i.risorsa_id=${+inv.r} AND i.nonce=${String(inv.n)} AND i.expires_at > NOW()`;
+  if (!row) throw bad();
+  return { rid: +inv.r, nonce: String(inv.n), fullName: row.full_name };
+}
+// Apertura del link: a chi appartiene (per salutare l'utente prima che scelga la password)
+async function inviteInfo(p){ const v = await _validInvite(p.token); return { fullName: v.fullName }; }
+// Impostazione della password dal link: l'invito viene consumato in modo atomico (monouso)
+async function firstAccess(p){
+  checkPwdPolicy(p.password);
+  const v = await _validInvite(p.token);
   const stored = await hashPassword(p.password);
-  const ins = await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${rid}, ${stored})
-                        ON CONFLICT (risorsa_id) DO NOTHING RETURNING risorsa_id`;
-  if (!ins.length) throw new HttpError(409, 'Password già impostata: accedi con la tua password');
-  return { ok: true, token: signSession(rid, stored) };
+  const used = await sql`DELETE FROM password_invites WHERE risorsa_id=${v.rid} AND nonce=${v.nonce} AND expires_at > NOW() RETURNING risorsa_id`;
+  if (!used.length) throw new HttpError(400, 'Link non valido o scaduto: richiedine uno nuovo dalla pagina di accesso');
+  await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${v.rid}, ${stored})
+            ON CONFLICT (risorsa_id) DO UPDATE SET pwd_hash=EXCLUDED.pwd_hash, updated_at=NOW()`;
+  await _loginOk('u:' + v.rid);
+  return { ok: true, token: signSession(v.rid, stored), fullName: v.fullName };
 }
 async function adminLogin(p){
   await _throttle('admin');
@@ -740,7 +817,10 @@ async function userHasPwd(p){
   return !!r;
 }
 // Reset: la risorsa tornerà al "primo accesso" e le sue sessioni aperte decadono
-async function resetUserPwd(p){ await sql`DELETE FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`; }
+async function resetUserPwd(p){
+  await sql`DELETE FROM utenti_pwd WHERE risorsa_id=${p.risorsaId}`;
+  await sql`DELETE FROM password_invites WHERE risorsa_id=${p.risorsaId}`;
+}
 
 // ── rep tipi (stored in config as rep_tipi_{progetto_id}) ──
 async function saveRepTipi(p){
@@ -941,9 +1021,9 @@ table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
       <!-- BODY -->
       <tr>
         <td class="dm-body" style="background-color:#ffffff;padding:32px 40px 24px;">
-          <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;color:#111827;" class="dm-title">Ciao ${risorsa},</p>
+          <p style="margin:0 0 16px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;color:#111827;" class="dm-title">Ciao ${_esc(risorsa)},</p>
           <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
-            <strong>${manager}</strong> ti sta sollecitando per l'inserimento delle ore Forecast di <strong>${_esc(meseLabel)}</strong>.
+            <strong>${_esc(manager)}</strong> ti sta sollecitando per l'inserimento delle ore Forecast di <strong>${_esc(meseLabel)}</strong>.
           </p>
           <p style="margin:0 0 28px;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;" class="dm-text">
             Ti chiediamo di procedere con la compilazione delle ore di entrambe le quindicine accedendo al seguente link:
@@ -1021,15 +1101,20 @@ async function saveConsuntivo(p){
 }
 
 // ── consuntivo: lettura ore giornaliere da daily_hours (sola lettura) ──
-async function getConsuntivo(p){
+// Consuntivo: admin tutto; manager il suo team; Team Lead di progetto le risorse staffate sui suoi progetti;
+// gli altri solo le proprie ore (stesse regole della griglia nell'interfaccia)
+async function getConsuntivo(p, ctx){
   const anno = V.anno(p.anno);
   const mese = V.mese(p.mese); // 0-based dal frontend → EXTRACT(MONTH) è 1-based
+  const me = ctx.id || 0, all = !!ctx.admin, mgr = !!ctx.manager, tlPrj = [...ctx.tlPrj];
   const rows = await sql`
     SELECT dh.risorsa_id, dh.data::text AS data, dh.ore::float AS ore, r.full_name
     FROM daily_hours dh
     JOIN risorse r ON r.id = dh.risorsa_id
     WHERE EXTRACT(YEAR  FROM dh.data) = ${anno}
       AND EXTRACT(MONTH FROM dh.data) = ${mese + 1}
+      AND (${all}::boolean OR dh.risorsa_id = ${me} OR (${mgr}::boolean AND r.manager_id = ${me})
+           OR dh.risorsa_id IN (SELECT risorsa_id FROM allocazioni WHERE progetto_id = ANY(${tlPrj}::int[])))
     ORDER BY dh.risorsa_id, dh.data`;
   return rows;
 }
@@ -1749,7 +1834,7 @@ function _found(rows){
 }
 
 // Azioni senza login: accesso e link email (protetti dal proprio token firmato)
-const PUBLIC = { loginLookup, login, firstAccess, adminLogin, getTicketsByToken, saveTicketsByToken };
+const PUBLIC = { loginLookup, login, requestInvite, inviteInfo, firstAccess, adminLogin, getTicketsByToken, saveTicketsByToken };
 
 // Azioni con login: (payload, ctx). Il controllo dei permessi precede sempre l'esecuzione.
 const ACTIONS = {
@@ -1761,10 +1846,10 @@ const ACTIONS = {
   deleteOre:      async (p, c) => { const o = _found(await sql`SELECT risorsa_id FROM ore_mensili WHERE id=${V.id(p.id)}`); await mustActOn(c, o.risorsa_id); return deleteOre(p); },
   saveFerie:      async (p, c) => { await mustActOn(c, p.risorsaId); return saveFerie(p); },
   deleteFerie:    async (p, c) => { const o = _found(await sql`SELECT risorsa_id FROM ferie WHERE id=${V.id(p.id)}`); await mustActOn(c, o.risorsa_id); return deleteFerie(p); },
-  getPresenze:    (p) => getPresenze(p),
+  getPresenze:    (p, c) => getPresenze(p, c),
   savePresenza:   async (p, c) => { await mustActOn(c, p.risorsaId); return savePresenza(p); },
   deletePresenza: async (p, c) => { await mustActOn(c, p.risorsaId); return deletePresenza(p); },
-  getConsuntivo:  (p) => getConsuntivo(p),
+  getConsuntivo:  (p, c) => getConsuntivo(p, c),
   saveConsuntivo: async (p, c) => { await mustActOn(c, p.risorsaId); return saveConsuntivo(p); },
   setDailyReminder: (p, c) => { const rid = V.id(p.risorsaId, 'Risorsa'); if (rid !== c.id) mustResAdmin(c, rid); return setDailyReminder(p); },
 

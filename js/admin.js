@@ -17,8 +17,8 @@ function _addTag(prefix,value){
   if([...tagsDiv.querySelectorAll('.prj-tag')].some(t=>t.dataset.value===value))return;
   const tag=document.createElement('span');tag.className='prj-tag';tag.dataset.value=value;
   const tls=_prjTLsByName[value]||[];
-  const tlHtml=tls.length?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${tls.map(t=>t.split(' ')[0]).join(', ')}</span>`:'';
-  tag.innerHTML=`<i class="fa-solid fa-folder" style="font-size:.7rem"></i> ${value}${tlHtml}<button type="button" onclick="removeProgettoTag(this,'${prefix}')" title="Rimuovi">✕</button>`;
+  const tlHtml=tls.length?` <span style="font-size:.67rem;color:var(--amber);font-weight:600">→ ${_esc(tls.map(t=>t.split(' ')[0]).join(', '))}</span>`:'';
+  tag.innerHTML=`<i class="fa-solid fa-folder" style="font-size:.7rem"></i> ${_esc(value)}${tlHtml}<button type="button" onclick="removeProgettoTag(this,'${prefix}')" title="Rimuovi">✕</button>`;
   tagsDiv.appendChild(tag);
 }
 function addProgettoTag(prefix){
@@ -35,7 +35,7 @@ function addNewPrjTL(){
   if([...tags.querySelectorAll('[data-tl]')].some(t=>t.dataset.tl===name)){sel.value='';return;}
   const chip=document.createElement('span');
   chip.dataset.tl=name;chip.style.cssText='display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:2px 8px;font-size:.75rem;font-weight:600';
-  chip.innerHTML=`<i class="fa-solid fa-user-tie" style="font-size:.65rem"></i>${name}<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.85rem;margin-left:2px">×</button>`;
+  chip.innerHTML=`<i class="fa-solid fa-user-tie" style="font-size:.65rem"></i>${_esc(name)}<button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.85rem;margin-left:2px">×</button>`;
   tags.appendChild(chip);sel.value='';
 }
 function getNewPrjTLNames(){return[...document.querySelectorAll('#newPrjTLTags [data-tl]')].map(t=>t.dataset.tl);}
@@ -68,27 +68,26 @@ async function renderResourcesByProject(){
   const staffed=RESOURCES.filter(r=>(r.progetti||[r.progetto]).filter(Boolean).includes(prj));
   if(!staffed.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessuna risorsa allocata.</p>';return;}
   const tls=_prjTLsByName[prj]||[];const tlLabel=tls.length?tls.join(', '):'—';
-  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${prj} · TL: ${tlLabel}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${r.fullName}</div><div class="rmeta">${(r.progetti||[]).join(', ')||'—'}</div></div></div>`).join('');
+  el.innerHTML=`<div style="font-size:.72rem;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:9px">${staffed.length} risorsa${staffed.length!==1?'e':''} su ${_esc(prj)} · TL: ${_esc(tlLabel)}</div>`+staffed.map(r=>`<div class="resource-row"><div><div class="rname">${_esc(r.fullName)}</div><div class="rmeta">${_esc((r.progetti||[]).join(', ')||'—')}</div></div></div>`).join('');
 }
 async function populateSearchByProject(){const sel=document.getElementById('searchByProject');if(!sel)return;const prjs=(isTeamLead&&!isAdmin)?_getManagerProjects():(await getProjects()).sort();const cur=sel.value;sel.innerHTML='<option value="">— Seleziona —</option>';prjs.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;if(p===cur)o.selected=true;sel.appendChild(o);});}
 function _getManagerProjects(){const myResPrjs=new Set(RESOURCES.filter(r=>r.managerName===currentUser).flatMap(r=>r.progetti||[]));return(_cache.prj||[]).filter(p=>myResPrjs.has(p)).sort();}
 async function renderProjectList(){
   const prjsFull=(isTeamLead&&!isAdmin)?_getManagerProjects():(_cache.prj||[]).slice().sort();const el=document.getElementById('prjList');if(!el)return;
   if(!prjsFull.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.84rem">Nessun progetto.</p>';return;}
-  const tlOptsList=RESOURCES.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}</option>`).join('');
+  const tlOptsList=RESOURCES.map(r=>`<option value="${_esc(r.fullName)}">${_esc(r.fullName)}</option>`).join('');
   el.innerHTML=prjsFull.map(p=>{
     const pid=_prjIdByName[p]||0,currentTLs=_prjTLsByName[p]||[];
-    const pSafe=p.replace(/'/g,"\\'");
     const tipi=_cache.repTipi[String(pid)]||[];
-    const tipiTags=tipi.length?tipi.map(t=>`<span style="background:var(--info-bg);color:var(--info);border-radius:4px;padding:1px 7px;font-size:.7rem;display:inline-flex;align-items:center;gap:3px">${t} <button onclick="removeRepTipoUI(${pid},'${t.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:var(--info);padding:0;line-height:1;font-size:.75rem">×</button></span>`).join(''):'<span style="font-size:.7rem;color:var(--ink-3);font-style:italic">predefinita</span>';
-    const tlChips=currentTLs.map(tl=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:2px 7px;font-size:.72rem;font-weight:600">${tl.split(' ')[0]} ${tl.split(' ').slice(1).join(' ')} <button onclick="removeProjectTL(${pid},'${tl.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.8rem;margin-left:2px">×</button></span>`).join('');
-    const addableTLs=tlOptsList.replace(currentTLs.map(tl=>`value="${tl.replace(/"/g,'&quot;')}"`).join('|'),'');
+    const tipiTags=tipi.length?tipi.map(t=>`<span style="background:var(--info-bg);color:var(--info);border-radius:4px;padding:1px 7px;font-size:.7rem;display:inline-flex;align-items:center;gap:3px">${_esc(t)} <button onclick="removeRepTipoUI(${pid},${_jsa(t)})" style="background:none;border:none;cursor:pointer;color:var(--info);padding:0;line-height:1;font-size:.75rem">×</button></span>`).join(''):'<span style="font-size:.7rem;color:var(--ink-3);font-style:italic">predefinita</span>';
+    const tlChips=currentTLs.map(tl=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--amber-bg);color:var(--amber);border-radius:4px;padding:2px 7px;font-size:.72rem;font-weight:600">${_esc(tl.split(' ')[0])} ${_esc(tl.split(' ').slice(1).join(' '))} <button onclick="removeProjectTL(${pid},${_jsa(tl)})" style="background:none;border:none;cursor:pointer;color:var(--amber);padding:0;line-height:1;font-size:.8rem;margin-left:2px">×</button></span>`).join('');
+    const addableTLs=tlOptsList.replace(currentTLs.map(tl=>`value="${_esc(tl)}"`).join('|'),'');
     return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:var(--stone);border-radius:var(--r);margin-bottom:6px;border:1px solid var(--line)">
       <i class="fa-solid fa-folder" style="color:var(--amber);font-size:.8rem;flex-shrink:0"></i>
-      <span style="font-size:.85rem;font-weight:500;flex:1;min-width:80px">${p}</span>
+      <span style="font-size:.85rem;font-weight:500;flex:1;min-width:80px">${_esc(p)}</span>
       <span style="font-size:.75rem;color:var(--ink-3);white-space:nowrap;flex-shrink:0">WBS:</span>
-      <input type="text" placeholder="Codice WBS" value="${(_prjWbsByName[p]||'').replace(/"/g,'&quot;')}" style="font-size:.75rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:120px" onblur="saveProjectWbs(${pid},this.value)" onkeydown="if(event.key==='Enter')saveProjectWbs(${pid},this.value)"/>
-      <button class="btn-icon danger" onclick="deleteProject('${pSafe}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
+      <input type="text" placeholder="Codice WBS" value="${_esc(_prjWbsByName[p]||'')}" style="font-size:.75rem;padding:2px 6px;border-radius:4px;border:1px solid var(--line);background:var(--white);max-width:120px" onblur="saveProjectWbs(${pid},this.value)" onkeydown="if(event.key==='Enter')saveProjectWbs(${pid},this.value)"/>
+      <button class="btn-icon danger" onclick="deleteProject(${_jsa(p)})"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>
       <div style="flex:1 1 100%;display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:5px;border-top:1px solid var(--line)">
         <span style="font-size:.72rem;color:var(--ink-3);font-weight:600;white-space:nowrap;flex-shrink:0"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Team Lead:</span>
         <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">${tlChips||'<span style="font-size:.72rem;color:var(--ink-3);font-style:italic">nessuno</span>'}
@@ -160,18 +159,18 @@ async function renderResourceList(){
   let h='';
   filtered.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName)).forEach(r=>{
     const idx=RESOURCES.indexOf(r),hasPwd=!!pwds[r.id];
-    const prjMeta=(r.progetti||[]).join(' · ')||'—';
+    const prjMeta=_esc((r.progetti||[]).join(' · ')||'—');
     const mgrBadge=r.isManager?`<span class="badge badge-amber" style="font-size:.68rem"><i class="fa-solid fa-user-tie" style="margin-right:3px"></i>Manager</span> `:'';
-    const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${r.managerName}</span> · `:'';
-    const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${r.email}</span> · `:'';
-    const lcMeta=(isAdmin||isTeamLead)&&r.loadCost!=null?`<span style="color:var(--amber);font-size:.72rem;font-weight:600"><i class="fa-solid fa-euro-sign" style="margin-right:2px"></i>LC: ${r.loadCost}</span> · `:'';
+    const mgrMeta=r.managerName?`<span style="color:var(--amber);font-size:.72rem"><i class="fa-solid fa-sitemap" style="margin-right:3px"></i>${_esc(r.managerName)}</span> · `:'';
+    const emailMeta=r.email?`<span style="color:var(--ink-3);font-size:.72rem"><i class="fa-solid fa-envelope" style="margin-right:3px"></i>${_esc(r.email)}</span> · `:'';
+    const lcMeta=(isAdmin||isTeamLead)&&r.loadCost!=null?`<span style="color:var(--amber);font-size:.72rem;font-weight:600"><i class="fa-solid fa-euro-sign" style="margin-right:2px"></i>LC: ${_esc(r.loadCost)}</span> · `:'';
     const empMeta=(isAdmin||isTeamLead)&&r.employeeId?`<span style="color:var(--ink-2);font-size:.72rem;font-weight:600"><i class="fa-solid fa-id-badge" style="margin-right:3px"></i>Emp. ${_esc(r.employeeId)}</span> · `:'';
-    h+=`<div class="resource-row"><div><div class="rname">${r.fullName} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${empMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},'${r.fullName.replace(/'/g,"\\'")}')">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},'${r.fullName.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
+    h+=`<div class="resource-row"><div><div class="rname">${_esc(r.fullName)} ${mgrBadge}</div><div class="rmeta">${emailMeta}${mgrMeta}${lcMeta}${empMeta}${prjMeta} · <span class="badge ${hasPwd?'badge-ok':'badge-warn'}" style="font-size:.68rem">${hasPwd?'Password impostata':'Nessuna password'}</span></div></div><div class="resource-actions">${!hasPwd?'':`<button class="btn btn-ghost2 btn-sm" onclick="confirmResetPwd(${idx},${_jsa(r.fullName)})">Reset pwd</button>`}<button class="btn-icon" onclick="startEdit(${idx})"><i class="fa-solid fa-pen" style="font-size:.75rem"></i></button><button class="btn-icon danger" onclick="deleteResource(${idx},${_jsa(r.fullName)})"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button></div></div>`;
   });
   h+=`<div style="color:var(--ink-3);font-size:.75rem;margin-top:12px">Totale: ${RESOURCES.length} risorsa${RESOURCES.length!==1?'e':''}</div>`;
   el.innerHTML=h;
 }
-async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{const rid=RESOURCES[idx].id;await call('resetUserPwd',{risorsaId:rid});await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata.','ok');},'Reset');}
+async function confirmResetPwd(idx,name){openModal('Reset password','Resettare la password di "'+name+'"?',async()=>{const rid=RESOURCES[idx].id;await call('resetUserPwd',{risorsaId:rid});await renderResourceList();showMsg('resourceMsg','Password di '+name+' resettata: al prossimo accesso riceverà via email il link per impostarne una nuova.','ok');},'Reset');}
 function startEdit(idx){
   const r=RESOURCES[idx];
   document.getElementById('editIdx').value=idx;

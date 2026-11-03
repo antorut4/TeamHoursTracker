@@ -44,7 +44,7 @@ async function loadConsuntivo(){
   el.innerHTML='<div class="msg">Caricamento...</div>';
   showSpinner();
   let rows;
-  try{rows=await call('getConsuntivo',{anno:year,mese:month});}catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${e.message}</div>`;return;}
+  try{rows=await call('getConsuntivo',{anno:year,mese:month});}catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
   const visibleIds=_consuntivoVisibleIds();
   if(visibleIds){
@@ -88,7 +88,7 @@ function _buildConsuntivoGrid(rows,month,year,resList){
     gQ1+=q1;gQ2+=q2;
     const tot=q1+q2;
     h+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-    h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="line-height:1.35">${res.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${res.fullName.split(' ').slice(1).join(' ')}</span></div></td>`;
+    h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="line-height:1.35">${_esc(res.fullName.split(' ')[0])}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${_esc(res.fullName.split(' ').slice(1).join(' '))}</span></div></td>`;
     for(let d=1;d<=dim;d++){
       const wd=new Date(year,month,d).getDay(),isWe=wd===0||wd===6;
       const ore=rd[d]||0;

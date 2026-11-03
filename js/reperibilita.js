@@ -36,7 +36,7 @@ let _excelJsP=null;
 function _loadExcelJs(){
   if(window.ExcelJS)return Promise.resolve(window.ExcelJS);
   return _excelJsP||(_excelJsP=new Promise((res,rej)=>{
-    const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';s.integrity='sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==';s.crossOrigin='anonymous';s.referrerPolicy='no-referrer';
     s.onload=()=>window.ExcelJS?res(window.ExcelJS):rej(new Error('libreria Excel non disponibile'));
     s.onerror=()=>{_excelJsP=null;s.remove();rej(new Error('impossibile caricare la libreria Excel, controlla la connessione'));};
     document.head.appendChild(s);
@@ -155,7 +155,7 @@ async function buildRepGriglia(){
   let h='';
   for(const etichetta of tipi){
     const etiKey=etichetta||'main';
-    if(tipi.length>1||etichetta){h+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:12px 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px">${etichetta||'Reperibilità'}</div>`;}
+    if(tipi.length>1||etichetta){h+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:12px 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px">${_esc(etichetta||'Reperibilità')}</div>`;}
     h+=`<div style="overflow-x:auto;margin-bottom:16px"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
     h+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
     for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
@@ -164,24 +164,23 @@ async function buildRepGriglia(){
     h+=`<th style="padding:5px 8px;background:var(--ink);color:var(--white);text-align:right;min-width:70px;white-space:nowrap;font-size:.65rem">Guadagno</th></tr></thead><tbody>`;
     resources.forEach((r,ri)=>{
       const gd=_repGridData[etichetta][r.fullName];
-      const etiEsc=etichetta.replace(/'/g,"\\'");
       h+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-      h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="display:flex;align-items:center;gap:6px"><div style="line-height:1.35">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></div><button onclick="removeRepResource('${r.fullName.replace(/'/g,"\\'")}',event)" title="Rimuovi dalla griglia" style="flex-shrink:0;background:none;border:1px solid transparent;cursor:pointer;color:var(--ink-3);font-size:.7rem;line-height:1;padding:2px 4px;border-radius:3px" onmouseover="this.style.color='var(--danger)';this.style.borderColor='var(--danger)'" onmouseout="this.style.color='var(--ink-3)';this.style.borderColor='transparent'">✕</button></div></td>`;
+      h+=`<td style="padding:5px 8px 5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit"><div style="display:flex;align-items:center;gap:6px"><div style="line-height:1.35">${_esc(r.fullName.split(' ')[0])}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${_esc(r.fullName.split(' ').slice(1).join(' '))}</span></div><button onclick="removeRepResource(${_jsa(r.fullName)},event)" title="Rimuovi dalla griglia" style="flex-shrink:0;background:none;border:1px solid transparent;cursor:pointer;color:var(--ink-3);font-size:.7rem;line-height:1;padding:2px 4px;border-radius:3px" onmouseover="this.style.color='var(--danger)';this.style.borderColor='var(--danger)'" onmouseout="this.style.color='var(--ink-3)';this.style.borderColor='transparent'">✕</button></div></td>`;
       for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,isFerie=gd.ferieSet.has(d),isSel=gd.selectedDays.has(d);
-        if(isFerie){h+=`<td style="background:var(--danger-bg);border:1px solid rgba(201,0,60,.2);padding:3px 1px;text-align:center" title="${isSel?'In ferie · Reperibilità assegnata':'In ferie – clicca per assegnare comunque'}"><div class="rep-day ferie-ov${isSel?' on':''}" id="rd_${r.id}_${d}_${etiKey}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d},'${etiEsc}')"><span class="rep-ferie-badge">F</span></div></td>`;}
-        else{h+=`<td style="border:1px solid var(--line);padding:3px 1px;text-align:center;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div class="rep-day${ih?' festivo':iw?' weekend':''}${isSel?' on':''}" id="rd_${r.id}_${d}_${etiKey}" onclick="toggleRepDayGrid('${r.fullName.replace(/'/g,"\\'")}',${d},'${etiEsc}')"></div></td>`;}
+        if(isFerie){h+=`<td style="background:var(--danger-bg);border:1px solid rgba(201,0,60,.2);padding:3px 1px;text-align:center" title="${isSel?'In ferie · Reperibilità assegnata':'In ferie – clicca per assegnare comunque'}"><div class="rep-day ferie-ov${isSel?' on':''}" id="rd_${r.id}_${d}_${_esc(etiKey)}" onclick="toggleRepDayGrid(${_jsa(r.fullName)},${d},${_jsa(etichetta)})"><span class="rep-ferie-badge">F</span></div></td>`;}
+        else{h+=`<td style="border:1px solid var(--line);padding:3px 1px;text-align:center;background:${ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div class="rep-day${ih?' festivo':iw?' weekend':''}${isSel?' on':''}" id="rd_${r.id}_${d}_${_esc(etiKey)}" onclick="toggleRepDayGrid(${_jsa(r.fullName)},${d},${_jsa(etichetta)})"></div></td>`;}
       }
       const earn=calcRepEarnings(r.fullName,year,month,etichetta);
-      h+=`<td id="repgg_${r.id}_${etiKey}" class="rep-earn-gg">${gd.selectedDays.size}</td>`;
-      h+=`<td id="repeur_${r.id}_${etiKey}" class="rep-earn" style="padding:5px 8px;text-align:right;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
+      h+=`<td id="repgg_${r.id}_${_esc(etiKey)}" class="rep-earn-gg">${gd.selectedDays.size}</td>`;
+      h+=`<td id="repeur_${r.id}_${_esc(etiKey)}" class="rep-earn" style="padding:5px 8px;text-align:right;border-left:1px solid var(--stone-3)">€${earn}</td></tr>`;
     });
     let initGg=0,initEur=0;
     for(const[,gd]of Object.entries(_repGridData[etichetta])){initGg+=gd.selectedDays.size;initEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}
     h+=`</tbody><tfoot><tr style="background:var(--stone-2);border-top:2px solid var(--stone-3)">`;
     h+=`<td style="position:sticky;left:0;background:var(--stone-2);padding:5px 10px;font-weight:700;font-size:.74rem;color:var(--ink)">Totale</td>`;
     h+=`<td colspan="${dim}" style="background:var(--stone-2)"></td>`;
-    h+=`<td id="reptot_gg_${etiKey}" style="text-align:center;font-weight:700;font-size:.72rem;padding:5px 4px">${initGg}</td>`;
-    h+=`<td id="reptot_eur_${etiKey}" style="text-align:right;font-weight:700;font-size:.72rem;color:var(--ok);padding:5px 8px;border-left:1px solid var(--stone-3)">€${initEur}</td>`;
+    h+=`<td id="reptot_gg_${_esc(etiKey)}" style="text-align:center;font-weight:700;font-size:.72rem;padding:5px 4px">${initGg}</td>`;
+    h+=`<td id="reptot_eur_${_esc(etiKey)}" style="text-align:right;font-weight:700;font-size:.72rem;color:var(--ok);padding:5px 8px;border-left:1px solid var(--stone-3)">€${initEur}</td>`;
     h+=`</tr></tfoot></table></div>`;
   }
   // ── riepilogo per risorsa (somma di tutti i turni) ──
@@ -190,7 +189,7 @@ async function buildRepGriglia(){
     let resGg=0,resEur=0;
     for(const eti of tipi){const gd=_repGridData[eti]?.[r.fullName];if(gd){resGg+=gd.selectedDays.size;resEur+=calcRepEarningsFromDays([...gd.selectedDays],year,month);}}
     h+=`<div style="background:var(--stone-1);border:1px solid var(--stone-3);border-radius:var(--r);padding:7px 12px;min-width:150px">`;
-    h+=`<div style="font-size:.74rem;font-weight:600;color:var(--ink);margin-bottom:2px">${r.fullName}</div>`;
+    h+=`<div style="font-size:.74rem;font-weight:600;color:var(--ink);margin-bottom:2px">${_esc(r.fullName)}</div>`;
     h+=`<div style="font-size:.72rem;color:var(--ink-3)"><span id="reptot_res_gg_${r.id}" style="font-weight:700;color:var(--ink)">${resGg}</span> gg&nbsp;·&nbsp;<span id="reptot_res_eur_${r.id}" style="font-weight:700;color:var(--ok)">€${resEur}</span></div>`;
     h+=`</div>`;
   });
@@ -200,7 +199,7 @@ async function buildRepGriglia(){
   h+=`<div style="margin-top:10px;padding:10px 16px;background:var(--ink);color:var(--white);border-radius:var(--r);display:flex;align-items:center;gap:12px;font-size:.83rem;flex-wrap:wrap"><i class="fa-solid fa-sigma" style="color:var(--amber)"></i><span style="opacity:.75">Totale assegnato:</span><span id="repGrandTotalGg" style="font-weight:700">${grandGg}</span><span style="opacity:.5">giorni ·</span><span id="repGrandTotalEur" style="color:var(--amber);font-weight:700">€${grandEur}</span></div>`;
   const _inGrid=new Set(resources.map(r=>r.fullName));
   const _avail=RESOURCES.filter(r=>!_inGrid.has(r.fullName));
-  if(_avail.length){h+=`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select id="repAddExtraSelect" style="font-size:.8rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink);min-width:180px"><option value="">— Aggiungi risorsa —</option>${_avail.map(r=>`<option value="${r.fullName.replace(/"/g,'&quot;')}">${r.fullName}${_repHiddenResources.has(r.fullName)?' (nascosta)':''}</option>`).join('')}</select><button class="btn btn-ghost2 btn-sm" onclick="addExtraRepResource()"><i class="fa-solid fa-user-plus"></i> Aggiungi</button></div>`;}
+  if(_avail.length){h+=`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select id="repAddExtraSelect" style="font-size:.8rem;padding:5px 8px;border:1px solid var(--line-s);border-radius:var(--r);background:var(--white);color:var(--ink);min-width:180px"><option value="">— Aggiungi risorsa —</option>${_avail.map(r=>`<option value="${_esc(r.fullName)}">${_esc(r.fullName)}${_repHiddenResources.has(r.fullName)?' (nascosta)':''}</option>`).join('')}</select><button class="btn btn-ghost2 btn-sm" onclick="addExtraRepResource()"><i class="fa-solid fa-user-plus"></i> Aggiungi</button></div>`;}
   document.getElementById('repGriglia').innerHTML=h;
   const mFilt=document.getElementById('repFilterMese'),yFilt=document.getElementById('repFilterAnno');
   if(mFilt)mFilt.value=month;
@@ -379,7 +378,7 @@ async function renderRepTeam(){
     const tls=_prjTLsByName[progetto]||[];
     const canDelPrj=isAdmin||(isProjectTL&&tls.includes(currentUser));
     html+=`<div style="margin-bottom:24px">`;
-    html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${progetto}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${tls.join(', ')}</span>`:''}</div>`;
+    html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${_esc(progetto)}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${_esc(tls.join(', '))}</span>`:''}</div>`;
     for(const [meseKey,entries] of Object.entries(byMese).sort(([a],[b])=>{const[ay,am]=a.split('|').map(Number),[by,bm]=b.split('|').map(Number);return ay!==by?ay-by:am-bm;})){
       const anno=+meseKey.split('|')[0],mese=+meseKey.split('|')[1];
       const dim=new Date(anno,mese+1,0).getDate(),holSet=getHol(anno);
@@ -389,7 +388,7 @@ async function renderRepTeam(){
       html+=`<div style="margin-bottom:14px"><div style="font-size:.78rem;font-weight:600;color:var(--ink-2);margin:10px 0 6px">${MONTHS[mese]} ${anno}</div>`;
       for(const eti of etichette){
         const etiEntries=entries.filter(e=>(e.etichetta||'')===eti);
-        if(etichette.length>1||eti){html+=`<div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin:10px 0 4px;padding-left:2px">${eti||'Reperibilità'}</div>`;}
+        if(etichette.length>1||eti){html+=`<div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin:10px 0 4px;padding-left:2px">${_esc(eti||'Reperibilità')}</div>`;}
         html+=`<div style="overflow-x:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
         html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
         for(let d=1;d<=dim;d++){const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt),ih=holSet.has(ds),iw=wd===0||wd===6;
@@ -403,7 +402,7 @@ async function renderRepTeam(){
           const days=entry?new Set(entry.giorni):new Set();
           const ferieSet=ferieMap[r.fullName+'|'+anno+'|'+mese]||new Set();
           html+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-          html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
+          html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${_esc(r.fullName.split(' ')[0])}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${_esc(r.fullName.split(' ').slice(1).join(' '))}</span></td>`;
           for(let d=1;d<=dim;d++){const dt=new Date(anno,mese,d),wd=dt.getDay(),ds=localDate(dt),ih=holSet.has(ds),iw=wd===0||wd===6,on=days.has(d),isConflict=ferieSet.has(d)&&on;
             html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?(isConflict?'rgba(201,0,60,.12)':'rgba(0,123,255,.12)'):ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}">`;
             html+=`<div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?(isConflict?'var(--danger)':'var(--info)'):'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white" title="${on?(isConflict?'Reperibilità + ferie!':'assegnato'):''}">`;
@@ -412,7 +411,7 @@ async function renderRepTeam(){
           const earn=entry?calcRepEarningsFromDays(entry.giorni,anno,mese):null;
           html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem;color:var(--info)">${entry?days.size:'—'}</td>`;
           html+=`<td style="padding:5px 8px;text-align:right;font-weight:700;font-size:.72rem;border-left:1px solid var(--stone-3);color:${earn!==null&&earn>0?'var(--ok)':'var(--ink-3)'}">${earn!==null?`€${earn}`:'—'}</td>`;
-          if(canDelPrj)html+=`<td style="padding:2px 4px;text-align:center">${entry?`<button class="btn-icon danger" onclick="deleteRep(${entry.id},'${r.fullName.replace(/'/g,"\\'")}','${progetto.replace(/'/g,"\\'")}')"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</td>`;
+          if(canDelPrj)html+=`<td style="padding:2px 4px;text-align:center">${entry?`<button class="btn-icon danger" onclick="deleteRep(${entry.id},${_jsa(r.fullName)},${_jsa(progetto)})"><i class="fa-solid fa-trash-can" style="font-size:.75rem"></i></button>`:''}</td>`;
           html+=`</tr>`;
         });
         html+=`</tbody></table></div>`;
@@ -462,10 +461,10 @@ async function renderRepMine(){
     // Etichette distinte per questo progetto (ordinate; '' viene mostrata senza etichetta)
     const etichette=[...new Set(projEntries.map(e=>e.etichetta||''))].sort();
     html+=`<div style="margin-bottom:18px">`;
-    html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${progetto}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${tls.join(', ')}</span>`:''}</div>`;
+    html+=`<div style="font-weight:700;font-size:.82rem;color:var(--ink);margin:0 0 6px;border-bottom:2px solid var(--ink);padding-bottom:4px"><i class="fa-solid fa-folder" style="margin-right:5px;opacity:.6"></i>${_esc(progetto)}${tls.length?`<span style="font-size:.7rem;font-weight:400;color:var(--ink-3);margin-left:8px">TL: ${_esc(tls.join(', '))}</span>`:''}</div>`;
     for(const eti of etichette){
       const etiEntries=projEntries.filter(e=>(e.etichetta||'')===eti);
-      if(etichette.length>1||eti){html+=`<div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin:10px 0 4px;padding-left:2px">${eti||'Reperibilità'}</div>`;}
+      if(etichette.length>1||eti){html+=`<div style="font-size:.74rem;font-weight:700;color:var(--ink-2);margin:10px 0 4px;padding-left:2px">${_esc(eti||'Reperibilità')}</div>`;}
       html+=`<div style="overflow-x:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
       html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
       for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
@@ -478,7 +477,7 @@ async function renderRepMine(){
         const days=entry?new Set(entry.giorni):new Set();
         const isMe=r.id===myRes.id;
         html+=`<tr style="background:${isMe?'rgba(0,123,255,.06)':ri%2?'var(--stone)':'var(--white)'}">`;
-        html+=`<td style="padding:5px 10px;font-weight:${isMe?700:600};font-size:.74rem;color:${isMe?'var(--info)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span>${isMe?` <span style="font-size:.58rem;background:var(--info);color:white;border-radius:3px;padding:1px 4px;vertical-align:middle">tu</span>`:''}</td>`;
+        html+=`<td style="padding:5px 10px;font-weight:${isMe?700:600};font-size:.74rem;color:${isMe?'var(--info)':'var(--ink)'};border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${_esc(r.fullName.split(' ')[0])}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${_esc(r.fullName.split(' ').slice(1).join(' '))}</span>${isMe?` <span style="font-size:.58rem;background:var(--info);color:white;border-radius:3px;padding:1px 4px;vertical-align:middle">tu</span>`:''}</td>`;
         for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d),isFerieConflict=isMe&&ferieSet.has(d)&&on;
           html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?(isFerieConflict?'rgba(201,0,60,.12)':'rgba(0,123,255,.12)'):ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}">`;
           html+=`<div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?(isFerieConflict?'var(--danger)':'var(--info)'):'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white" title="${on?(isFerieConflict?'Reperibilità + ferie!':'assegnato'):''}">`;
@@ -517,7 +516,7 @@ async function renderRepOverview(){
     const resOnPrj=myResources.filter(r=>entries.some(e=>e.risorsaId===r.id));
     const tls=_prjTLsByName[progetto]||[];const tlLabel=tls.length?tls.join(', '):'—';
     html+=`<div class="card" style="margin-bottom:16px">`;
-    html+=`<div class="card-title"><i class="fa-solid fa-folder"></i> ${progetto} <span style="font-size:.72rem;color:var(--ink-3);font-weight:400;margin-left:6px">TL: ${tlLabel}</span></div>`;
+    html+=`<div class="card-title"><i class="fa-solid fa-folder"></i> ${_esc(progetto)} <span style="font-size:.72rem;color:var(--ink-3);font-weight:400;margin-left:6px">TL: ${_esc(tlLabel)}</span></div>`;
     html+=`<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;width:100%"><thead><tr>`;
     html+=`<th style="padding:5px 10px;background:var(--ink);color:var(--white);text-align:left;white-space:nowrap;min-width:90px;position:sticky;left:0;z-index:1">Risorsa</th>`;
     for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6;
@@ -529,7 +528,7 @@ async function renderRepOverview(){
       const entry=entries.find(e=>e.risorsaId===r.id);
       const days=entry?new Set(entry.giorni):new Set();
       html+=`<tr style="background:${ri%2?'var(--stone)':'var(--white)'}">`;
-      html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${r.fullName.split(' ')[0]}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${r.fullName.split(' ').slice(1).join(' ')}</span></td>`;
+      html+=`<td style="padding:5px 10px;font-weight:600;font-size:.74rem;color:var(--ink);border-right:2px solid var(--stone-3);white-space:nowrap;position:sticky;left:0;background:inherit">${_esc(r.fullName.split(' ')[0])}<br><span style="font-weight:400;color:var(--ink-3);font-size:.63rem">${_esc(r.fullName.split(' ').slice(1).join(' '))}</span></td>`;
       for(let d=1;d<=dim;d++){const dt=new Date(year,month,d),wd=dt.getDay(),ds=localDate(dt),ih=hol.has(ds),iw=wd===0||wd===6,on=days.has(d);
         html+=`<td style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${on?'rgba(0,123,255,.12)':ih?'var(--amber-bg)':iw?'rgba(161,0,255,.05)':'var(--stone)'}"><div style="width:14px;height:14px;margin:auto;border-radius:50%;background:${on?'var(--info)':'transparent'};display:flex;align-items:center;justify-content:center;font-size:.55rem;color:white">${on?'✓':''}</div></td>`;}
       html+=`<td style="padding:5px 4px;text-align:center;font-weight:600;font-size:.72rem">${days.size}</td>`;

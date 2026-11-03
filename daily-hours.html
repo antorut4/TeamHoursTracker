@@ -85,6 +85,11 @@ async function callApi(action, payload) {
   return json.data;
 }
 
+// Escape HTML per i testi che arrivano dal server (nome, messaggi d'errore)
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
 function fmtDate(iso) {
   const DAYS   = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
   const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
@@ -98,14 +103,14 @@ function renderErr(msg) {
     <div class="oops">
       <div class="ico">🔐</div>
       <h2>Link non valido</h2>
-      <p>${msg}</p>
+      <p>${esc(msg)}</p>
     </div>`;
 }
 
 function renderForm(d) {
   const dateLabel = fmtDate(d.data);
   document.getElementById('app').innerHTML = `
-    <div class="u-name">${d.fullName}</div>
+    <div class="u-name">${esc(d.fullName)}</div>
     <div class="u-date">📅 ${dateLabel}</div>
     ${d.ore !== null ? '<div class="alert ok" id="banner">✓ Ore già registrate — puoi modificarle</div>' : ''}
     <label for="ore-inp">Ore lavorate</label>

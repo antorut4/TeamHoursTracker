@@ -12,8 +12,8 @@ async function loadOreForm(){
     if(wbs.length>0){
       const q1=wbs.filter(x=>x.q==='1Q'),q2=wbs.filter(x=>x.q==='2Q');
       wbsHtml=`<div class="wbs-info-box"><div class="wbs-info-label"><i class="fa-solid fa-code-branch"></i> WBS assegnate dal manager</div><div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px">`;
-      if(q1.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">I Quindicina</div>${q1.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${x.ore}h</span>`:''}</div>`).join('')}</div>`;
-      if(q2.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">II Quindicina</div>${q2.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${x.progetto}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${x.codice}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${x.ore}h</span>`:''}</div>`).join('')}</div>`;
+      if(q1.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">I Quindicina</div>${q1.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${_esc(x.progetto)}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${_esc(x.codice)}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${_esc(x.ore)}h</span>`:''}</div>`).join('')}</div>`;
+      if(q2.length)wbsHtml+=`<div><div style="font-size:.72rem;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">II Quindicina</div>${q2.map(x=>`<div style="font-size:.83rem;margin-bottom:3px"><span style="color:var(--ink-3)">${_esc(x.progetto)}</span>${x.codice?` <b style="font-family:monospace;color:var(--ink)">${_esc(x.codice)}</b>`:''}${x.ore!=null?` <span style="color:var(--amber);font-weight:700">${_esc(x.ore)}h</span>`:''}</div>`).join('')}</div>`;
       wbsHtml+=`</div></div>`;
     }
   }
@@ -48,7 +48,7 @@ async function renderMyOre(){
   let h='<div class="table-wrap"><table><thead><tr><th>Mese</th><th>I Q</th><th>II Q</th><th>Totale</th><th>Disponibili</th><th></th></tr></thead><tbody>';
   rows.forEach(e=>{const tot=(+e.ore_q1||0)+(+e.ore_q2||0),av=wHours(e.anno,e.mese,1)+wHours(e.anno,e.mese,2);const extra=tot-av;
     const straoBadge=extra>0?` <span style="font-size:.69rem;font-weight:700;color:var(--warn);background:var(--warn-bg);border-radius:10px;padding:1px 7px;white-space:nowrap"><i class="fa-solid fa-bolt" style="margin-right:3px"></i>+${Math.round(extra*10)/10}h strao</span>`:'';
-    h+=`<tr style="${extra>0?'background:var(--warn-bg)':''}"><td><b>${MONTHS[e.mese]} ${e.anno}</b></td><td>${e.ore_q1!=null?e.ore_q1+'h':'—'}${e.note_q1?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q1})</span>`:''}</td><td>${e.ore_q2!=null?e.ore_q2+'h':'—'}${e.note_q2?` <span style="color:var(--ink-3);font-size:.73rem">(${e.note_q2})</span>`:''}</td><td><b>${tot}h</b>${straoBadge}</td><td style="color:var(--ink-3)">${av}h</td><td><button class="btn-icon danger" onclick="deleteMyOre(${e.id},'${MONTHS[e.mese]} ${e.anno}')" title="Elimina inserimento"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button></td></tr>`;
+    h+=`<tr style="${extra>0?'background:var(--warn-bg)':''}"><td><b>${MONTHS[e.mese]} ${e.anno}</b></td><td>${e.ore_q1!=null?e.ore_q1+'h':'—'}${e.note_q1?` <span style="color:var(--ink-3);font-size:.73rem">(${_esc(e.note_q1)})</span>`:''}</td><td>${e.ore_q2!=null?e.ore_q2+'h':'—'}${e.note_q2?` <span style="color:var(--ink-3);font-size:.73rem">(${_esc(e.note_q2)})</span>`:''}</td><td><b>${tot}h</b>${straoBadge}</td><td style="color:var(--ink-3)">${av}h</td><td><button class="btn-icon danger" onclick="deleteMyOre(${e.id},'${MONTHS[e.mese]} ${e.anno}')" title="Elimina inserimento"><i class="fa-solid fa-trash-can" style="font-size:.72rem"></i></button></td></tr>`;
   });
   el.innerHTML=h+'</tbody></table></div>';
 }
@@ -96,8 +96,8 @@ async function loadRiepilogo(){
     const panelId=`wbsp-${rid}-${month}-${year}`;
     const wbsTd=canWbs?`<td style="white-space:nowrap"><button class="btn btn-ghost2 btn-sm${hasWbs?' btn-wbs-set':''}" onclick="toggleWbsPanel('${panelId}',${rid},${month},${year})"><i class="fa-solid fa-code-branch"></i> WBS</button></td>`:'';
     const lcTd=canLC?`<td style="white-space:nowrap;font-size:.82rem;color:var(--amber);font-weight:600">${res&&res.loadCost!=null?'€'+res.loadCost:'—'}</td>`:'';
-    if(!e)h+=`<tr><td>${m}</td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td>${lcTd}${wbsTd}</tr>`;
-    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${m}</b></td><td style="color:var(--ink-3);font-size:.8rem">${lead}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td>${lcTd}${wbsTd}</tr>`;}
+    if(!e)h+=`<tr><td>${_esc(m)}</td><td style="color:var(--ink-3);font-size:.8rem">${_esc(lead)}</td><td colspan="3" style="color:var(--ink-3)">—</td><td style="color:var(--ink-3)">${av}h</td><td><span class="badge badge-warn">Non inserito</span></td>${lcTd}${wbsTd}</tr>`;
+    else{const tot=(+e.ore1||0)+(+e.ore2||0);h+=`<tr><td><b>${_esc(m)}</b></td><td style="color:var(--ink-3);font-size:.8rem">${_esc(lead)}</td><td>${e.ore1!=null?e.ore1+'h':'—'}</td><td>${e.ore2!=null?e.ore2+'h':'—'}</td><td><b>${tot}h</b></td><td style="color:var(--ink-3)">${av}h</td><td>${tot>av?`<span class="badge badge-amber">Extra ${tot}h</span>`:`<span class="badge badge-ok">${tot}h</span>`}</td>${lcTd}${wbsTd}</tr>`;}
     if(canWbs)h+=`<tr id="${panelId}" style="display:none"><td colspan="${cols}" style="padding:0">${buildWbsPanelHtml(rid,m,month,year,wbsEntries)}</td></tr>`;
   });
   document.getElementById('riepilogoTable').innerHTML=h+'</tbody></table></div>';
@@ -120,14 +120,14 @@ function buildWbsPanelHtml(risorsaId,memberName,month,year,entries){
   }
   const label1=`<div class="wbs-col-head"><span>I</span> Quindicina (1–15)</div>`;
   const label2=`<div class="wbs-col-head"><span>II</span> Quindicina (16–fine)</div>`;
-  return `<div class="wbs-panel"><div class="wbs-panel-title"><i class="fa-solid fa-code-branch"></i> WBS per <b>${memberName}</b> — ${MONTHS[month]} ${year}</div><div class="wbs-cols"><div class="wbs-col">${label1}${colHtml('1Q',q1)}</div><div class="wbs-col">${label2}${colHtml('2Q',q2)}</div></div><div style="display:flex;gap:10px;align-items:center;margin-top:14px"><button class="btn btn-ink" onclick="saveWbsForMember(${risorsaId},${month},${year})"><i class="fa-solid fa-floppy-disk"></i> Salva WBS</button><div id="wbs-msg-${risorsaId}-${month}-${year}" class="msg"></div></div></div>`;
+  return `<div class="wbs-panel"><div class="wbs-panel-title"><i class="fa-solid fa-code-branch"></i> WBS per <b>${_esc(memberName)}</b> — ${MONTHS[month]} ${year}</div><div class="wbs-cols"><div class="wbs-col">${label1}${colHtml('1Q',q1)}</div><div class="wbs-col">${label2}${colHtml('2Q',q2)}</div></div><div style="display:flex;gap:10px;align-items:center;margin-top:14px"><button class="btn btn-ink" onclick="saveWbsForMember(${risorsaId},${month},${year})"><i class="fa-solid fa-floppy-disk"></i> Salva WBS</button><div id="wbs-msg-${risorsaId}-${month}-${year}" class="msg"></div></div></div>`;
 }
 function wbsRowHtml(risorsaId,month,year,q,idx,progetto,codice,ore){
   const rid=`wbsr-${risorsaId}-${month}-${year}-${q}-${idx}`;
-  const cE=(codice||'').replace(/"/g,'&quot;');
-  const oV=ore!=null&&ore!==''?ore:'';
+  const cE=_esc(codice||'');
+  const oV=ore!=null&&ore!==''?_esc(ore):'';
   const res=RESOURCES.find(x=>x.id===risorsaId);const prjs=res?.progetti||[];
-  const opts='<option value="">— Progetto —</option>'+prjs.map(p=>`<option value="${p.replace(/"/g,'&quot;')}"${p===progetto?' selected':''}>${p}</option>`).join('');
+  const opts='<option value="">— Progetto —</option>'+prjs.map(p=>`<option value="${_esc(p)}"${p===progetto?' selected':''}>${_esc(p)}</option>`).join('');
   return `<div class="wbs-row" id="${rid}"><select class="wbs-input wbs-prj-sel" onchange="onWbsProgettoChange(this,'${rid}')">${opts}</select><input type="text" class="wbs-input wbs-code" placeholder="Codice WBS" value="${cE}"/><input type="number" class="wbs-input wbs-ore" placeholder="Ore" min="0" step="0.5" value="${oV}"/><button class="btn-icon danger" onclick="removeWbsRow('${rid}')" title="Rimuovi"><i class="fa-solid fa-xmark"></i></button></div>`;
 }
 function onWbsProgettoChange(sel,rid){

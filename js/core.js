@@ -17,6 +17,11 @@ function _sessionExpired(){
   doLogout();
   if(!_expiredShown){_expiredShown=true;setTimeout(()=>{alert('La sessione è scaduta: accedi di nuovo.');_expiredShown=false;},0);}
 }
+// Escape HTML: ogni testo che arriva dal database va passato qui prima di finire in innerHTML,
+// sia nel contenuto sia negli attributi (value, title, data-*)
+function _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// Testo come argomento JS dentro un attributo HTML: onclick="fn(${_jsa(nome)})". Gestisce apostrofi, virgolette, backslash
+function _jsa(v){return _esc(JSON.stringify(String(v??'')));}
 const K_HRS='hrs',K_FER='fer',K_RES='res',K_REP='rep',K_PRJ='prj',K_FRIS='hrs_fris';
 let _cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};
 let _prjIdByName={},_prjNameById={},_prjTLsByName={},_prjWbsByName={};
@@ -51,7 +56,8 @@ async function getProjects(){return _cache.prj.slice();}
 function getWbsForMember(risorsaId,anno,mese){return _cache.wbs[`${risorsaId}_${anno}_${mese}`]||[];}
 function getRepTipiForPrj(progetto){const pid=_prjIdByName[progetto];const tipi=pid&&_cache.repTipi[String(pid)];return(tipi&&tipi.length)?tipi:[''];}
 const MONTHS=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':'#007A4C';
+// 'Assenza' = assenza di un collega senza dettaglio (il server non invia il tipo Malattia né le note)
+const TIPO_C=t=>t==='Ferie'?'#A100FF':t==='Malattia'?'#C9003C':t==='Assenza'?'#8C8C8C':'#007A4C';
 const PAL=['#A100FF','#007A4C','#004B87','#C9003C','#E60075','#FF6900','#00BAAB','#7500C0','#005734','#003366','#6200CC','#FF3385'];
 const S={get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
 let currentUser=null,isAdmin=false,isTeamLead=false,isProjectTL=false,RESOURCES=[];

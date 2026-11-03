@@ -8,8 +8,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="sha512-Avb2QiuDEEvB4bZJYdft2mNjVShBftLdPG8FJ0V7irTLQ8Uo0qcPxh4Plq7G5tGm0rU+1SPhVotteLpBERwTkw==" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+<!-- Librerie da CDN con SRI: il browser le rifiuta se il file servito non è identico a quello verificato -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="ticket-cls.css"/>
 </head>
@@ -41,8 +42,15 @@
         <button class="btn-primary" onclick="goStepPwdByEmail()">Continua</button>
         <button class="btn-ghost" onclick="goAdminLogin()">Accesso amministratore</button>
       </div>
+      <div id="stepInvite" style="display:none">
+        <div class="first-badge"><i class="fa-solid fa-envelope"></i>Primo accesso — password da impostare</div>
+        <p id="inviteText" style="font-size:.84rem;color:var(--ink-2);line-height:1.5;margin:0 0 14px">Non hai ancora una password. Ti invieremo all'email aziendale un link per impostarla: è valido 72 ore e si usa una sola volta.</p>
+        <div class="login-err" id="errInvite"></div>
+        <button class="btn-primary" id="inviteBtn" onclick="doRequestInvite()">Inviami il link</button>
+        <button class="btn-ghost" onclick="goStepSelect()">← Indietro</button>
+      </div>
       <div id="stepFirstAccess" style="display:none">
-        <div class="first-badge"><i class="fa-solid fa-circle-info"></i>Primo accesso — imposta la tua password</div>
+        <div class="first-badge"><i class="fa-solid fa-circle-info"></i>Imposta la tua password</div>
         <label for="pwd1stA">Scegli una password</label>
         <input type="password" id="pwd1stA" placeholder="Minimo 6 caratteri"/>
         <label for="pwd1stB">Conferma password</label>

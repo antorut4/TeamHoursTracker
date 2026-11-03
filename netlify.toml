@@ -21,8 +21,71 @@
   to = "/.netlify/functions/daily"
   status = 200
 
+# Il sito pubblica la cartella del progetto: sorgenti del backend, test e file di progetto non vanno serviti
+[[redirects]]
+  from = "/netlify/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/tests/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/node_modules/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package.json"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/package-lock.json"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/server.mjs"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/migration_daily_hours.sql"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/start.bat"
+  to = "/404.html"
+  status = 404
+  force = true
+
 [functions."send-daily-reminder-background"]
   schedule = "0 8 * * 1-5"
 
 [functions."send-ticket-reminder-background"]
   schedule = "0 8 * * 1-5"
+
+# ── Header di sicurezza su tutte le pagine ──
+# CSP: script e stili solo dal sito e dai CDN usati; connessioni (fetch) solo verso il sito stesso,
+# così un eventuale script iniettato non può spedire dati o token all'esterno.
+# 'unsafe-inline' resta necessario per gli handler inline (onclick=...) e gli stili inline.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Strict-Transport-Security = "max-age=31536000"

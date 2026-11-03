@@ -1,5 +1,5 @@
 // Test end-to-end dell'handler /api/db su un Postgres in-process: login, sessioni, permessi,
-// validazione, migrazioni. Nessun accesso a Neon e nessuna email inviata (SMTP non configurato).
+// validazione, inviti, visibilità dei dati, migrazioni. Nessun accesso a Neon; le email finiscono in `mails`.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDb, caller } from './helpers/db.mjs';
@@ -8,12 +8,19 @@ process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
 process.env.DAILY_TOKEN_SECRET = 'test-daily-secret';
 delete process.env.GMAIL_USER; delete process.env.GMAIL_APP_PASSWORD; delete process.env.SESSION_SECRET;
 
+process.env.SITE_URL = 'https://app.test';
+
 const db = await import('../netlify/functions/db.mjs');
-const { legacyHash } = await import('../netlify/lib/auth.mjs');
+const { legacyHash, hashPassword } = await import('../netlify/lib/auth.mjs');
+const { claimDailyRun } = await import('../netlify/lib/jobs.mjs');
 const { SCHEMA_VERSION } = await import('../netlify/lib/migrations.mjs');
 const { sql } = await createDb();
 db._setSqlForTests(sql);
 const call = caller(db.handler);
+const mails = [];
+const fakeMailer = { sendMail: async m => { mails.push(m); return { messageId: 'm' + mails.length }; } };
+db._setMailerForTests(fakeMailer);
+const inviteFromMail = m => decodeURIComponent(m.text.match(/\?invite=([^\s]+)/)[1]);
 
 const T = {};          // token per utente
 const ID = {};         // id risorse
@@ -38,8 +45,9 @@ before(async () => {
   await sql`INSERT INTO config (chiave, valore) VALUES ('admin_pwd', ${legacyHash('adminpass')})`;
   await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${ID.piero}, ${legacyHash('vecchia1')})`;
   for (const n of ['mario', 'anna', 'luca', 'sara']) {
-    const r = await call('firstAccess', { risorsaId: ID[n], password: PASS });
-    assert.equal(r.status, 200, n);
+    await sql`INSERT INTO utenti_pwd (risorsa_id, pwd_hash) VALUES (${ID[n]}, ${await hashPassword(PASS)})`;
+    const r = await call('login', { risorsaId: ID[n], password: PASS });
+    assert.equal(r.data.ok, true, n);
     T[n] = r.data.token;
   }
   T.admin = (await call('adminLogin', { password: 'adminpass' })).data.token;
@@ -91,14 +99,59 @@ test('loginLookup: email case-insensitive, nessun dato sensibile', async () => {
   assert.equal((await call('loginLookup', { email: 'non-una-email' })).status, 400);
 });
 
-test('login: password errata, corretta, primo accesso non ripetibile', async () => {
+test('login: password errata e corretta', async () => {
   assert.equal((await call('login', { risorsaId: ID.anna, password: 'sbagliata' })).data.ok, false);
   const ok = await call('login', { risorsaId: ID.anna, password: PASS });
   assert.equal(ok.data.ok, true);
   assert.ok(ok.data.token);
-  const again = await call('firstAccess', { risorsaId: ID.anna, password: 'rubata123' });
-  assert.equal(again.status, 409);
-  assert.equal((await call('firstAccess', { risorsaId: ID.anna, password: '123' })).status, 400);
+});
+
+// ── primo accesso solo tramite invito via email ──
+test('invito: la password si imposta solo dal link ricevuto', async () => {
+  const [g] = await sql`INSERT INTO risorse (nome, cognome, email) VALUES ('Gino', 'Blu', 'gino@x.it') RETURNING id`;
+  // Prima bastava conoscere l'email: ora senza link non si imposta niente
+  assert.equal((await call('firstAccess', { risorsaId: g.id, password: 'rubata123' })).status, 400);
+  const r = await call('requestInvite', { risorsaId: g.id });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.email, 'gi***@x.it');
+  const m = mails.at(-1);
+  assert.equal(m.to, 'gino@x.it');
+  assert.match(m.text, /https:\/\/app\.test\/\?invite=/);
+  const token = inviteFromMail(m);
+  assert.equal((await call('inviteInfo', { token })).data.fullName, 'Gino Blu');
+  assert.equal((await call('firstAccess', { token, password: '123' })).status, 400, 'policy password');
+  const fa = await call('firstAccess', { token, password: 'nuova1234' });
+  assert.equal(fa.status, 200);
+  assert.equal((await call('bootstrap', {}, fa.data.token)).status, 200);
+  assert.equal((await call('firstAccess', { token, password: 'altra12345' })).status, 400, 'il link è monouso');
+  assert.equal((await call('requestInvite', { risorsaId: g.id })).status, 409, 'password già impostata');
+  assert.equal((await call('login', { risorsaId: g.id, password: 'nuova1234' })).data.ok, true);
+});
+
+test('invito: un nuovo link annulla il precedente; limite richieste; nome escapato nell\'email', async () => {
+  const [e] = await sql`INSERT INTO risorse (nome, cognome, email) VALUES ('Eva<img src=x>', 'Ros', 'eva@x.it') RETURNING id`;
+  await call('requestInvite', { risorsaId: e.id });
+  const first = inviteFromMail(mails.at(-1));
+  assert.match(mails.at(-1).html, /Eva&lt;img src=x&gt;/);
+  assert.doesNotMatch(mails.at(-1).html, /<img src=x>/);
+  await call('requestInvite', { risorsaId: e.id });
+  const second = inviteFromMail(mails.at(-1));
+  assert.equal((await call('inviteInfo', { token: first })).status, 400, 'il link precedente non vale più');
+  assert.equal((await call('inviteInfo', { token: second })).status, 200);
+  assert.equal((await call('requestInvite', { risorsaId: e.id })).status, 200);
+  assert.equal((await call('requestInvite', { risorsaId: e.id })).status, 429, 'massimo 3 richieste ogni 15 minuti');
+  const forged = second.slice(0, -3) + (second.endsWith('AAA') ? 'BBB' : 'AAA');
+  assert.equal((await call('inviteInfo', { token: forged })).status, 400);
+  assert.equal((await call('bootstrap', {}, second)).status, 401, 'un invito non vale come sessione');
+});
+
+test('invito: senza SMTP configurato risponde 503', async () => {
+  const [n] = await sql`INSERT INTO risorse (nome, cognome, email) VALUES ('Nino', 'Mail', 'nino@x.it') RETURNING id`;
+  db._setMailerForTests(null);
+  try { assert.equal((await call('requestInvite', { risorsaId: n.id })).status, 503); }
+  finally { db._setMailerForTests(fakeMailer); }
+  const [s0] = await sql`INSERT INTO risorse (nome, cognome) VALUES ('Senza', 'Email') RETURNING id`;
+  assert.equal((await call('requestInvite', { risorsaId: s0.id })).status, 400);
 });
 
 test('hash legacy: login riuscito e password riscritta in scrypt', async () => {
@@ -211,7 +264,51 @@ test('reset password: le sessioni della risorsa decadono', async () => {
   assert.equal((await call('resetUserPwd', { risorsaId: ID.anna }, T.mario)).status, 200);
   assert.equal((await call('bootstrap', {}, anna)).status, 401);
   assert.equal((await call('loginLookup', { email: 'anna@x.it' })).data.hasPwd, false);
-  assert.equal((await call('firstAccess', { risorsaId: ID.anna, password: PASS })).status, 200);
+  assert.equal((await call('requestInvite', { risorsaId: ID.anna })).status, 200);
+  const fa = await call('firstAccess', { token: inviteFromMail(mails.at(-1)), password: PASS });
+  assert.equal(fa.status, 200);
+  T.anna = fa.data.token;
+});
+
+// ── visibilità dei dati personali ──
+test('dati personali filtrati per ruolo: ore, note, malattia, email, consuntivo, presenze', async () => {
+  const [mal] = await sql`INSERT INTO ferie (risorsa_id, data_inizio, data_fine, tipo, note) VALUES (${ID.anna}, '2026-10-05', '2026-10-06', 'Malattia', 'visita medica') RETURNING id`;
+  await sql`INSERT INTO ore_mensili (risorsa_id, anno, mese, ore_q1) VALUES (${ID.anna}, 2026, 9, 80) ON CONFLICT DO NOTHING`;
+  await sql`INSERT INTO config (chiave, valore) VALUES (${'wbs_' + ID.anna + '_2026_9'}, '[]')`;
+  await sql`INSERT INTO presenze (risorsa_id, data) VALUES (${ID.anna}, '2026-10-07'), (${ID.sara}, '2026-10-07')`;
+  const anna = d => d.ferie.find(f => f.id === mal.id);
+  const sara = (await call('bootstrap', {}, T.sara)).data;
+  const fs = anna(sara);
+  assert.equal(fs.tipo, 'Assenza', 'la malattia di un collega non viene inviata');
+  assert.equal(fs.note, null);
+  assert.ok(!sara.ore.some(o => o.risorsa_id === ID.anna), 'niente ore altrui');
+  assert.ok(!Object.keys(sara.wbs).some(k => k.startsWith(ID.anna + '_')));
+  assert.equal(sara.risorse.find(r => r.id === ID.anna).email, null);
+  assert.equal(sara.risorse.find(r => r.id === ID.sara).email, 'Sara@X.it', 'la propria email resta');
+  const mario = (await call('bootstrap', {}, T.mario)).data;   // manager di Anna
+  assert.equal(anna(mario).tipo, 'Malattia');
+  assert.equal(anna(mario).note, 'visita medica');
+  assert.ok(mario.ore.some(o => o.risorsa_id === ID.anna));
+  const luca = (await call('bootstrap', {}, T.luca)).data;     // TL del progetto di Anna, non suo manager
+  assert.equal(anna(luca).tipo, 'Assenza');
+  assert.ok(!luca.ore.some(o => o.risorsa_id === ID.anna));
+  const cons = async t => (await call('getConsuntivo', { anno: 2026, mese: 9 }, t)).data.map(r => r.risorsa_id);
+  assert.ok((await cons(T.luca)).includes(ID.anna), 'il TL vede il consuntivo delle risorse del suo progetto');
+  assert.ok(!(await cons(T.sara)).includes(ID.anna));
+  assert.ok((await cons(T.admin)).includes(ID.anna));
+  const pres = async t => (await call('getPresenze', { from: '2026-10-05', to: '2026-10-09' }, t)).data.map(r => r.risorsa_id);
+  assert.deepEqual(await pres(T.sara), [ID.sara], 'Sara non ha colleghi di progetto');
+  assert.ok((await pres(T.luca)).includes(ID.anna) && !(await pres(T.luca)).includes(ID.sara));
+  assert.equal((await pres(T.admin)).length, 2);
+});
+
+// ── reminder schedulati: una sola esecuzione al giorno, nella fascia prevista ──
+test('job schedulati: fascia oraria e una sola esecuzione al giorno', async () => {
+  assert.equal((await claimDailyRun(sql, 'test-job', new Date('2026-11-03T03:00:00Z'))).ok, false, 'di notte no');
+  assert.equal((await claimDailyRun(sql, 'test-job', new Date('2026-11-03T08:00:05Z'))).ok, true);
+  assert.equal((await claimDailyRun(sql, 'test-job', new Date('2026-11-03T08:30:00Z'))).ok, false, 'seconda volta no');
+  assert.equal((await claimDailyRun(sql, 'altro-job', new Date('2026-11-03T08:00:05Z'))).ok, true, 'job diversi indipendenti');
+  assert.equal((await claimDailyRun(sql, 'test-job', new Date('2026-11-04T08:00:05Z'))).ok, true, 'il giorno dopo sì');
 });
 
 // ── validazione ed errori ──

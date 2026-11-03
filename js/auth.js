@@ -5,8 +5,11 @@ const SESSION_KEY='tht_session',TAB_KEY='tht_tab',RENEW_MS=60*60*1000;
 let _renewT=null;
 function _setToken(t){_token=t||null;try{t?localStorage.setItem(SESSION_KEY,t):localStorage.removeItem(SESSION_KEY);}catch{}}
 function _tokenSub(t){try{return JSON.parse(atob(t.split('.')[0].replace(/-/g,'+').replace(/_/g,'/'))).sub;}catch{return null;}}
-// All'avvio: riprende la sessione salvata, altrimenti mostra il login
+// All'avvio: link d'invito (?invite=) per impostare la password, altrimenti sessione salvata, altrimenti login
+let _inviteToken=null;
 async function restoreSession(){
+  const inv=new URLSearchParams(location.search).get('invite');
+  if(inv){await _openInvite(inv);return;}
   let t=null;try{t=localStorage.getItem(SESSION_KEY);}catch{}
   if(!t){document.getElementById('loginScreen').style.display='flex';return;}
   _token=t;let me;
@@ -25,7 +28,19 @@ window.addEventListener('storage',e=>{
   else _token=e.newValue;
 });
 // LOGIN
-function showStep(id){['stepSelect','stepFirstAccess','stepPwd','stepAdmin'].forEach(s=>document.getElementById(s).style.display=s===id?'block':'none');}
+// Link d'invito: l'eventuale sessione di un altro utente su questo browser viene chiusa
+async function _openInvite(token){
+  _setToken(null);
+  document.getElementById('loginScreen').style.display='flex';
+  let r;showSpinner();try{r=await call('inviteInfo',{token});}catch(e){hideSpinner();
+    history.replaceState(null,'',location.pathname);goStepSelect();
+    const err=document.getElementById('errEmail');err.textContent=e.message;err.style.display='block';return;}
+  hideSpinner();
+  _inviteToken=token;
+  document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;
+  showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';
+}
+function showStep(id){['stepSelect','stepInvite','stepFirstAccess','stepPwd','stepAdmin'].forEach(s=>document.getElementById(s).style.display=s===id?'block':'none');}
 function goStepSelect(){document.getElementById('loginSub').textContent='Inserisci la tua email per accedere';showStep('stepSelect');document.getElementById('loginEmail').value='';document.getElementById('errEmail').style.display='none';}
 function goAdminLogin(){document.getElementById('loginSub').textContent='Accesso amministratore';showStep('stepAdmin');document.getElementById('adminPwd').value='';document.getElementById('errAdmin').style.display='none';}
 async function goStepPwdByEmail(){
@@ -35,17 +50,30 @@ async function goStepPwdByEmail(){
   let r=null;showSpinner();try{r=await call('loginLookup',{email});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
   if(!r){errEl.textContent='Nessun account trovato per questa email.';errEl.style.display='block';return;}
   errEl.style.display='none';_loginRisorsaId=r.risorsaId;_loginFullName=r.fullName;
-  if(!r.hasPwd){document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;showStep('stepFirstAccess');document.getElementById('pwd1stA').value='';document.getElementById('pwd1stB').value='';document.getElementById('err1st').style.display='none';}
+  if(!r.hasPwd){
+    document.getElementById('loginSub').textContent=`Benvenuto/a, ${r.fullName}`;showStep('stepInvite');
+    document.getElementById('inviteText').textContent='Non hai ancora una password. Ti invieremo all\'email aziendale un link per impostarla: è valido 72 ore e si usa una sola volta.';
+    document.getElementById('inviteBtn').style.display='';document.getElementById('errInvite').style.display='none';
+  }
   else{document.getElementById('loginSub').textContent='Bentornato/a';document.getElementById('loginWhoLabel').textContent=r.fullName;showStep('stepPwd');document.getElementById('pwdInput').value='';document.getElementById('errPwd').style.display='none';setTimeout(()=>document.getElementById('pwdInput').focus(),100);}
 }
-async function doFirstAccess(){
+// Primo accesso (o dopo un reset): la password si imposta solo dal link ricevuto via email
+async function doRequestInvite(){
   if(!_loginRisorsaId)return;
+  const errEl=document.getElementById('errInvite');let r;
+  showSpinner();try{r=await call('requestInvite',{risorsaId:_loginRisorsaId});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
+  errEl.style.display='none';document.getElementById('inviteBtn').style.display='none';
+  document.getElementById('inviteText').textContent=`Ti abbiamo inviato il link a ${r.email}. Aprilo per impostare la password: è valido 72 ore.`;
+}
+async function doFirstAccess(){
+  if(!_inviteToken)return;
   const p1=document.getElementById('pwd1stA').value,p2=document.getElementById('pwd1stB').value,errEl=document.getElementById('err1st');
   if(p1.length<6){errEl.textContent='Minimo 6 caratteri.';errEl.style.display='block';return;}
   if(p1!==p2){errEl.textContent='Le password non coincidono.';errEl.style.display='block';return;}
   errEl.style.display='none';
-  let res;showSpinner();try{res=await call('firstAccess',{risorsaId:_loginRisorsaId,password:p1});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
-  await _startSession(res.token,_loginFullName,false);
+  let res;showSpinner();try{res=await call('firstAccess',{token:_inviteToken,password:p1});}catch(e){hideSpinner();errEl.textContent=e.message;errEl.style.display='block';return;}hideSpinner();
+  _inviteToken=null;history.replaceState(null,'',location.pathname);
+  await _startSession(res.token,res.fullName,false);
 }
 // Dopo il login: carica i dati (ora protetti dal token) e apre l'app
 async function _startSession(token,user,admin){

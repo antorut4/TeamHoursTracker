@@ -5,7 +5,6 @@
 const TK_LV=[{k:'l1',l:'L1',c:'#A100FF',m:'circle'},{k:'l2',l:'L2',c:'#1f6fc9',m:'square'},{k:'l3',l:'L3',c:'#d95926',m:'triangle'}];
 const TK_TOT={k:'totale',l:'Totale',c:'#3D3D3D',m:'diamond',tot:true};
 const EE_C='#A100FF',EE_C_HOVER='#7500C0',THR_C='#C9003C';
-function _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function _fmtNum(n){return Number(n).toLocaleString('it-IT');}
 function _r2(n){return Math.round(Number(n)*100)/100;}
 function _fmtOre(n){return _r2(n).toLocaleString('it-IT',{maximumFractionDigits:2})+' h';}

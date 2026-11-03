@@ -66,13 +66,13 @@ export function pwdVersion(storedHash) {
   return createHash('sha256').update(String(storedHash || '')).digest('hex').slice(0, 16);
 }
 
-export function signSession(sub, storedHash, now = Date.now()) {
-  const b64 = Buffer.from(JSON.stringify({ k: 's', sub, pv: pwdVersion(storedHash), e: Math.floor(now / 1000) + SESSION_TTL })).toString('base64url');
+// Token firmati con la chiave di sessione: payload base64url + '.' + HMAC-SHA256. Il campo k distingue
+// i tipi ('s' sessione, 'inv' invito) così un token non può essere usato al posto di un altro.
+function _sign(payload) {
+  const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return b64 + '.' + createHmac('sha256', _sessionKey()).update(b64).digest('base64url');
 }
-
-// Ritorna il payload oppure null (firma errata, scaduto, malformato)
-export function readSession(token, now = Date.now()) {
+function _verify(token, kind, now) {
   const t = String(token || ''), dot = t.indexOf('.');
   if (dot < 1) return null;
   const b64 = t.slice(0, dot), sig = Buffer.from(t.slice(dot + 1));
@@ -80,9 +80,28 @@ export function readSession(token, now = Date.now()) {
   if (sig.length !== exp.length || !timingSafeEqual(sig, exp)) return null;
   let p;
   try { p = JSON.parse(Buffer.from(b64, 'base64url').toString()); } catch { return null; }
-  if (!p || p.k !== 's' || !p.sub || !p.pv || !p.e) return null;
-  if (Math.floor(now / 1000) > p.e) return null;
+  if (!p || p.k !== kind || !p.e || Math.floor(now / 1000) > p.e) return null;
   return p;
+}
+
+export function signSession(sub, storedHash, now = Date.now()) {
+  return _sign({ k: 's', sub, pv: pwdVersion(storedHash), e: Math.floor(now / 1000) + SESSION_TTL });
+}
+// Ritorna il payload oppure null (firma errata, scaduto, malformato)
+export function readSession(token, now = Date.now()) {
+  const p = _verify(token, 's', now);
+  return p && p.sub && p.pv ? p : null;
+}
+
+// ── inviti per impostare la password (primo accesso o dopo un reset) ──
+// Monouso: il nonce è salvato nel DB e cancellato al primo utilizzo o a un nuovo invito.
+export const INVITE_TTL = 72 * 3600;
+export function signInvite(rid, nonce, now = Date.now()) {
+  return _sign({ k: 'inv', r: rid, n: nonce, e: Math.floor(now / 1000) + INVITE_TTL });
+}
+export function readInvite(token, now = Date.now()) {
+  const p = _verify(token, 'inv', now);
+  return p && p.r && p.n ? p : null;
 }
 
 // ── errori con stato HTTP (il messaggio arriva al client) ──
@@ -117,4 +136,16 @@ export function canActOn(ctx, targetId, targetProjects = []) {
 // Anagrafica di una risorsa (modifica, eliminazione, reset password): admin o suo manager
 export function canAdminResource(ctx, targetId) {
   return ctx.admin || (ctx.manager && ctx.team.has(+targetId));
+}
+
+// ── visibilità dei dati personali (il server invia solo ciò che il ruolo può vedere) ──
+// Dettaglio completo di una risorsa (ore, WBS, note e tipo delle assenze, email): lei stessa, admin, suo manager
+export function seesPersonalDetail(ctx, rid) {
+  rid = +rid;
+  return ctx.admin || ctx.id === rid || (ctx.manager && ctx.team.has(rid));
+}
+// Assenza di un collega senza dettaglio: restano date e orari (calendari di team), la malattia
+// diventa una generica "Assenza" (dato sanitario) e la nota sparisce
+export function maskFerie(f) {
+  return { ...f, tipo: f.tipo === 'Malattia' ? 'Assenza' : f.tipo, note: null };
 }

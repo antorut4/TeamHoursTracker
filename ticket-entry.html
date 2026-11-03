@@ -119,7 +119,7 @@ function fmtDate(iso, short) {
 
 function renderErr(msg, ico) {
   document.getElementById('app').innerHTML = `
-    <div class="oops"><div class="ico">${ico || '🔐'}</div><h2>${ico ? 'Nessuna area' : 'Link non valido'}</h2><p>${msg}</p></div>`;
+    <div class="oops"><div class="ico">${ico || '🔐'}</div><h2>${ico ? 'Nessuna area' : 'Link non valido'}</h2><p>${esc(msg)}</p></div>`;
 }
 
 function dayDone(date) {
@@ -316,7 +316,7 @@ async function doSave() {
     const firma   = e.message.includes('irma') || e.message.includes('malformato') || e.message.includes('campi');
     renderErr(scaduto ? "Link scaduto. Puoi inserire i ticket dalla sezione Andamento progetto dell'app."
             : firma   ? 'Link non valido. Usa il link ricevuto via email.'
-            : 'Errore: ' + esc(e.message));
+            : 'Errore: ' + e.message);   // renderErr fa l'escape
   }
 })();
 </script>

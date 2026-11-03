@@ -200,6 +200,30 @@ export const MIGRATIONS = [
         END IF;
       END $$`
     ]
+  },
+  {
+    version: 4,
+    name: 'job_runs: al massimo un\'esecuzione al giorno per i reminder schedulati',
+    up: sql => [
+      sql`CREATE TABLE IF NOT EXISTS job_runs (
+        job        TEXT      NOT NULL,
+        giorno     DATE      NOT NULL,
+        started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (job, giorno)
+      )`
+    ]
+  },
+  {
+    version: 5,
+    name: 'password_invites: primo accesso e reset solo tramite link monouso via email',
+    up: sql => [
+      sql`CREATE TABLE IF NOT EXISTS password_invites (
+        risorsa_id INTEGER   PRIMARY KEY REFERENCES risorse(id) ON DELETE CASCADE,
+        nonce      TEXT      NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )`
+    ]
   }
 ];
 
