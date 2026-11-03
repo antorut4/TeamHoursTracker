@@ -1827,6 +1827,7 @@ function _errorResponse(err, action){
     if (err.code === '23505') return { status: 409, msg: 'Valore già esistente' };
     if (err.code === '23503') return { status: 409, msg: 'Operazione non possibile: il dato è collegato ad altri elementi o non esiste più' };
     if (['23514', '22P02', '22003', '22007', '22008'].includes(err.code)) return { status: 400, msg: 'Valore non valido' };
+    if (err.code === '22001') return { status: 400, msg: 'Valore troppo lungo' };
     return { status: 500, msg: 'Errore del database: riprova tra poco' };
   }
   // I messaggi di validazione esistenti usano Error semplice; gli errori di programma (TypeError…) restano interni

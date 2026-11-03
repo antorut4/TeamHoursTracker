@@ -182,6 +182,24 @@ export const MIGRATIONS = [
       )`,
       sql`CREATE INDEX IF NOT EXISTS login_attempts_chiave_idx ON login_attempts (chiave, created_at)`
     ]
+  },
+  {
+    version: 3,
+    name: 'password: colonne VARCHAR troppo corte per gli hash scrypt (~116 caratteri) portate a TEXT',
+    // Su Neon utenti_pwd.pwd_hash era VARCHAR(50), sufficiente solo per il vecchio hash del browser.
+    // Si convertono solo le colonne VARCHAR: se sono già TEXT non cambia nulla.
+    up: sql => [
+      sql`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                   AND table_name = 'utenti_pwd' AND column_name = 'pwd_hash' AND data_type = 'character varying') THEN
+          ALTER TABLE utenti_pwd ALTER COLUMN pwd_hash TYPE TEXT;
+        END IF;
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                   AND table_name = 'config' AND column_name = 'valore' AND data_type = 'character varying') THEN
+          ALTER TABLE config ALTER COLUMN valore TYPE TEXT;
+        END IF;
+      END $$`
+    ]
   }
 ];
 

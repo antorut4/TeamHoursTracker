@@ -55,10 +55,10 @@ CREATE TABLE presenze (
 );
 CREATE TABLE utenti_pwd (
   risorsa_id INTEGER PRIMARY KEY REFERENCES risorse(id) ON DELETE CASCADE,
-  pwd_hash   TEXT NOT NULL,
+  pwd_hash   VARCHAR(50) NOT NULL,   -- come su Neon: la migrazione 3 la porta a TEXT
   updated_at TIMESTAMP DEFAULT NOW()
 );
 CREATE TABLE config (
   chiave TEXT PRIMARY KEY,
-  valore TEXT
+  valore VARCHAR(2000)
 );

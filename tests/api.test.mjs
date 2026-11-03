@@ -53,6 +53,12 @@ test('migrazioni: tutte applicate una volta sola', async () => {
   assert.deepEqual(await migrate(sql), [], 'nessuna migrazione da riapplicare');
 });
 
+test('migrazioni: colonne password portate a TEXT (su Neon erano VARCHAR(50))', async () => {
+  const cols = await sql`SELECT table_name, data_type FROM information_schema.columns
+                         WHERE (table_name, column_name) IN (('utenti_pwd', 'pwd_hash'), ('config', 'valore')) ORDER BY 1`;
+  assert.deepEqual(cols.map(c => c.table_name + ':' + c.data_type), ['config:text', 'utenti_pwd:text']);
+});
+
 test('migrazioni: la baseline è idempotente su un database già aggiornato a mano', async () => {
   const { createDb: fresh } = await import('./helpers/db.mjs');
   const { migrate, MIGRATIONS } = await import('../netlify/lib/migrations.mjs');
