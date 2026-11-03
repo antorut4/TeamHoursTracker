@@ -1904,10 +1904,9 @@ function _andListHtml(prjs,warn,lbl,monthOf){
     const p=_prjNameById[pid],aree=_prjAree(pid).filter(a=>a.attiva).sort((a,b)=>a.nome.localeCompare(b.nome,'it')),tls=_prjTLsByName[p]||[];
     const role=!me?'':tls.includes(currentUser)?'Team Lead del progetto':aree.some(a=>a.teamLeadId===me.id)?'Team Lead d\'area':_andReadOnly(pid)?'Manager · sola lettura':'';
     const w=warn[pid],f=monthOf?_fteOf(pid,monthOf(pid)):null;
-    const fteTxt=f?` · FTE erogati <span class="${f.over?'fte-over':''}">${f.over?'<i class="fa-solid fa-triangle-exclamation" style="margin-right:3px"></i>':''}${_fmtFte(f.erog)}</span> / FTE progetto ${f.tot!=null?_fmtFte(f.tot):'—'}`:'';
     return `<div class="and-list-row" role="link" tabindex="0" onclick="andGo(${pid})" onkeydown="if(event.key==='Enter')andGo(${pid})">
-      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
-        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}${fteTxt}</div>
+      <div style="min-width:0"><div class="and-list-name"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${f?_fteBoxes(f,lbl):''}${w?` <span class="badge badge-danger and-warn" title="${w.map(wTxt).join(' · ')}"><i class="fa-solid fa-triangle-exclamation" style="margin-right:4px"></i>Warning soglie</span>`:''}${role?` <span class="badge badge-amber">${role}</span>`:''}</div>
+        <div class="and-list-meta">${aree.length?`${aree.length} ${aree.length>1?'aree':'area'}: ${aree.map(a=>_esc(a.nome)).join(', ')}`:'Nessuna area configurata'} · Team Lead: ${tls.length?tls.map(_esc).join(', '):'—'}</div>
         ${w?`<div class="and-list-warn"><i class="fa-solid fa-triangle-exclamation"></i> Soglia ${w.map(wTxt).join(' · ')}</div>`:''}</div>
       <button class="btn btn-ink btn-sm" onclick="event.stopPropagation();andGo(${pid})">Apri dettaglio <i class="fa-solid fa-arrow-right" style="margin-left:4px"></i></button>
     </div>`;}).join('')}</div></div>`;
@@ -2108,7 +2107,7 @@ function _andDetailHtml(pid,aid){
   const ro=_andReadOnly(pid);
   return `${crumb}
     <div class="card">
-      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}</div><div class="and-badges">${ro?'<span class="badge badge-amber"><i class="fa-solid fa-eye" style="margin-right:4px"></i>Sola lettura</span>':''}${_andBadges(pid,aid,r)}</div></div>
+      <div class="and-head"><div class="card-title"><i class="fa-solid fa-folder-open"></i> ${_esc(p)}${area?` <span style="color:var(--ink-3);font-weight:600">/ ${_esc(area.nome)}</span>`:''}${_fteBoxes(_fteOf(pid,D.get(pid,null,D.year,D.month)),D.lbl)}</div><div class="and-badges">${ro?'<span class="badge badge-amber"><i class="fa-solid fa-eye" style="margin-right:4px"></i>Sola lettura</span>':''}${_andBadges(pid,aid,r)}</div></div>
       ${tabs}
       ${_andFteHtml(pid,periods)}
       ${ro?`<div class="and-ro-kpis"><div class="and-sum-title">Ticket ${scopeName?_esc(scopeName)+' — ':''}${D.lbl} · % sul totale del mese</div>${_andKpis(r,true)}</div>`:''}
@@ -2151,23 +2150,27 @@ function _fmtFte(n){return _r2(n).toLocaleString('it-IT',{minimumFractionDigits:
 // FTE erogati del mese, sempre sull'intero progetto:
 //   Σ L1..L3 ((n·Tempo)·(Pyr/8))/21/Pyr + ((ore extra)·(Pyr/8))/21/Pyr + ((MD·8)·(240/8))/21/240
 // Pyr si semplifica: ogni termine vale ore/8/21, cioè le ore erogate su 21 giorni da 8 h.
-// FTE progetto = FTE venduti TOT del Benchmark; il valore diventa rosso quando gli erogati lo raggiungono.
+// FTE progetto = FTE venduti TOT del Benchmark; gli erogati diventano rossi quando lo superano.
 function _fteOf(pid,r){
   const b=_bench(pid),t=k=>+b[k]||0;
   const ore=r.l1*t('tL1')+r.l2*t('tL2')+r.l3*t('tL3')+r.ee+r.cr*8;
   const erog=ore/8/21,tot=b.fteTot!=null?+b.fteTot:null;
-  return{erog,tot,over:tot!=null&&tot>0&&_r2(erog)>=_r2(tot),noTempi:TK_LV.some(s=>r[s.k]>0&&!(+b['t'+s.l]>0))};
+  return{erog,tot,over:tot!=null&&_r2(erog)>_r2(tot),noTempi:TK_LV.some(s=>r[s.k]>0&&!(+b['t'+s.l]>0))};
 }
+// Due box accanto al nome del progetto (elenco e dettaglio), sempre sull'intero progetto
+function _fteBoxes(f,lbl){
+  return `<span class="and-fte">
+      <span class="and-fte-kpi${f.over?' over':''}" title="FTE erogati in ${lbl}${f.over?' — superano gli FTE progetto':''}"><small>FTE erogati</small><b>${f.over?'<i class="fa-solid fa-triangle-exclamation" style="font-size:.75rem;margin-right:4px"></i>':''}${_fmtFte(f.erog)}</b></span>
+      <span class="and-fte-kpi" title="FTE venduti TOT (Benchmark)"><small>FTE progetto</small><b>${f.tot!=null?_fmtFte(f.tot):'—'}</b></span>
+    </span>`;
+}
+// Sotto il nome: eventuale avviso di configurazione e tabella mensile degli FTE erogati
 function _andFteHtml(pid,periods){
   const D=_andData,f=_fteOf(pid,D.get(pid,null,D.year,D.month));
   const note=f.tot==null?'FTE venduti TOT non configurati':f.noTempi?'Tempi L1/L2/L3 mancanti per alcuni ticket del mese':'';
   const rows=periods.map(({m,y})=>{const x=_fteOf(pid,D.get(pid,null,y,m));return `<tr><td>${MONTHS[m]} ${y}</td><td class="and-num${x.over?' fte-over':''}">${_fmtFte(x.erog)}</td><td class="and-num">${x.tot!=null?_fmtFte(x.tot):'—'}</td></tr>`;}).join('');
-  return `<div class="and-fte">
-      <div class="and-fte-kpi${f.over?' over':''}"><small>FTE erogati · ${D.lbl}</small><b>${f.over?'<i class="fa-solid fa-triangle-exclamation" style="font-size:.9rem;margin-right:5px"></i>':''}${_fmtFte(f.erog)}</b><span>${f.over?'FTE progetto raggiunti':'intero progetto'}</span></div>
-      <div class="and-fte-kpi"><small>FTE progetto</small><b>${f.tot!=null?_fmtFte(f.tot):'—'}</b><span>FTE venduti TOT</span></div>
-      ${note?`<div class="and-fte-note"><i class="fa-solid fa-circle-info" style="margin-right:4px"></i>${note}: <a href="#" onclick="showTab('benchmark');return false">configura in Benchmark</a></div>`:''}
-    </div>
-    <details style="margin:-6px 0 14px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">FTE erogati per mese</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">FTE erogati</th><th class="and-num">FTE progetto</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  return `${note?`<div class="and-fte-note"><i class="fa-solid fa-circle-info" style="margin-right:4px"></i>${note}: <a href="#" onclick="showTab('benchmark');return false">configura in Benchmark</a></div>`:''}
+    <details style="margin:0 0 14px"><summary style="font-size:.76rem;color:var(--ink-3);cursor:pointer">FTE erogati per mese</summary><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mese</th><th class="and-num">FTE erogati</th><th class="and-num">FTE progetto</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
 }
 // ── BENCHMARK: una riga per ogni progetto presente a backend, campi modificabili da tutti ──
 const BENCH_COLS=[{k:'fteTot',l:'FTE venduti TOT'},{k:'fteCr',l:'FTE CR'},{k:'fteTicket',l:'FTE Ticket/Extra'},{k:'tL1',l:'Tempo L1 (h)'},{k:'tL2',l:'Tempo L2 (h)'},{k:'tL3',l:'Tempo L3 (h)'},{k:'pyr',l:'Pyr'}];
