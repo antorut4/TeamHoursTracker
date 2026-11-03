@@ -1,0 +1,12 @@
+<!-- OVERVIEW REPERIBILITÀ -->
+<div class="panel" id="panel-rep-overview">
+  <div class="page-header"><h1>Overview Reperibilità</h1><p>Reperibilità del team per progetto e per mese</p></div>
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-sliders"></i> Filtri</div>
+    <div class="field-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div class="field" style="min-width:140px"><label>Mese</label><select id="repOvMonth" onchange="renderRepOverview()"></select></div>
+      <div class="field" style="min-width:100px"><label>Anno</label><select id="repOvYear" onchange="renderRepOverview()"></select></div>
+    </div>
+  </div>
+  <div id="repOverviewContent"></div>
+</div>

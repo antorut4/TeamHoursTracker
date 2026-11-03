@@ -4,8 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Tracker ore/ferie/reperibilita del team, con proxy serverless verso Neon",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\""
+  },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
-    "nodemailer": "^6.9.0"
+    "nodemailer": "^10.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.14"
   }
 }

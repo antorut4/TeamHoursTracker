@@ -1,0 +1,31 @@
+<!-- FERIE -->
+<div class="panel" id="panel-ferie">
+  <div class="page-header"><h1>Ferie e permessi</h1><p>Clicca su un giorno del tuo nome per aggiungere o rimuovere un'assenza</p></div>
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:0"><i class="fa-regular fa-calendar-days"></i> Calendario del team</div>
+      <button class="btn btn-ghost2 btn-sm" onclick="exportICS()"><i class="fa-regular fa-calendar"></i> Esporta .ics</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div id="ferieMsg" class="msg" style="flex:1"></div>
+      <button class="btn btn-amber btn-sm" onclick="showFeriePicker(new Date().toISOString().slice(0,10))"><i class="fa-solid fa-plus"></i> Aggiungi assenza</button>
+    </div>
+    <div class="field-row" style="margin-bottom:12px">
+      <div class="field" style="max-width:170px"><label>Mese</label><select id="ferieCalMonth" onchange="renderFerieCalendar()"></select></div>
+      <div class="field" style="max-width:100px"><label>Anno</label><select id="ferieCalYear" onchange="renderFerieCalendar()"></select></div>
+      <div><button class="btn btn-ghost2" onclick="renderFerieCalendar()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+    </div>
+    <div class="legend">
+      <span><span class="legend-dot" style="background:#A100FF"></span>Ferie</span>
+      <span><span class="legend-dot" style="background:var(--ok)"></span>Permesso/ROL</span>
+      <span><span class="legend-dot" style="background:var(--danger)"></span>Malattia</span>
+      <span><span class="legend-dot" style="background:var(--amber-bg);border:1px solid var(--amber-rim)"></span>Festività</span>
+      <span><span class="legend-dot" style="background:var(--stone-3)"></span>Weekend</span>
+    </div>
+    <div class="ov-wrap"><div id="ferieCalendar"></div></div>
+    <div style="font-family:var(--f-display);font-size:1rem;font-weight:400;color:var(--ink);margin:18px 0 10px;display:flex;align-items:center;gap:8px"><i class="fa-solid fa-chart-bar" style="width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;background:var(--stone-2);border-radius:6px;font-size:.75rem;color:var(--ink-2)"></i> Riepilogo mese</div>
+    <div class="ov-cards" id="ferieCalCards"></div>
+    <div id="ferieCalOverlaps" style="margin-top:10px"></div>
+  </div>
+  <div style="display:none"><div id="ferieList"></div><div id="searchFerie"></div><div id="filterMembro"></div><div id="filterAnno"></div></div>
+</div>

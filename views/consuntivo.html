@@ -1,0 +1,21 @@
+<!-- CONSUNTIVO -->
+<div class="panel" id="panel-consuntivo">
+  <div class="page-header"><h1>Ore Consuntivate</h1><p>Ore giornaliere effettivamente lavorate (da reminder email)</p></div>
+  <div class="card" id="consuntivoNotifCard">
+    <div class="card-title"><i class="fa-regular fa-bell"></i> Promemoria email</div>
+    <label class="mgr-check-label" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" id="consuntivoNotifChk" onchange="toggleDailyReminder(this)"/>
+      <span>Ricevi ogni mattina l'email per registrare le ore del giorno precedente</span>
+    </label>
+    <div id="consuntivoNotifMsg" class="msg"></div>
+  </div>
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-sliders"></i> Filtri</div>
+    <div class="field-row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div class="field" style="min-width:140px"><label>Mese</label><select id="consuntivoMonth" onchange="loadConsuntivo().catch(console.error)"></select></div>
+      <div class="field" style="min-width:100px"><label>Anno</label><select id="consuntivoYear" onchange="loadConsuntivo().catch(console.error)"></select></div>
+      <div class="field" style="min-width:200px" id="consuntivoResField"><label>Risorsa</label><select id="consuntivoRes" onchange="loadConsuntivo().catch(console.error)"><option value="">Tutte le risorse</option></select></div>
+    </div>
+  </div>
+  <div id="consuntivoContent"></div>
+</div>

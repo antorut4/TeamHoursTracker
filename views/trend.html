@@ -1,0 +1,18 @@
+<!-- TREND -->
+<div class="panel" id="panel-trend">
+  <div class="page-header"><h1>Trend ore</h1><p>Andamento storico negli ultimi mesi</p></div>
+  <div class="card">
+    <div class="field-row" style="margin-bottom:16px">
+      <div class="field" style="max-width:140px"><label>Periodo</label>
+        <select id="trendMonths" onchange="renderTrend()"><option value="6">6 mesi</option><option value="9">9 mesi</option><option value="12" selected>12 mesi</option></select>
+      </div>
+      <div class="field" style="max-width:190px"><label>Team Lead</label><select id="trendLead" onchange="renderTrend()"><option value="">Tutti</option></select></div>
+    </div>
+    <canvas id="trendCanvas" height="240"></canvas>
+    <div class="trend-legend" id="trendLegend"></div>
+  </div>
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-bell"></i> Avvisi</div>
+    <div id="trendAlerts"></div>
+  </div>
+</div>

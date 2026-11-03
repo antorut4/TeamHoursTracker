@@ -1,0 +1,14 @@
+<!-- PRESENZE -->
+<div class="panel" id="panel-presenze">
+  <div class="page-header"><h1>Presenze in ufficio</h1><p>Segna i giorni in cui sei in ufficio — il tuo team lo vede in tempo reale</p></div>
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+      <button class="btn btn-ghost2 btn-sm" onclick="prevWeek()"><i class="fa-solid fa-chevron-left"></i></button>
+      <div id="presenzeWeekLabel" style="flex:1;text-align:center;font-weight:600;font-size:.9rem;color:var(--ink)"></div>
+      <button class="btn btn-ghost2 btn-sm" onclick="nextWeek()"><i class="fa-solid fa-chevron-right"></i></button>
+      <button class="btn btn-ghost2 btn-sm" onclick="_presWeekOffset=0;renderPresenzeGrid()">Questa settimana</button>
+    </div>
+    <div class="table-wrap" id="presenzeGrid"></div>
+    <div id="presenzeMsg" class="msg" style="margin-top:10px"></div>
+  </div>
+</div>

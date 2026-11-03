@@ -1,0 +1,16 @@
+<!-- RIEPILOGO -->
+<div class="panel" id="panel-riepilogo">
+  <div class="page-header"><h1>Riepilogo team</h1><p>Ore inserite dal team nel mese selezionato</p></div>
+  <div class="card">
+    <div class="field-row">
+      <div class="field" style="max-width:170px"><label>Mese</label><select id="riepilogoMonth"></select></div>
+      <div class="field" style="max-width:100px"><label>Anno</label><select id="riepilogoYear"></select></div>
+      <div class="field" style="max-width:190px"><label>Team Lead</label><select id="riepilogoLead" onchange="loadRiepilogo()"><option value="">Tutti</option></select></div>
+      <div><button class="btn btn-ghost2" onclick="loadRiepilogo()"><i class="fa-solid fa-rotate"></i> Aggiorna</button></div>
+      <div id="sollecitaForecastBtn" style="display:none"><button class="btn btn-amber" onclick="sollecitaForecast()"><i class="fa-solid fa-paper-plane"></i> Sollecita Forecast</button></div>
+      <div id="sollecitaMsg" class="msg"></div>
+    </div>
+    <div class="table-wrap" id="riepilogoTable"></div>
+    <div style="margin-top:13px;display:flex;align-items:center;gap:12px"><button class="btn btn-amber" onclick="exportExcel()"><i class="fa-solid fa-file-excel"></i> Esporta Excel</button><span id="exportMsg" class="msg"></span></div>
+  </div>
+</div>
