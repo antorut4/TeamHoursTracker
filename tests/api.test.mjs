@@ -388,3 +388,89 @@ test('senior manager: associazione dei manager, permessi ereditati, niente cicli
   assert.equal(await mgrOf(ID.mario), null);
   assert.equal((await call('setDailyReminder', { risorsaId: ID.anna, value: true }, ts)).status, 403);
 });
+
+// ── link nelle email: SITE_URL sbagliato (es. il server SMTP) non finisce nei link ──
+test('siteUrl: indirizzo non valido sostituito da quello di Netlify', async () => {
+  const { siteUrl } = await import('../netlify/lib/site.mjs');
+  const keep = { s: process.env.SITE_URL, u: process.env.URL };
+  try {
+    process.env.URL = 'https://team.netlify.app';
+    for (const bad of ['smtp.gmail.com', 'https://smtp.gmail.com', 'tuosito.netlify.app', '']) {
+      process.env.SITE_URL = bad;
+      assert.equal(siteUrl(), 'https://team.netlify.app', bad);
+    }
+    process.env.SITE_URL = ' https://ore.example.com/ ';
+    assert.equal(siteUrl(), 'https://ore.example.com');
+  } finally {
+    process.env.SITE_URL = keep.s;
+    if (keep.u === undefined) delete process.env.URL; else process.env.URL = keep.u;
+  }
+});
+
+// ── Benchmark: modificabile solo da admin, manager e Senior Manager ──
+test('benchmark: salvataggio riservato ad admin e manager', async () => {
+  const rows = [{ progettoId: 1, fteTot: '2' }];
+  assert.equal((await call('saveBenchmark', { rows }, T.anna)).status, 403, 'collaboratore');
+  assert.equal((await call('saveBenchmark', { rows }, T.luca)).status, 403, 'Team Lead di progetto');
+  assert.equal((await call('saveBenchmark', { rows }, T.mario)).status, 200, 'manager');
+  assert.equal((await call('saveBenchmark', { rows }, T.admin)).status, 200, 'admin');
+});
+
+// ── Eventi: inviti, disponibilità, data, partecipazione ──
+test('eventi: creazione, visibilità, disponibilità, data fissata e partecipazione', async () => {
+  // Validazione: serve la data oppure il periodo
+  assert.equal((await call('saveEvento', { nome: 'X', invitati: [ID.anna] }, T.luca)).status, 400);
+  assert.equal((await call('saveEvento', { nome: 'X', periodoDa: '2026-12-10', periodoA: '2026-12-01', invitati: [ID.anna] }, T.luca)).status, 400);
+  // Luca organizza, invita Anna e Sara; lui è aggiunto in automatico
+  const cr = await call('saveEvento', { nome: 'Team Building', descrizione: 'Giornata insieme', luogo: 'Firenze',
+    periodoDa: '2026-12-14', periodoA: '2026-12-18', invitati: [ID.anna, ID.sara] }, T.luca);
+  assert.equal(cr.status, 200, cr.error);
+  const id = cr.data.id;
+  const ev = (await call('getEvento', { id }, T.anna)).data;
+  assert.deepEqual(ev.invitati.map(i => i.risorsa_id).sort(), [ID.anna, ID.luca, ID.sara].sort());
+  assert.equal(ev.owner, false);
+  assert.equal(ev.creatore, 'Luca Verdi');
+  // Chi non è invitato non lo vede; l'admin sì
+  assert.equal((await call('getEvento', { id }, T.mario)).status, 404);
+  assert.ok(!(await call('getEventi', {}, T.mario)).data.some(e => e.id === id));
+  assert.equal((await call('getEvento', { id }, T.admin)).data.owner, true);
+
+  // Disponibilità: solo a proprio nome, solo nel periodo
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-15', stato: 'si' }, T.anna)).status, 200);
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-15', stato: 'forse' }, T.sara)).status, 200);
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-20', stato: 'si' }, T.anna)).status, 400, 'fuori periodo');
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-15', stato: 'si' }, T.mario)).status, 404, 'non invitato');
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-15', stato: 'boh' }, T.anna)).status, 400);
+  const disp = (await call('getEvento', { id }, T.luca)).data.disponibilita;
+  assert.deepEqual(disp.map(d => d.risorsa_id + ':' + d.stato).sort(), [ID.anna + ':si', ID.sara + ':forse'].sort());
+
+  // Solo l'organizzatore (o l'admin) fissa la data e modifica l'evento
+  assert.equal((await call('setEventoData', { id, data: '2026-12-15' }, T.anna)).status, 403);
+  assert.equal((await call('saveEvento', { id, nome: 'Rubato', data: '2026-12-15', invitati: [ID.anna] }, T.anna)).status, 403);
+  assert.equal((await call('setEventoData', { id, data: '2026-12-15' }, T.luca)).status, 200);
+  assert.equal((await call('getEvento', { id }, T.sara)).data.data, '2026-12-15');
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-16', stato: 'si' }, T.anna)).status, 409, 'data già fissata');
+
+  // Partecipazione con commento
+  assert.equal((await call('setPartecipazione', { eventoId: id, risposta: 'si', commento: 'Porto la torta' }, T.anna)).status, 200);
+  assert.equal((await call('setPartecipazione', { eventoId: id, risposta: 'no', commento: 'In ferie' }, T.sara)).status, 200);
+  assert.equal((await call('setPartecipazione', { eventoId: id, risposta: 'forse' }, T.sara)).status, 400);
+  assert.equal((await call('setPartecipazione', { eventoId: id, risposta: 'si' }, T.admin)).status, 403, 'l\'admin non è un invitato');
+  const ls = (await call('getEventi', {}, T.anna)).data.find(e => e.id === id);
+  assert.equal(ls.si, 1); assert.equal(ls.no, 1); assert.equal(ls.invitati, 3); assert.equal(ls.mia_risposta, 'si');
+  const anna = (await call('getEvento', { id }, T.luca)).data.invitati.find(i => i.risorsa_id === ID.anna);
+  assert.equal(anna.commento, 'Porto la torta');
+
+  // Modifica: Sara tolta dagli invitati (sparisce anche la sua disponibilità), l'organizzatore resta
+  const up = await call('saveEvento', { id, nome: 'Team Building', periodoDa: '2026-12-14', periodoA: '2026-12-18', invitati: [ID.anna] }, T.luca);
+  assert.equal(up.status, 200, up.error);
+  const ev2 = (await call('getEvento', { id }, T.luca)).data;
+  assert.deepEqual(ev2.invitati.map(i => i.risorsa_id).sort(), [ID.anna, ID.luca].sort());
+  assert.ok(!ev2.disponibilita.some(d => d.risorsa_id === ID.sara));
+  assert.equal((await call('getEvento', { id }, T.sara)).status, 404);
+
+  // Eliminazione: solo organizzatore o admin
+  assert.equal((await call('deleteEvento', { id }, T.anna)).status, 403);
+  assert.equal((await call('deleteEvento', { id }, T.luca)).status, 200);
+  assert.equal((await call('getEvento', { id }, T.luca)).status, 404);
+});

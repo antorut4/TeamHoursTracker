@@ -59,8 +59,8 @@ async function checkAlerts(){
   if(missing.length){b.classList.add('visible');t.textContent=`Ore mancanti: ${missing.join(', ')}`;}else b.classList.remove('visible');
 }
 // TABS
-const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento','fte-trend','benchmark'];
-const NAV_MAP={andamento:'navAndamento','fte-trend':'navFteTrend',benchmark:'navBenchmark',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
+const TABS=['ore','riepilogo','trend','ferie','overview','reperibilita','admin','presenze','dashboard','consuntivo','andamento','fte-trend','benchmark','eventi'];
+const NAV_MAP={eventi:'navEventi',andamento:'navAndamento','fte-trend':'navFteTrend',benchmark:'navBenchmark',ore:'navOre',riepilogo:'navRiepilogo',trend:'navTrend',ferie:'navFerie',overview:'navOverview','rep-overview':'navRepOverview',reperibilita:'navRep',admin:'navAdmin',presenze:'navPresenze',dashboard:'navDashboard',consuntivo:'navConsuntivo'};
 function toggleMobileNav(){const s=document.querySelector('.sidebar'),o=document.getElementById('mobileOverlay');s.classList.toggle('mobile-open');o.classList.toggle('visible');}
 function closeMobileNav(){document.querySelector('.sidebar').classList.remove('mobile-open');document.getElementById('mobileOverlay').classList.remove('visible');}
 async function showTab(t){
@@ -83,4 +83,5 @@ async function showTab(t){
   if(t==='andamento')renderAndamento().catch(console.error);
   if(t==='fte-trend')renderFteTrend().catch(console.error);
   if(t==='benchmark')renderBenchmark();
+  if(t==='eventi')renderEventi().catch(console.error);
 }

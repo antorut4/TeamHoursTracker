@@ -232,6 +232,40 @@ export const MIGRATIONS = [
       sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS is_senior BOOLEAN NOT NULL DEFAULT FALSE`,
       sql`UPDATE risorse SET is_manager = TRUE WHERE is_senior AND NOT is_manager`
     ]
+  },
+  {
+    version: 7,
+    name: 'eventi: inviti, partecipazione con commento, disponibilità per giorno',
+    up: sql => [
+      sql`CREATE TABLE IF NOT EXISTS eventi (
+        id          SERIAL    PRIMARY KEY,
+        nome        TEXT      NOT NULL,
+        descrizione TEXT,
+        luogo       TEXT,
+        data        DATE,
+        periodo_da  DATE,
+        periodo_a   DATE,
+        creatore_id INTEGER   REFERENCES risorse(id) ON DELETE SET NULL,
+        created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+        CHECK (periodo_da IS NULL OR periodo_a IS NULL OR periodo_a >= periodo_da)
+      )`,
+      sql`CREATE TABLE IF NOT EXISTS evento_invitati (
+        evento_id   INTEGER   NOT NULL REFERENCES eventi(id)  ON DELETE CASCADE,
+        risorsa_id  INTEGER   NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
+        risposta    TEXT      CHECK (risposta IN ('si', 'no')),
+        commento    TEXT,
+        risposto_at TIMESTAMP,
+        PRIMARY KEY (evento_id, risorsa_id)
+      )`,
+      sql`CREATE INDEX IF NOT EXISTS evento_invitati_risorsa ON evento_invitati (risorsa_id)`,
+      sql`CREATE TABLE IF NOT EXISTS evento_disponibilita (
+        evento_id  INTEGER NOT NULL REFERENCES eventi(id)  ON DELETE CASCADE,
+        risorsa_id INTEGER NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
+        data       DATE    NOT NULL,
+        stato      TEXT    NOT NULL CHECK (stato IN ('si', 'forse', 'no')),
+        PRIMARY KEY (evento_id, risorsa_id, data)
+      )`
+    ]
   }
 ];
 

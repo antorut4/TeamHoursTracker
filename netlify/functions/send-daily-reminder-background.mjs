@@ -9,10 +9,11 @@ import { createHmac } from 'crypto';
 import nodemailer      from 'nodemailer';
 import { ensureSchema } from '../lib/migrations.mjs';
 import { claimDailyRun } from '../lib/jobs.mjs';
+import { siteUrl } from '../lib/site.mjs';
 
 const sql       = neon(process.env.DATABASE_URL);
 const SECRET    = process.env.DAILY_TOKEN_SECRET;
-const SITE_URL  = (process.env.SITE_URL || '').replace(/\/$/, '');
+const SITE_URL  = siteUrl();
 const FROM_NAME = process.env.FROM_NAME || 'Team Hours Tracker';
 
 const transporter = nodemailer.createTransport({

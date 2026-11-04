@@ -15,6 +15,7 @@ import { HttpError, deny, hashPassword, verifyPassword, checkPwdPolicy, signSess
          signInvite, readInvite, INVITE_TTL } from '../lib/auth.mjs';
 import { ensureSchema } from '../lib/migrations.mjs';
 import * as V from '../lib/validate.mjs';
+import { siteUrl } from '../lib/site.mjs';
 
 let sql = neon(process.env.DATABASE_URL);
 // Solo per i test automatici: sostituisce il client Neon con un database locale
@@ -150,11 +151,13 @@ async function _logEmail(tipo, destinatario, nome, oggetto, stato, errore, meta)
 }
 
 function _absenceTransporter() {
+  // Valori incollati dal pannello Netlify: spazi e a capo vanno tolti. Google mostra la password
+  // per app a gruppi ("abcd efgh ijkl mnop"), ma la password vera sono i 16 caratteri senza spazi.
   return nodemailer.createTransport({
     host:   'smtp.gmail.com',
     port:   587,
     secure: false,
-    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
+    auth: { user: String(process.env.GMAIL_USER || '').trim(), pass: String(process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '') }
   });
 }
 
@@ -746,8 +749,13 @@ async function _sendInvite(rid){
   const [r] = await sql`SELECT id, full_name, email FROM risorse WHERE id=${rid}`;
   if (!r) throw new HttpError(404, 'Risorsa non trovata');
   if (!r.email) throw new HttpError(400, 'Nessun indirizzo email configurato per questo account: contatta il tuo manager');
-  const site = (process.env.SITE_URL || '').replace(/\/$/, ''), mailer = _mail();
-  if (!site || !mailer) throw new HttpError(503, 'Invio email non configurato: contatta l\'amministratore');
+  const site = siteUrl(), mailer = _mail();
+  if (!site || !mailer) {
+    // Nei log di Netlify si vede subito cosa manca (SITE_URL è facoltativo: Netlify fornisce URL)
+    const missing = [!site && 'SITE_URL', !process.env.GMAIL_USER && 'GMAIL_USER', !process.env.GMAIL_APP_PASSWORD && 'GMAIL_APP_PASSWORD'].filter(Boolean);
+    console.error(JSON.stringify({ level: 'error', action: 'requestInvite', error: 'invio email non configurato', missing }));
+    throw new HttpError(503, 'Invio email non configurato: contatta l\'amministratore');
+  }
   const nonce = randomBytes(16).toString('hex');
   // Un nuovo invito sostituisce il precedente: i link già inviati non valgono più
   await sql`INSERT INTO password_invites (risorsa_id, nonce, expires_at) VALUES (${rid}, ${nonce}, NOW() + make_interval(secs => ${INVITE_TTL}))
@@ -766,6 +774,8 @@ async function _sendInvite(rid){
     await _logEmail('invito', r.email, r.full_name, subject, 'sent', null, { messageId: info && info.messageId });
   } catch (err) {
     await _logEmail('invito', r.email, r.full_name, subject, 'error', err.message, null);
+    // Nei log di Netlify: 535 = credenziali rifiutate, ETIMEDOUT/ECONNECTION = SMTP non raggiungibile
+    console.error(JSON.stringify({ level: 'error', action: 'requestInvite', kind: 'smtp', code: err.code, responseCode: err.responseCode, error: err.message }));
     throw new HttpError(502, 'Invio dell\'email non riuscito: riprova tra poco');
   }
   return { sent: true, email: _maskEmail(r.email) };
@@ -872,6 +882,144 @@ async function saveRepExport(p){
   return JSON.parse(valore);
 }
 
+
+// ════════════════════════════════════════════════════════════════════════
+//  Eventi: chi crea l'evento sceglie gli invitati; se la data non è fissata gli invitati indicano
+//  la disponibilità giorno per giorno nel periodo proposto e l'organizzatore fissa la data.
+//  Ogni invitato risponde "ci sono / non ci sono" con un commento facoltativo.
+//  Vedono l'evento gli invitati, l'organizzatore e l'admin; lo gestiscono l'organizzatore e l'admin.
+// ════════════════════════════════════════════════════════════════════════
+const EV_MAX_GIORNI = 92;
+const _dayDiff = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5);
+async function _evento(id){
+  const [e] = await sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da,
+                               periodo_a::text AS periodo_a, creatore_id FROM eventi WHERE id=${V.id(id, 'Evento')}`;
+  if (!e) throw new HttpError(404, 'Evento non trovato');
+  return e;
+}
+const _evOwner = (ctx, e) => ctx.admin || (e.creatore_id != null && +e.creatore_id === ctx.id);
+async function _evInvited(ctx, eid){
+  if (!ctx.id) return false;
+  return (await sql`SELECT 1 FROM evento_invitati WHERE evento_id=${eid} AND risorsa_id=${ctx.id}`).length > 0;
+}
+async function _mustSeeEvento(ctx, id){
+  const e = await _evento(id);
+  if (!_evOwner(ctx, e) && !(await _evInvited(ctx, e.id))) throw new HttpError(404, 'Evento non trovato');
+  return e;
+}
+async function _mustOwnEvento(ctx, id){
+  const e = await _mustSeeEvento(ctx, id);
+  if (!_evOwner(ctx, e)) deny('Solo chi ha creato l\'evento può modificarlo');
+  return e;
+}
+function _evFields(p){
+  const data = p.data ? V.isoDate(p.data, 'Data evento') : null;
+  let da = p.periodoDa ? V.isoDate(p.periodoDa, 'Inizio periodo') : null;
+  let a  = p.periodoA  ? V.isoDate(p.periodoA, 'Fine periodo') : null;
+  if (!data && (!da || !a)) throw new HttpError(400, 'Indica la data dell\'evento oppure il periodo in cui raccogliere le disponibilità');
+  if (da && a) {
+    const n = _dayDiff(da, a);
+    if (n < 0) throw new HttpError(400, 'La fine del periodo è prima dell\'inizio');
+    if (n >= EV_MAX_GIORNI) throw new HttpError(400, `Periodo troppo lungo: massimo ${EV_MAX_GIORNI} giorni`);
+  } else { da = null; a = null; }
+  const invitati = [...new Set(V.arr(p.invitati, 'Invitati', 1000).map(x => V.id(x, 'Invitato')))];
+  return { nome: V.text(p.nome, 'Nome evento', 150), descrizione: V.optText(p.descrizione, 'Descrizione', 4000),
+           luogo: V.optText(p.luogo, 'Luogo', 200), data, da, a, invitati };
+}
+
+// Elenco: eventi visibili con riepilogo delle risposte e la risposta di chi chiede
+async function getEventi(p, ctx){
+  const me = ctx.id || 0, all = !!ctx.admin;
+  return sql`
+    SELECT e.id, e.nome, e.descrizione, e.luogo, e.data::text AS data, e.periodo_da::text AS periodo_da,
+           e.periodo_a::text AS periodo_a, e.creatore_id, c.full_name AS creatore,
+           (${all}::boolean OR e.creatore_id = ${me}) AS owner,
+           COUNT(i.risorsa_id)::int AS invitati,
+           COUNT(*) FILTER (WHERE i.risposta = 'si')::int AS si,
+           COUNT(*) FILTER (WHERE i.risposta = 'no')::int AS no,
+           MAX(i.risposta) FILTER (WHERE i.risorsa_id = ${me}) AS mia_risposta,
+           BOOL_OR(i.risorsa_id = ${me}) AS invitato
+    FROM eventi e
+    LEFT JOIN risorse c ON c.id = e.creatore_id
+    LEFT JOIN evento_invitati i ON i.evento_id = e.id
+    WHERE ${all}::boolean OR e.creatore_id = ${me}
+       OR EXISTS (SELECT 1 FROM evento_invitati x WHERE x.evento_id = e.id AND x.risorsa_id = ${me})
+    GROUP BY e.id, c.full_name
+    ORDER BY COALESCE(e.data, e.periodo_da) DESC NULLS LAST, e.id DESC`;
+}
+async function getEvento(p, ctx){
+  const e = await _mustSeeEvento(ctx, p.id);
+  const [invitati, disp, [cr]] = await Promise.all([
+    sql`SELECT i.risorsa_id, r.full_name, i.risposta, i.commento, i.risposto_at::text AS risposto_at
+        FROM evento_invitati i JOIN risorse r ON r.id = i.risorsa_id
+        WHERE i.evento_id = ${e.id} ORDER BY r.cognome, r.nome`,
+    sql`SELECT risorsa_id, data::text AS data, stato FROM evento_disponibilita WHERE evento_id = ${e.id}`,
+    sql`SELECT full_name FROM risorse WHERE id = ${e.creatore_id || 0}`
+  ]);
+  return { ...e, creatore: cr ? cr.full_name : (e.creatore_id ? null : 'Amministratore'), owner: _evOwner(ctx, e),
+           invitato: invitati.some(i => +i.risorsa_id === ctx.id), invitati, disponibilita: disp };
+}
+// Crea o modifica. L'organizzatore (se è una risorsa) è sempre tra gli invitati.
+async function saveEvento(p, ctx){
+  const f = _evFields(p);
+  if (ctx.id && !f.invitati.includes(ctx.id) && !p.id) f.invitati.push(ctx.id);
+  if (!f.invitati.length) throw new HttpError(400, 'Aggiungi almeno un invitato');
+  const ok = await sql`SELECT id FROM risorse WHERE id = ANY(${f.invitati}::int[])`;
+  if (ok.length !== f.invitati.length) throw new HttpError(400, 'Uno o più invitati non esistono più');
+  let id;
+  if (p.id) {
+    const e = await _mustOwnEvento(ctx, p.id); id = e.id;
+    if (e.creatore_id && !f.invitati.includes(+e.creatore_id)) f.invitati.push(+e.creatore_id);
+    await sql.transaction([
+      sql`UPDATE eventi SET nome=${f.nome}, descrizione=${f.descrizione}, luogo=${f.luogo}, data=${f.data},
+                 periodo_da=${f.da}, periodo_a=${f.a} WHERE id=${id}`,
+      sql`DELETE FROM evento_invitati WHERE evento_id=${id} AND risorsa_id <> ALL(${f.invitati}::int[])`,
+      sql`DELETE FROM evento_disponibilita WHERE evento_id=${id}
+            AND (risorsa_id <> ALL(${f.invitati}::int[]) OR ${f.da}::date IS NULL OR data NOT BETWEEN ${f.da}::date AND ${f.a}::date)`,
+      sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`
+    ]);
+  } else {
+    const [r] = await sql`INSERT INTO eventi (nome, descrizione, luogo, data, periodo_da, periodo_a, creatore_id)
+                          VALUES (${f.nome}, ${f.descrizione}, ${f.luogo}, ${f.data}, ${f.da}, ${f.a}, ${ctx.id}) RETURNING id`;
+    id = +r.id;
+    await sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`;
+  }
+  return { id };
+}
+async function deleteEvento(p, ctx){ const e = await _mustOwnEvento(ctx, p.id); await sql`DELETE FROM eventi WHERE id=${e.id}`; }
+// L'organizzatore fissa (o toglie) la data, di solito scegliendola dal calendario delle disponibilità
+async function setEventoData(p, ctx){
+  const e = await _mustOwnEvento(ctx, p.id);
+  const data = p.data ? V.isoDate(p.data, 'Data evento') : null;
+  if (!data && !e.periodo_da) throw new HttpError(400, 'Senza periodo delle disponibilità la data non può essere tolta');
+  await sql`UPDATE eventi SET data=${data} WHERE id=${e.id}`;
+}
+// Disponibilità e partecipazione: sempre a proprio nome, solo se invitati
+async function _mustInvited(ctx, id){
+  if (!ctx.id) deny('Solo gli invitati possono rispondere');
+  const e = await _evento(id);
+  if (!(await _evInvited(ctx, e.id))) throw new HttpError(404, 'Evento non trovato');
+  return e;
+}
+async function setDisponibilita(p, ctx){
+  const e = await _mustInvited(ctx, p.eventoId);
+  if (e.data) throw new HttpError(409, 'La data dell\'evento è già stata fissata');
+  if (!e.periodo_da) throw new HttpError(400, 'Questo evento non raccoglie disponibilità');
+  const data = V.isoDate(p.data, 'Giorno');
+  if (data < e.periodo_da || data > e.periodo_a) throw new HttpError(400, 'Giorno fuori dal periodo proposto');
+  if (!p.stato) { await sql`DELETE FROM evento_disponibilita WHERE evento_id=${e.id} AND risorsa_id=${ctx.id} AND data=${data}`; return; }
+  const stato = V.oneOf(p.stato, ['si', 'forse', 'no'], 'Disponibilità');
+  await sql`INSERT INTO evento_disponibilita (evento_id, risorsa_id, data, stato) VALUES (${e.id}, ${ctx.id}, ${data}, ${stato})
+            ON CONFLICT (evento_id, risorsa_id, data) DO UPDATE SET stato = EXCLUDED.stato`;
+}
+async function setPartecipazione(p, ctx){
+  const e = await _mustInvited(ctx, p.eventoId);
+  const risposta = p.risposta == null || p.risposta === '' ? null : V.oneOf(p.risposta, ['si', 'no'], 'Risposta');
+  const commento = V.optText(p.commento, 'Commento', 500);
+  await sql`UPDATE evento_invitati SET risposta=${risposta}, commento=${commento}, risposto_at=NOW()
+            WHERE evento_id=${e.id} AND risorsa_id=${ctx.id}`;
+}
+
 // ── Benchmark per progetto (config benchmark_{progettoId}): FTE venduti, tempi medi dei ticket, Pyr.
 //    Modificabile da chiunque; i campi vuoti restano null. ──
 const BENCH_FIELDS = { fteTot: 'FTE venduti TOT', fteCr: 'FTE CR', fteTicket: 'FTE Ticket/Extra', tL1: 'Tempo L1 (h)', tL2: 'Tempo L2 (h)', tL3: 'Tempo L3 (h)', pyr: 'Pyr' };
@@ -913,7 +1061,7 @@ async function sollecitaForecast(p) {
   const GMAIL_USER = process.env.GMAIL_USER;
   const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
   const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
-  const SITE_URL   = (process.env.SITE_URL || '').replace(/\/$/, '');
+  const SITE_URL   = siteUrl();
   if (!GMAIL_USER || !GMAIL_PASS) return { sent: 0, reason: 'no_smtp' };
 
   const [manager] = await sql`SELECT full_name FROM risorse WHERE id = ${p.managerId}`;
@@ -1579,7 +1727,7 @@ async function _sendThresholdAlert(kind, scope, anno, mese, soglia, tot, extra){
   const GMAIL_USER = process.env.GMAIL_USER;
   const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
   const FROM_NAME  = process.env.FROM_NAME || 'Team Hours Tracker';
-  const SITE_URL   = (process.env.SITE_URL || '').replace(/\/$/, '');
+  const SITE_URL   = siteUrl();
   const { progettoId, areaId } = scope;
   const isEe = kind === 'ee';
   const [prj] = await sql`SELECT nome FROM progetti WHERE id=${progettoId}`;
@@ -1916,7 +2064,7 @@ const ACTIONS = {
   // Ticket ed Extra Effort si inseriscono sempre a proprio nome: la risorsa arriva dalla sessione
   getTicketDay: (p, c) => { mustPerson(c); return getTicketDay({ ...p, risorsaId: c.id }); },
   saveTickets:  (p, c) => { mustPerson(c); return saveTickets({ ...p, risorsaId: c.id }); },
-  saveBenchmark: (p) => saveBenchmark(p),   // modificabile da tutti gli utenti autenticati
+  saveBenchmark: (p, c) => { mustElevated(c); return saveBenchmark(p); },   // admin, manager e Senior Manager
   saveArea:   (p, c) => { mustAdmin(c); return saveArea(p); },
   deleteArea: (p, c) => { mustAdmin(c); return deleteArea(p); },
 
@@ -1941,6 +2089,15 @@ const ACTIONS = {
   removeProjectTL: (p, c) => { mustMgrPrj(c, V.id(p.progettoId, 'Progetto')); return removeProjectTL(p); },
   saveProjectWbs:  (p, c) => { mustMgrPrj(c, V.id(p.id, 'Progetto')); return saveProjectWbs(p); },
   saveProjectLead: () => null,   // deprecata, mantenuta per compatibilità
+
+  // ── eventi (permessi negli handler: invitati, organizzatore, admin) ──
+  getEventi:         (p, c) => getEventi(p, c),
+  getEvento:         (p, c) => getEvento(p, c),
+  saveEvento:        (p, c) => saveEvento(p, c),
+  deleteEvento:      (p, c) => deleteEvento(p, c),
+  setEventoData:     (p, c) => setEventoData(p, c),
+  setDisponibilita:  (p, c) => setDisponibilita(p, c),
+  setPartecipazione: (p, c) => setPartecipazione(p, c),
 
   // ── solo admin ──
   setAdminPwd: (p, c) => { mustAdmin(c); return setAdminPwd(p); },
