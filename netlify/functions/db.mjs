@@ -885,7 +885,7 @@ async function saveRepExport(p){
 
 
 // ── Tema colore dell'app: ognuno sceglie il proprio (l'admin, che non è una risorsa, in config) ──
-const TEMI = ['viola', 'blu', 'verde', 'teal', 'rosso', 'rosa', 'arancio', 'grafite'];
+const TEMI = ['viola', 'blu', 'verde', 'teal', 'rosso', 'rosa', 'arancio', 'grafite', 'napoli', 'juvestabia', 'roma', 'salernitana', 'barcellona'];
 async function _getTema(ctx){
   const [r] = ctx.admin ? await sql`SELECT valore AS tema FROM config WHERE chiave='admin_tema'`
                         : await sql`SELECT tema FROM risorse WHERE id=${ctx.id || 0}`;
@@ -947,97 +947,138 @@ async function _nameOf(ctx){ if (!ctx.id) return 'L\'amministratore'; const [r] 
 // Invito a un evento: email "poster" in stile Accenture (tabelle e stili inline, per Gmail e Outlook).
 // Niente immagini esterne né font di icone: emoji e sfumature con un colore pieno di riserva.
 const _fmtBreve = iso => new Date(String(iso).slice(0, 10) + 'T00:00:00Z').toLocaleDateString('it-IT', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+// Stile dell'email in base al tipo di evento, dedotto dall'icona scelta dall'organizzatore
+const EV_MAIL_EMOJI = {
+  'champagne-glasses': '🥂', 'cake-candles': '🎂', gift: '🎁', music: '🎵', microphone: '🎤', guitar: '🎸', 'masks-theater': '🎭', star: '⭐',
+  'beer-mug-empty': '🍺', 'wine-glass': '🍷', 'martini-glass-citrus': '🍹', utensils: '🍽️', 'pizza-slice': '🍕', burger: '🍔', 'mug-hot': '☕', 'ice-cream': '🍦',
+  futbol: '⚽', basketball: '🏀', volleyball: '🏐', 'table-tennis-paddle-ball': '🏓', 'bowling-ball': '🎳', 'golf-ball-tee': '⛳', 'person-running': '🏃',
+  'person-biking': '🚴', 'person-swimming': '🏊', dumbbell: '🏋️', trophy: '🏆', medal: '🏅',
+  plane: '✈️', train: '🚆', bus: '🚌', car: '🚗', ship: '🚢', hotel: '🏨', 'umbrella-beach': '🏖️', mountain: '⛰️', 'person-hiking': '🥾', 'person-skiing': '⛷️', campground: '🏕️', tree: '🌲',
+  'people-group': '👥', handshake: '🤝', 'chalkboard-user': '🧑‍🏫', 'laptop-code': '💻', lightbulb: '💡', 'graduation-cap': '🎓',
+  gamepad: '🎮', dice: '🎲', film: '🎬', camera: '📸', palette: '🎨', heart: '❤️'
+};
+const EV_MAIL_KIND = {
+  cena:    ['utensils', 'pizza-slice', 'burger', 'ice-cream'],
+  brindisi:['champagne-glasses', 'beer-mug-empty', 'wine-glass', 'martini-glass-citrus', 'mug-hot'],
+  sport:   ['futbol', 'basketball', 'volleyball', 'table-tennis-paddle-ball', 'bowling-ball', 'golf-ball-tee', 'person-running', 'person-biking', 'person-swimming', 'dumbbell', 'trophy', 'medal'],
+  viaggio: ['plane', 'train', 'bus', 'car', 'ship', 'hotel', 'umbrella-beach', 'mountain', 'person-hiking', 'person-skiing', 'campground', 'tree'],
+  festa:   ['cake-candles', 'gift', 'music', 'microphone', 'guitar', 'masks-theater', 'star'],
+  lavoro:  ['people-group', 'handshake', 'chalkboard-user', 'laptop-code', 'lightbulb', 'graduation-cap'],
+  svago:   ['gamepad', 'dice', 'film', 'camera', 'palette', 'heart']
+};
+// h* = sfumatura dell'intestazione, hl = evidenziato nel titolo, c* = pulsante e fascia finale, soft/chip = riquadri chiari
+const EV_MAIL_STYLE = {
+  cena: { h: ['#1E1236', '#2A1846', '#5B2A6E', '#C2477E'], hl: '#F472B6', c: ['#7A0C4C', '#B0175F', '#E0287A'], soft: '#FDF2F8', chip: '#FBE3EF', deco: '&#9679; &#9679; &#9679; &#9679; &#9679;', decoColor: '#FDE68A',
+    eyebrow: 'Sei nostro ospite!', tag: ['Good food', 'Great conversations', 'Bright ideas'],
+    chips: [['🍽️', 'Buon cibo', 'da condividere'], ['👥', 'Team', 'più uniti'], ['💡', 'Nuove idee', 'da far crescere']], close: 'Buon appetito!',
+    slogan: 'Insieme, anche fuori dall\'ufficio,<br>costruiamo il futuro.', intro: 'Ti aspettiamo a tavola per' },
+  brindisi: { h: ['#2B1406', '#4A230B', '#8A4B12', '#E0A030'], hl: '#FCD34D', c: ['#7C3A0A', '#B45309', '#E09A1F'], soft: '#FFF8EB', chip: '#FDEBC8', deco: '✨ &nbsp; 🥂 &nbsp; ✨', decoColor: '#FDE68A',
+    eyebrow: 'Cin cin!', tag: ['Cheers', 'Good vibes', 'Great people'],
+    chips: [['🥂', 'Un brindisi', 'tutti insieme'], ['💬', 'Chiacchiere', 'in libertà'], ['😌', 'Relax', 'dopo il lavoro']], close: 'Cin cin!',
+    slogan: 'Alziamo i calici<br>al nostro team.', intro: 'Ti aspettiamo per' },
+  sport: { h: ['#03241A', '#064E3B', '#047857', '#34D399'], hl: '#A7F3D0', c: ['#065F46', '#047857', '#10B981'], soft: '#ECFDF5', chip: '#D1FAE5', deco: '&#9135;&#9135;&#9135; &#9711; &#9135;&#9135;&#9135;', decoColor: '#A7F3D0',
+    eyebrow: 'Scendi in campo!', tag: ['Play hard', 'Have fun', 'Team spirit'],
+    chips: [['👟', 'Squadra', 'si gioca insieme'], ['🏆', 'Sfida', 'all\'ultimo punto'], ['🎉', 'Divertimento', 'garantito']], close: 'Che vinca il migliore!',
+    slogan: 'In campo come in ufficio:<br>una squadra sola.', intro: 'Ti aspettiamo in campo per', luogo: 'Ritrovo' },
+  viaggio: { h: ['#082F49', '#0C4A6E', '#0369A1', '#38BDF8'], hl: '#7DD3FC', c: ['#075985', '#0369A1', '#0EA5E9'], soft: '#F0F9FF', chip: '#E0F2FE', deco: '&#9728; &nbsp; &#9729; &nbsp; &#9729;', decoColor: '#FDE68A',
+    eyebrow: 'Si parte!', tag: ['Pack your bags', 'New places', 'Good company'],
+    chips: [['🗺️', 'Nuovi posti', 'da scoprire'], ['🧭', 'Avventura', 'tutti insieme'], ['📸', 'Ricordi', 'da portare a casa']], close: 'Buon viaggio!',
+    slogan: 'Nuovi orizzonti,<br>la stessa squadra.', intro: 'Preparati a partire con noi per', luogo: 'Destinazione' },
+  festa: { h: ['#2E1065', '#4C1D95', '#9D174D', '#F472B6'], hl: '#F9A8D4', c: ['#6D28D9', '#9D174D', '#DB2777'], soft: '#FDF4FF', chip: '#FAE8FF', deco: '🎉 &nbsp; 🎊 &nbsp; 🎈', decoColor: '#FFFFFF',
+    eyebrow: 'Si festeggia!', tag: ['Let\'s celebrate', 'Good music', 'Great memories'],
+    chips: [['🎶', 'Musica', 'e allegria'], ['🎊', 'Festa', 'tutti insieme'], ['📸', 'Ricordi', 'da condividere']], close: 'Let\'s party!',
+    slogan: 'Festeggiare insieme<br>ci rende una squadra.', intro: 'Ti aspettiamo per festeggiare' },
+  lavoro: { h: ['#0F172A', '#1E1B4B', '#3730A3', '#6366F1'], hl: '#A5B4FC', c: ['#312E81', '#4338CA', '#6366F1'], soft: '#EEF2FF', chip: '#E0E7FF', deco: '&#9670; &nbsp; &#9670; &nbsp; &#9670;', decoColor: '#A5B4FC',
+    eyebrow: 'Ti aspettiamo!', tag: ['Learn', 'Share', 'Grow'],
+    chips: [['🤝', 'Condivisione', 'di esperienze'], ['📈', 'Crescita', 'professionale'], ['💡', 'Nuove idee', 'da realizzare']], close: 'See you there!',
+    slogan: 'Imparare insieme<br>ci fa crescere.', intro: 'Ti aspettiamo per' },
+  svago: { h: ['#042F2E', '#134E4A', '#0F766E', '#5EEAD4'], hl: '#99F6E4', c: ['#115E59', '#0F766E', '#14B8A6'], soft: '#F0FDFA', chip: '#CCFBF1', deco: '&#9733; &nbsp; &#9733; &nbsp; &#9733;', decoColor: '#FDE68A',
+    eyebrow: 'Un momento di svago!', tag: ['Have fun', 'Relax', 'Good company'],
+    chips: [['🎲', 'Divertimento', 'assicurato'], ['😄', 'Relax', 'senza pensieri'], ['👥', 'Insieme', 'come una squadra']], close: 'See you there!',
+    slogan: 'Insieme, anche fuori dall\'ufficio,<br>costruiamo il futuro.', intro: 'Ti aspettiamo per' }
+};
+function _evMailKind(icona){
+  for (const [k, list] of Object.entries(EV_MAIL_KIND)) if (list.includes(icona)) return k;
+  return 'brindisi';   // icona predefinita degli eventi: il brindisi
+}
+const _evEmoji = e => EV_MAIL_EMOJI[e.icona] || '🥂';
 function _eventMail(e, d, org, link){
-  const P = { plum: '#2A1846', plum2: '#5B2A6E', pink: '#F472B6', mag: '#B0175F', mag2: '#E0287A', ink: '#1F1B2E', mut: '#5E5872', soft: '#FDF2F8', line: '#F3D7E6', acc: '#A100FF' };
+  const K = EV_MAIL_STYLE[_evMailKind(e.icona)], emoji = _evEmoji(e);
+  const ink = '#1F1B2E', mut = '#5E5872', acc = '#A100FF', accent = K.c[1];
   const FONT = "Arial,Helvetica,sans-serif", SCRIPT = "'Brush Script MT','Segoe Script','Lucida Handwriting',cursive";
   const g = (e.giorni || []).slice().sort();
   const nome = String(e.nome || '').trim(), words = nome.split(/\s+/);
   const titoloA = words.length > 1 ? words.slice(0, -1).join(' ') : nome, titoloB = words.length > 1 ? words.at(-1) : '';
   const desc = e.descrizione || 'Un momento speciale per stare insieme, conoscerci meglio e condividere nuove idee.';
   const sub = desc.length > 150 ? desc.slice(0, 147).replace(/\s+\S*$/, '') + '…' : desc;
-  // Data: giorno fissato oppure i giorni proposti su cui indicare la disponibilità
-  let dataTop, dataSub;
+  let dataTop, dataSub = '';
   if (e.data) {
     const w = new Date(e.data + 'T00:00:00Z').toLocaleDateString('it-IT', { weekday: 'long', timeZone: 'UTC' });
     dataTop = `${w.charAt(0).toUpperCase() + w.slice(1)}<br>${new Date(e.data + 'T00:00:00Z').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
-    dataSub = '';
   } else {
     dataTop = 'Da definire';
     dataSub = g.length ? (g.length === 1 ? `1 giorno proposto: ${_fmtBreve(g[0])}` : `${g.length} giorni proposti (dal ${_fmtBreve(g[0])} al ${_fmtBreve(g.at(-1))})`)
       : e.periodo_da ? `Disponibilità dal ${_fmtBreve(e.periodo_da)} al ${_fmtBreve(e.periodo_a)}` : '';
   }
   const cta = e.data ? 'Conferma la tua partecipazione' : 'Indica la tua disponibilità';
+  const circle = (ic, size) => `<div style="width:${size}px;height:${size}px;border-radius:${size / 2}px;background:${K.chip};text-align:center;line-height:${size}px;font-size:${Math.round(size * .47)}px">${ic}</div>`;
   const info = (ic, label, val, small) => `<td valign="top" class="em-col" style="padding:16px 14px;width:33%">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td valign="top" style="padding-right:10px"><div style="width:36px;height:36px;border-radius:18px;background:#FBE3EF;text-align:center;line-height:36px;font-size:17px">${ic}</div></td>
-        <td valign="top" style="font-family:${FONT}"><div style="font-size:12px;color:${P.mut}">${label}</div><div style="font-size:15px;font-weight:700;color:${P.ink};line-height:1.35">${val}</div>${small ? `<div style="font-size:12px;color:${P.mut};margin-top:3px">${small}</div>` : ''}</td>
-      </tr></table></td>`;
-  const chip = (ic, t, s) => `<td valign="middle" class="em-col" style="padding:14px 10px;width:33%"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="padding-right:10px"><div style="width:44px;height:44px;border-radius:22px;background:#FBE3EF;text-align:center;line-height:44px;font-size:20px">${ic}</div></td>
-      <td style="font-family:${FONT}"><div style="font-size:14px;font-weight:700;color:${P.ink}">${t}</div><div style="font-size:12px;color:${P.mut}">${s}</div></td></tr></table></td>`;
-  const logo = (c, txt) => `<span style="font-family:${FONT};font-size:22px;font-weight:900;color:${P.acc};letter-spacing:-1px">&gt;</span><span style="font-family:${FONT};font-size:18px;font-weight:700;color:${txt};padding-left:8px;vertical-align:2px">Accenture</span>`;
-  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${_esc(nome)}</title><style>@media (max-width:520px){.em-col{display:block!important;width:auto!important;padding:10px 14px!important}.em-hide{display:none!important}}</style></head>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td valign="top" style="padding-right:10px">${circle(ic, 36)}</td>
+        <td valign="top" style="font-family:${FONT}"><div style="font-size:12px;color:${mut}">${label}</div><div style="font-size:15px;font-weight:700;color:${ink};line-height:1.35">${val}</div>${small ? `<div style="font-size:12px;color:${mut};margin-top:3px">${small}</div>` : ''}</td></tr></table></td>`;
+  const chip = ([ic, t, s]) => `<td valign="middle" class="em-col" style="padding:14px 10px;width:33%"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="padding-right:10px">${circle(ic, 44)}</td><td style="font-family:${FONT}"><div style="font-size:14px;font-weight:700;color:${ink}">${t}</div><div style="font-size:12px;color:${mut}">${s}</div></td></tr></table></td>`;
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${_esc(nome)}</title><style>@media (max-width:520px){.em-col{display:block!important;width:auto!important;padding:10px 14px!important}.em-hide{display:none!important}.em-big{font-size:56px!important}}</style></head>
 <body style="margin:0;padding:0;background:#F4F1F6">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F1F6"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#FFFFFF;border-radius:14px">
-  <!-- testata -->
   <tr><td style="padding:22px 28px 14px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-    <td>${logo(P.acc, P.ink)}</td>
-    <td align="right" style="font-family:${SCRIPT};font-size:18px;color:${P.ink};line-height:1.1">People make<br><span style="color:${P.mag}">extraordinary happen</span></td>
+    <td><span style="font-family:${FONT};font-size:22px;font-weight:900;color:${acc};letter-spacing:-1px">&gt;</span><span style="font-family:${FONT};font-size:18px;font-weight:700;color:${ink};padding-left:8px;vertical-align:2px">Accenture</span></td>
+    <td align="right" style="font-family:${SCRIPT};font-size:18px;color:${ink};line-height:1.1">People make<br><span style="color:${accent}">extraordinary happen</span></td>
   </tr></table></td></tr>
-  <!-- hero -->
   <tr><td style="padding:0 20px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${P.plum}" style="background:${P.plum};background-image:linear-gradient(135deg,#1E1236 0%,${P.plum} 45%,${P.plum2} 80%,#C2477E 100%);border-radius:14px">
-      <tr><td align="right" style="padding:14px 22px 0;font-size:14px;letter-spacing:10px;color:#FDE68A;line-height:1">&#9679; &#9679; &#9679; &#9679; &#9679;</td></tr>
-      <tr><td style="padding:6px 28px 26px;font-family:${FONT}">
-        <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:${P.pink};text-transform:uppercase">Sei nostro ospite!</div>
-        <div style="font-size:38px;line-height:1.08;font-weight:800;color:#FFFFFF;margin:10px 0 0">${_esc(titoloA)}${titoloB ? `<br><span style="color:${P.pink}">${_esc(titoloB)}</span>` : ''}</div>
-        <div style="font-size:15px;line-height:1.5;color:#EDE7F6;margin:14px 0 0;max-width:420px">${_esc(sub)}</div>
-        <div style="width:44px;height:3px;background:${P.pink};border-radius:2px;margin-top:16px"></div>
-      </td></tr>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${K.h[1]}" style="background:${K.h[1]};background-image:linear-gradient(135deg,${K.h[0]} 0%,${K.h[1]} 45%,${K.h[2]} 80%,${K.h[3]} 100%);border-radius:14px">
+      <tr><td colspan="2" align="right" style="padding:14px 22px 0;font-size:14px;letter-spacing:6px;color:${K.decoColor};line-height:1">${K.deco}</td></tr>
+      <tr><td valign="top" style="padding:6px 10px 26px 28px;font-family:${FONT}">
+        <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:${K.hl};text-transform:uppercase">${K.eyebrow}</div>
+        <div style="font-size:38px;line-height:1.08;font-weight:800;color:#FFFFFF;margin:10px 0 0">${_esc(titoloA)}${titoloB ? `<br><span style="color:${K.hl}">${_esc(titoloB)}</span>` : ''}</div>
+        <div style="font-size:15px;line-height:1.5;color:#F1F5F9;margin:14px 0 0">${_esc(sub)}</div>
+        <div style="width:44px;height:3px;background:${K.hl};border-radius:2px;margin-top:16px"></div>
+      </td><td valign="middle" align="center" width="130" style="padding:0 22px 20px 0"><div class="em-big" style="font-size:78px;line-height:1">${emoji}</div></td></tr>
     </table></td></tr>
-  <!-- saluto -->
   <tr><td style="padding:26px 28px 6px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td valign="top" style="font-family:${FONT}">
-      <div style="font-size:22px;font-weight:800;color:${P.ink}">Ciao ${_esc(String(d.full_name).split(' ')[0])},</div>
-      <div style="font-size:17px;color:${P.ink};margin-top:8px">sei invitato/a al nostro evento <strong style="color:${P.mag}">${_esc(nome)}</strong>!</div>
-      <div style="font-size:14px;line-height:1.6;color:${P.mut};margin-top:10px;white-space:pre-line">${_esc(desc)}</div>
+      <div style="font-size:22px;font-weight:800;color:${ink}">Ciao ${_esc(String(d.full_name).split(' ')[0])},</div>
+      <div style="font-size:17px;color:${ink};margin-top:8px">${K.intro} <strong style="color:${accent}">${_esc(nome)}</strong>!</div>
+      <div style="font-size:14px;line-height:1.6;color:${mut};margin-top:10px;white-space:pre-line">${_esc(desc)}</div>
     </td>
-    <td valign="top" align="right" width="150" class="em-hide" style="font-family:${SCRIPT};font-size:19px;color:${P.mag};line-height:1.25;padding-left:10px">Good people<br>Great conversations<br>Bright ideas</td>
+    <td valign="top" align="right" width="150" class="em-hide" style="font-family:${SCRIPT};font-size:19px;color:${accent};line-height:1.25;padding-left:10px">${K.tag.map(_esc).join('<br>')}</td>
   </tr></table></td></tr>
-  <!-- data, luogo, organizzatore -->
-  <tr><td style="padding:18px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${P.soft};border-radius:12px"><tr>
-    ${info('&#128197;', 'Data', dataTop, dataSub)}
-    ${info('&#128205;', 'Luogo', _esc(e.luogo || 'Da definire'), '')}
-    ${info('&#128101;', 'Organizzato da', _esc(org), '')}
+  <tr><td style="padding:18px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${K.soft};border-radius:12px"><tr>
+    ${info('📅', 'Data', dataTop, dataSub)}${info('📍', K.luogo || 'Luogo', _esc(e.luogo || 'Da definire'), '')}${info('👤', 'Organizzato da', _esc(org), '')}
   </tr></table></td></tr>
-  <!-- pulsante -->
   ${link ? `<tr><td align="center" style="padding:26px 28px 6px">
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${P.mag}" style="border-radius:10px;background:${P.mag};background-image:linear-gradient(90deg,#7A0C4C,${P.mag2})">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${K.c[1]}" style="border-radius:10px;background:${K.c[1]};background-image:linear-gradient(90deg,${K.c[0]},${K.c[2]})">
       <a href="${_esc(link)}" style="display:inline-block;padding:15px 34px;font-family:${FONT};font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none">${cta} &rarr;</a></td></tr></table>
-    <div style="font-family:${FONT};font-size:12px;color:${P.mut};margin-top:10px">Puoi indicare la tua disponibilità direttamente nella sezione Eventi di Team Hours Tracker.</div>
+    <div style="font-family:${FONT};font-size:12px;color:${mut};margin-top:10px">Puoi indicare la tua disponibilità direttamente nella sezione Eventi di Team Hours Tracker.</div>
   </td></tr>` : ''}
-  <!-- tre punti -->
-  <tr><td style="padding:22px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F6F4FA;border-radius:12px"><tr>
-    ${chip('&#129346;', 'Buona compagnia', 'momenti da condividere')}${chip('&#128101;', 'Team', 'più uniti')}${chip('&#128161;', 'Nuove idee', 'da far crescere')}
-  </tr></table></td></tr>
-  <tr><td align="center" style="padding:22px 28px 4px;font-family:${SCRIPT};font-size:28px;color:${P.mag}">&mdash; See you there! &mdash;</td></tr>
-  <!-- piede -->
-  <tr><td style="padding:14px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${P.mag}" style="background:${P.mag};background-image:linear-gradient(90deg,#6B0F45 0%,${P.mag} 60%,${P.mag2} 100%);border-radius:12px"><tr>
+  <tr><td style="padding:22px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F6F5FA;border-radius:12px"><tr>${K.chips.map(chip).join('')}</tr></table></td></tr>
+  <tr><td align="center" style="padding:22px 28px 4px;font-family:${SCRIPT};font-size:28px;color:${accent}">&mdash; ${_esc(K.close)} &mdash;</td></tr>
+  <tr><td style="padding:14px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${K.c[1]}" style="background:${K.c[1]};background-image:linear-gradient(90deg,${K.c[0]} 0%,${K.c[1]} 60%,${K.c[2]} 100%);border-radius:12px"><tr>
     <td style="padding:20px 22px;white-space:nowrap" width="150"><span style="font-family:${FONT};font-size:22px;font-weight:900;color:#FFFFFF">&gt;</span><span style="font-family:${FONT};font-size:17px;font-weight:700;color:#FFFFFF;padding-left:8px;vertical-align:2px">Accenture</span></td>
-    <td style="padding:20px 22px 20px 16px;border-left:1px solid rgba(255,255,255,.35);font-family:${FONT};font-size:14px;line-height:1.5;color:#FFFFFF">Insieme, anche fuori dall'ufficio,<br>costruiamo il futuro.</td>
+    <td style="padding:20px 22px 20px 16px;border-left:1px solid rgba(255,255,255,.35);font-family:${FONT};font-size:14px;line-height:1.5;color:#FFFFFF">${K.slogan}</td>
   </tr></table></td></tr>
-  <tr><td align="center" style="padding:16px 28px 22px;font-family:${FONT};font-size:11px;line-height:1.6;color:${P.mut}">Questa è una comunicazione interna inviata da Team Hours Tracker.<br>Per qualsiasi domanda, contatta l'organizzatore dell'evento.</td></tr>
+  <tr><td align="center" style="padding:16px 28px 22px;font-family:${FONT};font-size:11px;line-height:1.6;color:${mut}">Questa è una comunicazione interna inviata da Team Hours Tracker.<br>Per qualsiasi domanda, contatta l'organizzatore dell'evento.</td></tr>
 </table></td></tr></table></body></html>`;
 }
 function _eventMailText(e, d, org, link){
+  const K = EV_MAIL_STYLE[_evMailKind(e.icona)];
   const g = (e.giorni || []).slice().sort();
   const quando = e.data ? _fmtGiorno(e.data)
     : g.length ? `da definire: indica la tua disponibilità per ${g.length === 1 ? _fmtGiorno(g[0]) : `${g.length} giorni proposti (${g.map(_fmtBreve).join(', ')})`}`
     : e.periodo_da ? `da definire: indica la tua disponibilità tra ${_fmtGiorno(e.periodo_da)} e ${_fmtGiorno(e.periodo_a)}` : 'da definire';
-  return [`Ciao ${String(d.full_name).split(' ')[0]},`, '', `sei invitato/a al nostro evento "${e.nome}"!`, e.descrizione ? '\n' + e.descrizione : '', '',
-          `Data: ${quando}`, `Luogo: ${e.luogo || 'da definire'}`, `Organizzato da: ${org}`,
-          link ? `\n${e.data ? 'Conferma la tua partecipazione' : 'Indica la tua disponibilità'}: ${link}` : '', '', 'See you there!'].filter(x => x !== '').join('\n');
+  return [`${_evEmoji(e)} ${K.eyebrow}`, '', `Ciao ${String(d.full_name).split(' ')[0]},`, `${K.intro} "${e.nome}"!`, e.descrizione ? '\n' + e.descrizione : '', '',
+          `Data: ${quando}`, `${K.luogo || 'Luogo'}: ${e.luogo || 'da definire'}`, `Organizzato da: ${org}`,
+          link ? `\n${e.data ? 'Conferma la tua partecipazione' : 'Indica la tua disponibilità'}: ${link}` : '', '', K.close].filter(x => x !== '').join('\n');
 }
 
 // Invito a un evento: a chi è appena stato aggiunto, escluso chi lo ha creato
@@ -1045,11 +1086,11 @@ async function _notifyEvento(eid, ids, ctx){
   ids = ids.filter(id => id !== ctx.id);
   if (!ids.length) return { sent: 0, total: 0 };
   const [[e], dest, org] = await Promise.all([
-    sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da, periodo_a::text AS periodo_a, giorni::text[] AS giorni FROM eventi WHERE id=${eid}`,
+    sql`SELECT id, nome, descrizione, luogo, icona, data::text AS data, periodo_da::text AS periodo_da, periodo_a::text AS periodo_a, giorni::text[] AS giorni FROM eventi WHERE id=${eid}`,
     _people(ids), _nameOf(ctx)]);
   const link = siteUrl() ? `${siteUrl()}/?tab=eventi&ev=${eid}` : null;
   return _notify('evento_invito', dest, d => ({
-    subject: `Sei invitato/a: ${e.nome}`, html: _eventMail(e, d, org, link), text: _eventMailText(e, d, org, link)
+    subject: `${_evEmoji(e)} Sei invitato/a: ${e.nome}`, html: _eventMail(e, d, org, link), text: _eventMailText(e, d, org, link)
   }), { evento: e.nome, eventoId: eid });
 }
 

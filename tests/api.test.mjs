@@ -602,6 +602,8 @@ test('tema: ognuno salva il proprio, predefinito viola, valori non validi rifiut
   assert.equal((await call('setTema', { tema: 'nero; background:red' }, T.anna)).status, 400);
   assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'verde');
   assert.equal((await call('bootstrap', {}, T.mario)).data.tema, 'viola', 'il tema di Anna non cambia quello degli altri');
+  for (const sq of ['napoli', 'juvestabia', 'roma', 'salernitana', 'barcellona']) assert.equal((await call('setTema', { tema: sq }, T.mario)).status, 200, sq);
+  await call('setTema', { tema: 'viola' }, T.mario);
   assert.equal((await call('setTema', { tema: 'grafite' }, T.admin)).status, 200);
   assert.equal((await call('bootstrap', {}, T.admin)).data.tema, 'grafite');
   assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'verde');
@@ -627,4 +629,28 @@ test('eventi: giorni proposti scelti sul calendario', async () => {
   assert.equal((await call('saveEvento', { nome: 'X', giorni: ['2026-02-30'], invitati: [ID.anna] }, T.luca)).status, 400, 'data non valida');
   assert.equal((await call('saveEvento', { nome: 'X', giorni: [], invitati: [ID.anna] }, T.luca)).status, 400, 'né data né giorni');
   await call('deleteEvento', { id }, T.luca);
+});
+
+test('email evento: stile diverso in base al tipo di evento (icona)', async () => {
+  const mk = async (nome, icona) => {
+    const r = await call('saveEvento', { nome, icona, data: '2026-12-20', luogo: 'Napoli', invitati: [ID.anna] }, T.luca);
+    assert.equal(r.status, 200, r.error);
+    return { id: r.data.id, m: mails.at(-1) };
+  };
+  const calcio = await mk('Partita di calcetto', 'futbol');
+  const cena = await mk('Cena di Natale', 'utensils');
+  const gita = await mk('Gita in montagna', 'mountain');
+  assert.match(calcio.m.subject, /^⚽ Sei invitato\/a: Partita di calcetto/);
+  assert.match(calcio.m.html, /Scendi in campo!/);
+  assert.match(calcio.m.html, /Che vinca il migliore!/);
+  assert.match(calcio.m.html, /Ritrovo/);
+  assert.match(cena.m.subject, /^🍽️ Sei invitato\/a/);
+  assert.match(cena.m.html, /Sei nostro ospite!/);
+  assert.match(cena.m.html, /Buon appetito!/);
+  assert.match(gita.m.html, /Si parte!/);
+  assert.match(gita.m.html, /Destinazione/);
+  assert.notEqual(calcio.m.html.match(/bgcolor="(#[0-9A-F]+)"/)[1], cena.m.html.match(/bgcolor="(#[0-9A-F]+)"/)[1], 'colori diversi');
+  assert.doesNotMatch(calcio.m.html, /Buon appetito/);
+  assert.match(calcio.m.text, /Scendi in campo/);
+  for (const x of [calcio, cena, gita]) await call('deleteEvento', { id: x.id }, T.luca);
 });

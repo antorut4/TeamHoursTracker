@@ -645,3 +645,19 @@ button.ev-cell:disabled{opacity:.5;cursor:wait}
 .ev-pk-sel{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:10px}
 .ev-pk-sel .cf-tag{padding:3px 6px 3px 10px}
 .ev-when{align-items:start}
+/* Temi squadre di calcio: solo i colori sociali */
+:root[data-theme="napoli"]{--amber:#0B6FB8;--amber-bg:#E3F2FB;--amber-rim:#8CC8EC;--accent-2:#12A0D7;--accent-dark:#075A96;--accent-ink:#003C82;--accent-rgb:11,111,184;--accent-ink-rgb:0,60,130;--accent-tint:#F5FAFE;--accent-soft:#DDF0FB;--grad:linear-gradient(135deg,#0B6FB8 0%,#12A0D7 100%);--sb-grad:linear-gradient(170deg,#002A5C 0%,#075A96 45%,#12A0D7 100%);--sb-grad-h:linear-gradient(90deg,#002A5C 0%,#075A96 55%,#12A0D7 100%);--title-grad:linear-gradient(90deg,#003C82 0%,#0B6FB8 55%,#12A0D7 100%)}
+:root[data-theme="juvestabia"]{--amber:#0044A6;--amber-bg:#FFF6CC;--amber-rim:#F2D24B;--accent-2:#0A5BD1;--accent-dark:#003380;--accent-ink:#002766;--accent-rgb:0,68,166;--accent-ink-rgb:0,39,102;--accent-tint:#FFFCEB;--accent-soft:#FFF0A8;--grad:linear-gradient(135deg,#0044A6 0%,#0A5BD1 100%);--sb-grad:linear-gradient(170deg,#001A4D 0%,#003380 50%,#0044A6 100%);--sb-grad-h:linear-gradient(90deg,#001A4D 0%,#003380 55%,#0044A6 100%);--title-grad:linear-gradient(90deg,#002766 0%,#0044A6 60%,#C99A00 100%)}
+:root[data-theme="roma"]{--amber:#8E1F2F;--amber-bg:#FBEFD9;--amber-rim:#E8B866;--accent-2:#B8452B;--accent-dark:#6E1724;--accent-ink:#5A1220;--accent-rgb:142,31,47;--accent-ink-rgb:90,18,32;--accent-tint:#FFFAF0;--accent-soft:#FCE7BE;--grad:linear-gradient(135deg,#8E1F2F 0%,#B8452B 100%);--sb-grad:linear-gradient(170deg,#3D0A12 0%,#6E1724 45%,#A8322B 100%);--sb-grad-h:linear-gradient(90deg,#3D0A12 0%,#6E1724 55%,#A8322B 100%);--title-grad:linear-gradient(90deg,#5A1220 0%,#8E1F2F 55%,#D9952A 100%)}
+:root[data-theme="salernitana"]{--amber:#861F41;--amber-bg:#F8E6EC;--amber-rim:#D99AAF;--accent-2:#A8324F;--accent-dark:#6A1833;--accent-ink:#511226;--accent-rgb:134,31,65;--accent-ink-rgb:81,18,38;--accent-tint:#FDF7F9;--accent-soft:#F5DCE5;--grad:linear-gradient(135deg,#861F41 0%,#A8324F 100%);--sb-grad:linear-gradient(170deg,#2E0511 0%,#6A1833 45%,#9E2C4C 100%);--sb-grad-h:linear-gradient(90deg,#2E0511 0%,#6A1833 55%,#9E2C4C 100%);--title-grad:linear-gradient(90deg,#511226 0%,#861F41 55%,#B8466A 100%)}
+:root[data-theme="barcellona"]{--amber:#004D98;--amber-bg:#E6EEF8;--amber-rim:#9DB8DE;--accent-2:#A50044;--accent-dark:#003B75;--accent-ink:#002B57;--accent-rgb:0,77,152;--accent-ink-rgb:0,43,87;--accent-tint:#F6F9FD;--accent-soft:#FBE3EC;--grad:linear-gradient(135deg,#004D98 0%,#A50044 100%);--sb-grad:linear-gradient(170deg,#002B57 0%,#004D98 45%,#A50044 100%);--sb-grad-h:linear-gradient(90deg,#002B57 0%,#004D98 55%,#A50044 100%);--title-grad:linear-gradient(90deg,#004D98 0%,#6B2A73 55%,#A50044 100%)}
+/* Juve Stabia: voce attiva del menu in giallo, come la maglia */
+:root[data-theme="juvestabia"] .nav-item.active{background:#FFD200;color:#002766}
+:root[data-theme="juvestabia"] .nav-item.active i{color:#002766}
+:root[data-theme="juvestabia"] .user-avatar{background:#FFD200;color:#002766}
+/* Roma: voce attiva in oro */
+:root[data-theme="roma"] .nav-item.active{background:#F0BC42;color:#5A1220}
+:root[data-theme="roma"] .nav-item.active i{color:#5A1220}
+/* Selettore: gruppi di temi */
+.theme-grp{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);margin:4px 0 8px;grid-column:1/-1}
+.theme-grp:not(:first-child){margin-top:12px}
