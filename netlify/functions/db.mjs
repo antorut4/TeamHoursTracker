@@ -73,7 +73,8 @@ async function bootstrap(ctx){
   if (!isElevated(ctx)) risorse.forEach(r => { if (+r.id !== ctx.id) { r.load_cost = null; r.employee_id = null; r.email = null; } });
   Object.keys(wbs).forEach(k => { if (!sees(k.split('_')[0])) delete wbs[k]; });
   return { progetti, risorse, allocazioni, ore: ore.filter(o => sees(o.risorsa_id)),
-           ferie: ferie.map(f => sees(f.risorsa_id) ? f : maskFerie(f)), rep, wbs, repTipi, aree, soglie, repExport, benchmark };
+           ferie: ferie.map(f => sees(f.risorsa_id) ? f : maskFerie(f)), rep, wbs, repTipi, aree, soglie, repExport, benchmark,
+           tema: await _getTema(ctx) };
 }
 
 // Alberatura AMS per la classificazione dei ticket: unica fonte, inviata ai client e usata per validare
@@ -883,6 +884,127 @@ async function saveRepExport(p){
 }
 
 
+// ── Tema colore dell'app: ognuno sceglie il proprio (l'admin, che non è una risorsa, in config) ──
+const TEMI = ['viola', 'blu', 'verde', 'teal', 'rosso', 'rosa', 'arancio', 'grafite'];
+async function _getTema(ctx){
+  const [r] = ctx.admin ? await sql`SELECT valore AS tema FROM config WHERE chiave='admin_tema'`
+                        : await sql`SELECT tema FROM risorse WHERE id=${ctx.id || 0}`;
+  return r && TEMI.includes(r.tema) ? r.tema : 'viola';
+}
+async function setTema(p, ctx){
+  const tema = V.oneOf(p.tema, TEMI, 'Tema');
+  if (ctx.admin) await sql`INSERT INTO config (chiave, valore) VALUES ('admin_tema', ${tema}) ON CONFLICT (chiave) DO UPDATE SET valore=EXCLUDED.valore`;
+  else await sql`UPDATE risorse SET tema=${tema} WHERE id=${ctx.id}`;
+  return { tema };
+}
+
+// ── Notifiche email di Eventi e Confronto & Feedback ──
+// Non fanno mai fallire l'azione: chi crea un evento o aggiorna una richiesta riceve comunque l'esito,
+// e ogni invio (riuscito, fallito o saltato) finisce nel log email dell'Admin.
+const _fmtGiorno = iso => iso ? new Date(String(iso).slice(0, 10) + 'T00:00:00Z').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) : '';
+function _mailTpl({ titolo, intro, righe = [], citazione, elenco = [], cta }){
+  const r = righe.filter(x => x && x[1]).map(([k, v]) => `<tr><td style="padding:4px 14px 4px 0;color:#5B6275;font-size:13px;white-space:nowrap;vertical-align:top">${_esc(k)}</td><td style="padding:4px 0;font-size:14px;color:#111827">${_esc(v)}</td></tr>`).join('');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;color:#111827">
+    <div style="background:linear-gradient(135deg,#3B0F80,#7C3AED);color:#fff;padding:18px 22px;border-radius:12px 12px 0 0;font-size:18px;font-weight:700">${_esc(titolo)}</div>
+    <div style="border:1px solid #E2E5EC;border-top:none;border-radius:0 0 12px 12px;padding:20px 22px">
+      <p style="font-size:15px;margin:0 0 14px">${intro}</p>
+      ${citazione ? `<div style="background:#F1EBFD;border-left:3px solid #6D28D9;padding:10px 14px;border-radius:6px;font-size:14px;margin:0 0 14px;white-space:pre-line">${_esc(citazione)}</div>` : ''}
+      ${r ? `<table style="border-collapse:collapse;margin:0 0 14px">${r}</table>` : ''}
+      ${elenco.length ? `<ul style="margin:0 0 14px;padding-left:20px;font-size:14px">${elenco.map(x => `<li>${_esc(x)}</li>`).join('')}</ul>` : ''}
+      ${cta ? `<p style="margin:20px 0 6px"><a href="${_esc(cta.url)}" style="background:#6D28D9;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;display:inline-block">${_esc(cta.label)}</a></p>` : ''}
+      <p style="font-size:12px;color:#5B6275;margin:16px 0 0">Email automatica di Team Hours Tracker.</p>
+    </div></div>`;
+}
+function _mailTxt({ titolo, intro, righe = [], citazione, elenco = [], cta }){
+  return [titolo, '', intro.replace(/<[^>]+>/g, ''), citazione ? `\n"${citazione}"` : '', ...righe.filter(x => x && x[1]).map(([k, v]) => `${k}: ${v}`),
+          ...elenco.map(x => '- ' + x), cta ? `\n${cta.label}: ${cta.url}` : ''].filter(x => x !== '').join('\n');
+}
+// destinatari: [{ email, full_name }] — build(r) restituisce { subject, titolo, intro, righe, citazione, elenco, cta }
+async function _notify(tipo, destinatari, build, meta){
+  const list = destinatari.filter(d => d && d.email);
+  if (!list.length) return { sent: 0, total: 0 };
+  const mailer = _mail();
+  const from = `${process.env.FROM_NAME || 'Team Hours Tracker'} <${String(process.env.GMAIL_USER || 'noreply@localhost').trim()}>`;
+  const res = await Promise.allSettled(list.map(async d => {
+    const m = build(d);
+    if (!mailer) { await _logEmail(tipo, d.email, d.full_name, m.subject, 'skipped', 'SMTP non configurato', meta); return false; }
+    try {
+      const info = await mailer.sendMail({ from, to: d.email, subject: m.subject, html: _mailTpl(m), text: _mailTxt(m) });
+      await _logEmail(tipo, d.email, d.full_name, m.subject, 'sent', null, { ...meta, messageId: info && info.messageId });
+      return true;
+    } catch (err) {
+      await _logEmail(tipo, d.email, d.full_name, m.subject, 'error', err.message, meta);
+      console.error(JSON.stringify({ level: 'error', action: tipo, kind: 'smtp', code: err.code, responseCode: err.responseCode, error: err.message }));
+      return false;
+    }
+  }));
+  return { sent: res.filter(x => x.status === 'fulfilled' && x.value).length, total: list.length };
+}
+const _people = ids => ids.length ? sql`SELECT id, full_name, email FROM risorse WHERE id = ANY(${ids}::int[])` : [];
+async function _nameOf(ctx){ if (!ctx.id) return 'L\'amministratore'; const [r] = await sql`SELECT full_name FROM risorse WHERE id=${ctx.id}`; return r ? r.full_name : 'Un collega'; }
+
+// Invito a un evento: a chi è appena stato aggiunto, escluso chi lo ha creato
+async function _notifyEvento(eid, ids, ctx){
+  ids = ids.filter(id => id !== ctx.id);
+  if (!ids.length) return { sent: 0, total: 0 };
+  const [[e], dest, org] = await Promise.all([
+    sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da, periodo_a::text AS periodo_a FROM eventi WHERE id=${eid}`,
+    _people(ids), _nameOf(ctx)]);
+  const link = siteUrl() ? `${siteUrl()}/?tab=eventi&ev=${eid}` : null;
+  const quando = e.data ? _fmtGiorno(e.data) : e.periodo_da ? `da definire: indica la tua disponibilità tra ${_fmtGiorno(e.periodo_da)} e ${_fmtGiorno(e.periodo_a)}` : 'da definire';
+  return _notify('evento_invito', dest, d => ({
+    subject: `Sei invitato/a: ${e.nome}`, titolo: e.nome,
+    intro: `Ciao <strong>${_esc(d.full_name)}</strong>, <strong>${_esc(org)}</strong> ti ha invitato a un evento.`,
+    citazione: e.descrizione, righe: [['Quando', quando], ['Dove', e.luogo], ['Organizza', org]],
+    cta: link && { label: e.data ? 'Conferma la partecipazione' : 'Indica la tua disponibilità', url: link }
+  }), { evento: e.nome, eventoId: eid });
+}
+
+const CONF_TEMI_LBL = { crescita: 'Crescita professionale', feedback: 'Feedback sul lavoro', organizzazione: 'Organizzazione e carichi di lavoro',
+  progetti: 'Nuovi progetti', team: 'Feedback sul team', benessere: 'Benessere', altro: 'Altro' };
+const CONF_PRI_LBL = { alta: 'Alta', media: 'Media', bassa: 'Bassa' };
+async function _confronto(id){
+  const [c] = await sql`SELECT c.id, c.tema, c.messaggio, c.argomenti, c.priorita, c.periodo_da::text AS periodo_da, c.periodo_a::text AS periodo_a,
+                               c.durata_min, c.note, c.richiedente_id, r.full_name AS richiedente, r.email AS richiedente_email
+                        FROM confronti c JOIN risorse r ON r.id = c.richiedente_id WHERE c.id=${id}`;
+  return c;
+}
+const _cfLink = (id, box) => siteUrl() ? `${siteUrl()}/?tab=confronti&cf=${id}${box ? '&box=' + box : ''}` : null;
+// Nuova richiesta: a ogni destinatario
+async function _notifyConfrontoNuovo(id, ids){
+  const [c, dest] = await Promise.all([_confronto(id), _people(ids)]);
+  const periodo = c.periodo_da || c.periodo_a ? [c.periodo_da && 'dal ' + _fmtGiorno(c.periodo_da), c.periodo_a && 'al ' + _fmtGiorno(c.periodo_a)].filter(Boolean).join(' ') : null;
+  return _notify('confronto_richiesta', dest, d => ({
+    subject: `${c.richiedente} ti ha chiesto un confronto: ${CONF_TEMI_LBL[c.tema]}`, titolo: 'Nuova richiesta di confronto',
+    intro: `Ciao <strong>${_esc(d.full_name)}</strong>, <strong>${_esc(c.richiedente)}</strong> vorrebbe confrontarsi con te.`,
+    citazione: c.messaggio, elenco: c.argomenti || [],
+    righe: [['Tema', CONF_TEMI_LBL[c.tema]], ['Priorità', CONF_PRI_LBL[c.priorita]], ['Periodo preferito', periodo], ['Durata', c.durata_min ? c.durata_min + ' minuti' : null], ['Note', c.note]],
+    cta: _cfLink(id) && { label: 'Apri la richiesta', url: _cfLink(id) }
+  }), { confrontoId: id, evento: 'richiesta' });
+}
+// Aggiornamento da parte di un destinatario: a chi ha fatto la richiesta
+async function _notifyConfrontoUpdate(id, ctx, azione){
+  const [c, [d]] = await Promise.all([_confronto(id),
+    sql`SELECT r.full_name, d.data_incontro::text AS data_incontro, d.ora_incontro, d.luogo, d.risposta
+        FROM confronto_destinatari d JOIN risorse r ON r.id = d.risorsa_id WHERE d.confronto_id=${id} AND d.risorsa_id=${ctx.id}`]);
+  if (!c || !d) return { sent: 0, total: 0 };
+  const chi = d.full_name, tema = CONF_TEMI_LBL[c.tema];
+  const T = {
+    pianifica: [`${chi} ha pianificato il confronto`, `<strong>${_esc(chi)}</strong> ha pianificato l'incontro per la tua richiesta di confronto.`, 'Confronto pianificato'],
+    rispondi:  [`${chi} ha risposto alla tua richiesta di confronto`, `<strong>${_esc(chi)}</strong> ha risposto alla tua richiesta di confronto.`, 'Nuova risposta'],
+    completa:  [`Confronto completato con ${chi}`, `<strong>${_esc(chi)}</strong> ha segnato il confronto come completato.`, 'Confronto completato'],
+    rifiuta:   [`${chi} non può accettare la richiesta di confronto`, `<strong>${_esc(chi)}</strong> ha rifiutato la tua richiesta di confronto.`, 'Richiesta rifiutata'],
+    riapri:    [`${chi} ha riaperto la richiesta di confronto`, `<strong>${_esc(chi)}</strong> ha riaperto la tua richiesta di confronto: l'incontro è di nuovo da pianificare.`, 'Richiesta riaperta']
+  }[azione];
+  const incontro = azione === 'pianifica' && d.data_incontro ? _fmtGiorno(d.data_incontro) + (d.ora_incontro ? ' alle ' + d.ora_incontro : '') : null;
+  return _notify('confronto_aggiornamento', [{ email: c.richiedente_email, full_name: c.richiedente }], r => ({
+    subject: `${T[0]} (${tema})`, titolo: T[2], intro: `Ciao <strong>${_esc(r.full_name)}</strong>, ${T[1]}`,
+    citazione: ['pianifica', 'rispondi', 'rifiuta'].includes(azione) ? d.risposta : null,
+    righe: [['Tema', tema], ['Quando', incontro], ['Dove', azione === 'pianifica' ? d.luogo : null], ['La tua richiesta', c.messaggio.length > 160 ? c.messaggio.slice(0, 157) + '…' : c.messaggio]],
+    cta: _cfLink(id, 'inviate') && { label: 'Apri la richiesta', url: _cfLink(id, 'inviate') }
+  }), { confrontoId: id, evento: azione, da: chi });
+}
+
 // ════════════════════════════════════════════════════════════════════════
 //  Eventi: chi crea l'evento sceglie gli invitati; se la data non è fissata gli invitati indicano
 //  la disponibilità giorno per giorno nel periodo proposto e l'organizzatore fissa la data.
@@ -969,9 +1091,10 @@ async function saveEvento(p, ctx){
   if (!f.invitati.length) throw new HttpError(400, 'Aggiungi almeno un invitato');
   const ok = await sql`SELECT id FROM risorse WHERE id = ANY(${f.invitati}::int[])`;
   if (ok.length !== f.invitati.length) throw new HttpError(400, 'Uno o più invitati non esistono più');
-  let id;
+  let id, prima = [];
   if (p.id) {
     const e = await _mustOwnEvento(ctx, p.id); id = e.id;
+    prima = (await sql`SELECT risorsa_id FROM evento_invitati WHERE evento_id=${id}`).map(r => +r.risorsa_id);
     if (e.creatore_id && !f.invitati.includes(+e.creatore_id)) f.invitati.push(+e.creatore_id);
     await sql.transaction([
       sql`UPDATE eventi SET nome=${f.nome}, descrizione=${f.descrizione}, luogo=${f.luogo}, icona=${f.icona}, data=${f.data},
@@ -987,7 +1110,8 @@ async function saveEvento(p, ctx){
     id = +r.id;
     await sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`;
   }
-  return { id };
+  const mail = await _notifyEvento(id, f.invitati.filter(x => !prima.includes(x)), ctx);
+  return { id, mail };
 }
 async function deleteEvento(p, ctx){ const e = await _mustOwnEvento(ctx, p.id); await sql`DELETE FROM eventi WHERE id=${e.id}`; }
 // L'organizzatore fissa (o toglie) la data, di solito scegliendola dal calendario delle disponibilità
@@ -1069,14 +1193,23 @@ async function saveConfronto(p, ctx){
   const [r] = await sql`INSERT INTO confronti (richiedente_id, tema, messaggio, argomenti, priorita, periodo_da, periodo_a, durata_min, note)
                         VALUES (${ctx.id}, ${tema}, ${messaggio}, ${argomenti}::text[], ${priorita}, ${da}, ${a}, ${durata}, ${note}) RETURNING id`;
   await sql`INSERT INTO confronto_destinatari (confronto_id, risorsa_id) SELECT ${r.id}, x FROM unnest(${dest}::int[]) AS x`;
-  return { id: +r.id };
+  const mail = await _notifyConfrontoNuovo(+r.id, dest);
+  return { id: +r.id, mail };
 }
 // Solo il richiedente ritira la propria richiesta (sparisce per tutti i destinatari)
 async function deleteConfronto(p, ctx){
   mustPerson(ctx);
   const id = V.id(p.id, 'Richiesta');
-  const r = await sql`DELETE FROM confronti WHERE id=${id} AND richiedente_id=${ctx.id} RETURNING id`;
-  if (!r.length) throw new HttpError(404, 'Richiesta non trovata');
+  const c = await _confronto(id);
+  if (!c || +c.richiedente_id !== ctx.id) throw new HttpError(404, 'Richiesta non trovata');
+  const dest = await sql`SELECT r.full_name, r.email FROM confronto_destinatari d JOIN risorse r ON r.id = d.risorsa_id
+                         WHERE d.confronto_id=${id} AND d.stato IN ('da_pianificare', 'pianificato')`;
+  await sql`DELETE FROM confronti WHERE id=${id} AND richiedente_id=${ctx.id}`;
+  await _notify('confronto_aggiornamento', dest, d => ({
+    subject: `${c.richiedente} ha ritirato la richiesta di confronto (${CONF_TEMI_LBL[c.tema]})`, titolo: 'Richiesta ritirata',
+    intro: `Ciao <strong>${_esc(d.full_name)}</strong>, <strong>${_esc(c.richiedente)}</strong> ha ritirato la richiesta di confronto che ti aveva inviato: non serve più pianificare l'incontro.`,
+    citazione: c.messaggio, righe: [['Tema', CONF_TEMI_LBL[c.tema]]]
+  }), { confrontoId: id, evento: 'ritirata' });
 }
 // Il destinatario aggiorna solo la propria copia della richiesta
 async function updateConfronto(p, ctx){
@@ -1091,11 +1224,11 @@ async function updateConfronto(p, ctx){
     await sql`UPDATE confronto_destinatari SET stato='pianificato', data_incontro=${data}, ora_incontro=${ora}, luogo=${luogo},
               risposta = CASE WHEN ${risposta === undefined}::boolean THEN risposta ELSE ${risposta ?? null} END, updated_at=NOW()
               WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
-    return;
+    return { mail: await _notifyConfrontoUpdate(id, ctx, 'pianifica') };
   }
   if (p.azione === 'rispondi') {
     await sql`UPDATE confronto_destinatari SET risposta=${risposta ?? null}, updated_at=NOW() WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
-    return;
+    return { mail: await _notifyConfrontoUpdate(id, ctx, 'rispondi') };
   }
   const stato = CONF_AZIONI[p.azione];
   // Riaprire toglie la data; rifiutare o completare la conserva come promemoria
@@ -1104,6 +1237,7 @@ async function updateConfronto(p, ctx){
             ora_incontro  = CASE WHEN ${stato === 'da_pianificare'}::boolean THEN NULL ELSE ora_incontro END,
             risposta = CASE WHEN ${risposta === undefined}::boolean THEN risposta ELSE ${risposta ?? null} END, updated_at=NOW()
             WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
+  return { mail: await _notifyConfrontoUpdate(id, ctx, p.azione) };
 }
 
 // ── Benchmark per progetto (config benchmark_{progettoId}): FTE venduti, tempi medi dei ticket, Pyr.
@@ -2184,6 +2318,8 @@ const ACTIONS = {
   setEventoData:     (p, c) => setEventoData(p, c),
   setDisponibilita:  (p, c) => setDisponibilita(p, c),
   setPartecipazione: (p, c) => setPartecipazione(p, c),
+
+  setTema: (p, c) => setTema(p, c),   // ognuno solo il proprio
 
   // ── confronto & feedback (solo risorse; permessi negli handler) ──
   getConfronti:    (p, c) => getConfronti(p, c),

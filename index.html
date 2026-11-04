@@ -12,6 +12,7 @@
 <!-- Librerie da CDN con SRI: il browser le rifiuta se il file servito non è identico a quello verificato -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <link rel="stylesheet" href="styles.css"/>
+<script>/* tema salvato su questo dispositivo: applicato prima del disegno della pagina */try{var t=localStorage.getItem('tht_theme');if(t&&t!=='viola')document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="ticket-cls.css"/>
 </head>
 <body>
@@ -102,6 +103,7 @@
           <div class="uname" id="hUser">—</div>
           <div class="urole" id="hRole">—</div>
         </div>
+        <button class="user-theme-btn" onclick="openThemePicker()" title="Personalizza i colori dell'app" aria-label="Personalizza i colori dell'app"><i class="fa-solid fa-palette"></i></button>
       </div>
       <nav class="sidebar-nav">
         <div class="nav-section">Personale</div>
@@ -135,6 +137,15 @@
       <div id="alertBanner"><i class="fa-solid fa-triangle-exclamation"></i><span id="alertText"></span></div>
       <!-- Le sezioni sono in views/*.html: js/views.js le carica qui all'avvio -->
     </main>
+  </div>
+</div>
+<!-- Personalizzazione: scelta del tema colore -->
+<div class="theme-overlay" id="themeOverlay" onclick="if(event.target===this)closeThemePicker(true)">
+  <div class="theme-box" role="dialog" aria-modal="true" aria-labelledby="themeTitle">
+    <h3 id="themeTitle"><i class="fa-solid fa-palette"></i> Personalizza la tua app</h3>
+    <p>Scegli il colore che preferisci: vale solo per te e ti segue su ogni dispositivo.</p>
+    <div class="theme-grid" id="themeGrid"></div>
+    <div class="theme-foot"><div id="themeMsg" class="msg"></div><button class="btn btn-ghost2" onclick="closeThemePicker(true)">Annulla</button><button class="btn btn-amber" onclick="saveTheme()"><i class="fa-solid fa-check"></i> Salva</button></div>
   </div>
 </div>
 <!-- Ferie day picker -->
@@ -176,6 +187,7 @@
 <script src="js/fte-trend.js"></script>
 <script src="js/eventi.js"></script>
 <script src="js/confronti.js"></script>
+<script src="js/tema.js"></script>
 <script src="js/admin-aree-soglie.js"></script>
 <script src="js/email-log.js"></script>
 <script src="js/main.js"></script>

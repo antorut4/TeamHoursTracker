@@ -99,7 +99,7 @@ async function doAdminLogin(){
   errEl.style.display='none';document.getElementById('adminPwd').value='';
   await _startSession(res.token,'ADMIN',true);
 }
-function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isSeniorManager=false;isProjectTL=false;_ev={view:'list',id:null,list:[],data:null,form:null};_cf={box:'ricevute',st:'da_pianificare',tema:'',sel:null,data:null,form:null,act:null};document.querySelector('#navConfronti .nav-badge')?.remove();_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
+function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isSeniorManager=false;isProjectTL=false;_ev={view:'list',id:null,list:[],data:null,form:null};_cf={box:'ricevute',st:'da_pianificare',tema:'',sel:null,data:null,form:null,act:null};applyTheme('viola');document.querySelector('#navConfronti .nav-badge')?.remove();_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
 async function launchApp(){
   let lastTab=null;try{lastTab=sessionStorage.getItem(TAB_KEY);}catch{}
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
@@ -134,6 +134,9 @@ async function launchApp(){
   // Deep link dalle email (es. alert soglia → ?tab=andamento&prj=ID&area=ID)
   const qs=new URLSearchParams(location.search),qTab=qs.get('tab');
   if(qTab==='andamento'&&+qs.get('prj'))_andSel={pid:+qs.get('prj'),areaId:+qs.get('area')||null};
+  if(qTab==='eventi'&&+qs.get('ev'))_ev={..._ev,view:'detail',id:+qs.get('ev'),form:null};
+  if(qTab==='confronti'&&+qs.get('cf'))_cf={..._cf,box:qs.get('box')==='inviate'?'inviate':'ricevute',focus:+qs.get('cf'),form:null};
+  if(qTab&&!qs.get('invite'))history.replaceState(null,'',location.pathname);
   const canOpen=t=>t&&NAV_MAP[t]&&document.getElementById(NAV_MAP[t])?.style.display!=='none';
   if(canOpen(qTab))showTab(qTab);
   else if(canOpen(lastTab))showTab(lastTab);   // refresh: si torna alla sezione in cui si era

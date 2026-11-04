@@ -1,6 +1,7 @@
 // Andamento FTE: un grafico a linee per progetto con gli FTE erogati degli ultimi 12 o 6 mesi
 // e gli FTE progetto (FTE venduti TOT del Benchmark) come soglia. Stessi progetti e stesso calcolo di Andamento progetto.
-const FTE_C='#6D28D9';
+// Colore della linea: l'accento del tema scelto (letto al momento del disegno)
+const _fteC=()=>getComputedStyle(document.documentElement).getPropertyValue('--amber').trim()||'#6D28D9';
 let _fteN=S.get('fteTrendN')===6?6:12,_fteCharts=[];
 function fteSetPeriod(n){
   _fteN=n===6?6:12;S.set('fteTrendN',_fteN);
@@ -45,7 +46,7 @@ function _fteCardHtml(it,c,n,lastLbl){
       ${st}
     </div>
     <div class="and-chart-wrap"><canvas id="${c.id}" class="fte-cv" role="img" aria-label="FTE erogati di ${_esc(it.name)} negli ultimi ${n} mesi"></canvas><div class="and-tip" id="${c.id}-tip"></div></div>
-    <div class="and-legend"><span><svg width="22" height="12" aria-hidden="true"><line x1="0" y1="6" x2="22" y2="6" stroke="${FTE_C}" stroke-width="2"/><circle cx="11" cy="6" r="3.5" fill="${FTE_C}" stroke="#fff" stroke-width="1.5"/></svg>FTE erogati</span>${it.thr!=null?`<span>${_thrSwatch()}FTE progetto ${_fmtFte(it.thr)}</span><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="${THR_C}"/></svg>Mese sopra soglia</span>`:`<span style="color:var(--ink-3)">Configura gli FTE venduti TOT in <a href="#" onclick="showTab('benchmark');return false">Benchmark</a> per vedere la soglia</span>`}</div>
+    <div class="and-legend"><span><svg width="22" height="12" aria-hidden="true"><line x1="0" y1="6" x2="22" y2="6" stroke="${_fteC()}" stroke-width="2"/><circle cx="11" cy="6" r="3.5" fill="${_fteC()}" stroke="#fff" stroke-width="1.5"/></svg>FTE erogati</span>${it.thr!=null?`<span>${_thrSwatch()}FTE progetto ${_fmtFte(it.thr)}</span><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="${THR_C}"/></svg>Mese sopra soglia</span>`:`<span style="color:var(--ink-3)">Configura gli FTE venduti TOT in <a href="#" onclick="showTab('benchmark');return false">Benchmark</a> per vedere la soglia</span>`}</div>
   </div>`;
 }
 function _initFteChart(c){
@@ -80,12 +81,12 @@ function _drawFteChart(c){
   if(c.thr!=null){const y=Math.round(Y(c.thr))+.5;ctx.strokeStyle=THR_C;ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(P.l,y);ctx.lineTo(P.l+pw,y);ctx.stroke();ctx.setLineDash([]);}
   if(c.hover!=null){ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(Math.round(X(c.hover))+.5,P.t);ctx.lineTo(Math.round(X(c.hover))+.5,P.t+ph);ctx.stroke();ctx.setLineDash([]);}
   // area leggera sotto la linea, poi linea e marker (rossi i mesi che raggiungono o superano la soglia)
-  ctx.beginPath();c.vals.forEach((v,i)=>{i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v));});ctx.lineTo(X(n-1),Y(0));ctx.lineTo(X(0),Y(0));ctx.closePath();ctx.fillStyle='rgba(109,40,217,.07)';ctx.fill();
-  ctx.strokeStyle=FTE_C;ctx.lineWidth=2.25;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
+  ctx.beginPath();c.vals.forEach((v,i)=>{i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v));});ctx.lineTo(X(n-1),Y(0));ctx.lineTo(X(0),Y(0));ctx.closePath();ctx.fillStyle=`rgba(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim()||'109,40,217'},.07)`;ctx.fill();
+  ctx.strokeStyle=_fteC();ctx.lineWidth=2.25;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
   c.vals.forEach((v,i)=>{i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v));});ctx.stroke();
   c.vals.forEach((v,i)=>{
     const over=c.thr!=null&&v>=_r2(c.thr),r=c.hover===i?5.5:4.5;
-    ctx.beginPath();ctx.arc(X(i),Y(v),r,0,Math.PI*2);ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();ctx.fillStyle=over?THR_C:FTE_C;ctx.fill();
+    ctx.beginPath();ctx.arc(X(i),Y(v),r,0,Math.PI*2);ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();ctx.fillStyle=over?THR_C:_fteC();ctx.fill();
   });
   // valore diretto sull'ultimo mese
   const lv=c.vals[n-1];ctx.font='600 11px DM Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillStyle='#111827';

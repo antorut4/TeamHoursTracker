@@ -526,3 +526,84 @@ test('confronti: richiesta a più persone, gestione per destinatario, visibilit�
   assert.equal((await call('deleteConfronto', { id }, T.sara)).status, 200);
   assert.ok(!(await call('getConfronti', {}, T.mario)).data.ricevute.some(r => r.id === id));
 });
+
+// ── Notifiche email di eventi e confronti ──
+test('email: invito agli eventi (solo nuovi invitati, non all\'organizzatore)', async () => {
+  const from = mails.length;
+  const cr = await call('saveEvento', { nome: 'Calcetto', descrizione: 'Partita aziendale', luogo: 'Campo 3',
+    periodoDa: '2026-12-01', periodoA: '2026-12-05', invitati: [ID.anna, ID.sara] }, T.luca);
+  assert.equal(cr.status, 200, cr.error);
+  assert.deepEqual(cr.data.mail, { sent: 2, total: 2 });
+  const sent = mails.slice(from);
+  assert.deepEqual(sent.map(m => m.to.toLowerCase()).sort(), ['anna@x.it', 'sara@x.it'], 'Luca, che organizza, non riceve l\'invito');
+  assert.match(sent[0].subject, /Sei invitato\/a: Calcetto/);
+  assert.match(sent[0].html, /Luca Verdi/);
+  assert.match(sent[0].text, /https:\/\/app\.test\/\?tab=eventi&ev=\d+/);
+  assert.match(sent[0].html, /Indica la tua disponibilità/);
+  // Modifica: solo Mario, appena aggiunto, riceve l'email
+  const n = mails.length;
+  await call('saveEvento', { id: cr.data.id, nome: 'Calcetto', periodoDa: '2026-12-01', periodoA: '2026-12-05', invitati: [ID.anna, ID.sara, ID.mario] }, T.luca);
+  assert.deepEqual(mails.slice(n).map(m => m.to), ['mario@x.it']);
+  const [log] = await sql`SELECT tipo, stato FROM email_log WHERE destinatario='mario@x.it' ORDER BY id DESC LIMIT 1`;
+  assert.deepEqual({ ...log }, { tipo: 'evento_invito', stato: 'sent' });
+  await call('deleteEvento', { id: cr.data.id }, T.luca);
+});
+
+test('email: richiesta di confronto ai destinatari, ogni aggiornamento al richiedente', async () => {
+  let n = mails.length;
+  const cr = await call('saveConfronto', { destinatari: [ID.mario, ID.luca], tema: 'feedback', messaggio: 'Vorrei un tuo feedback', argomenti: ['Performance'], priorita: 'media' }, T.anna);
+  assert.equal(cr.status, 200, cr.error);
+  const id = cr.data.id;
+  assert.deepEqual(mails.slice(n).map(m => m.to).sort(), ['luca@x.it', 'mario@x.it']);
+  assert.match(mails.at(-1).subject, /Anna Bianchi ti ha chiesto un confronto: Feedback sul lavoro/);
+  assert.match(mails.at(-1).html, /Performance/);
+  assert.match(mails.at(-1).text, /\?tab=confronti&cf=\d+/);
+  // Ogni aggiornamento di un destinatario arriva ad Anna
+  const steps = [
+    [{ azione: 'pianifica', data: '2026-12-02', ora: '15:00', luogo: 'Sala 1', risposta: 'Ok per me' }, /Mario Rossi ha pianificato il confronto/],
+    [{ azione: 'rispondi', risposta: 'Porta i numeri del mese' }, /Mario Rossi ha risposto/],
+    [{ azione: 'completa' }, /Confronto completato con Mario Rossi/],
+    [{ azione: 'riapri' }, /Mario Rossi ha riaperto/],
+    [{ azione: 'rifiuta' }, /Mario Rossi non può accettare/]
+  ];
+  for (const [p, re] of steps) {
+    n = mails.length;
+    assert.equal((await call('updateConfronto', { id, ...p }, T.mario)).status, 200, p.azione);
+    assert.equal(mails.length, n + 1, p.azione);
+    assert.equal(mails.at(-1).to, 'anna@x.it', p.azione);
+    assert.match(mails.at(-1).subject, re);
+    assert.match(mails.at(-1).text, /box=inviate/);
+  }
+  assert.match(mails.at(-5).html, /Sala 1/);
+  assert.match(mails.at(-5).html, /Ok per me/);
+  // Ritiro: avvisato solo chi aveva ancora la richiesta aperta (Luca), non Mario che l'ha rifiutata
+  n = mails.length;
+  await call('deleteConfronto', { id }, T.anna);
+  assert.deepEqual(mails.slice(n).map(m => m.to), ['luca@x.it']);
+  assert.match(mails.at(-1).subject, /ha ritirato la richiesta/);
+});
+
+test('email: senza SMTP le azioni riescono comunque e l\'invio è registrato come saltato', async () => {
+  db._setMailerForTests(null);
+  try {
+    const r = await call('saveConfronto', { destinatari: [ID.mario], tema: 'altro', messaggio: 'Prova senza SMTP' }, T.sara);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data.mail, { sent: 0, total: 1 });
+    const [log] = await sql`SELECT stato, errore FROM email_log WHERE tipo='confronto_richiesta' ORDER BY id DESC LIMIT 1`;
+    assert.equal(log.stato, 'skipped');
+    await call('deleteConfronto', { id: r.data.id }, T.sara);
+  } finally { db._setMailerForTests(fakeMailer); }
+});
+
+// ── Personalizzazione: tema colore per utente ──
+test('tema: ognuno salva il proprio, predefinito viola, valori non validi rifiutati', async () => {
+  assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'viola');
+  assert.equal((await call('setTema', { tema: 'verde' }, T.anna)).status, 200);
+  assert.equal((await call('setTema', { tema: 'nero; background:red' }, T.anna)).status, 400);
+  assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'verde');
+  assert.equal((await call('bootstrap', {}, T.mario)).data.tema, 'viola', 'il tema di Anna non cambia quello degli altri');
+  assert.equal((await call('setTema', { tema: 'grafite' }, T.admin)).status, 200);
+  assert.equal((await call('bootstrap', {}, T.admin)).data.tema, 'grafite');
+  assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'verde');
+  await call('setTema', { tema: 'viola' }, T.anna);
+});

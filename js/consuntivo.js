@@ -73,7 +73,7 @@ function _buildConsuntivoGrid(rows,month,year,resList){
   for(let d=1;d<=dim;d++){
     const wd=new Date(year,month,d).getDay(),isWe=wd===0||wd===6;
     const bdr=d===15?';border-right:2px solid rgba(255,255,255,.5)':'';
-    h+=`<th style="padding:2px 1px;background:${isWe?'rgba(109,40,217,.12)':'var(--ink)'};color:${isWe?'var(--amber)':'var(--white)'};text-align:center;min-width:28px;font-size:.6rem${bdr}"><div>${DN[wd]}</div><div>${d}</div></th>`;
+    h+=`<th style="padding:2px 1px;background:${isWe?'rgba(var(--accent-rgb),.12)':'var(--ink)'};color:${isWe?'var(--amber)':'var(--white)'};text-align:center;min-width:28px;font-size:.6rem${bdr}"><div>${DN[wd]}</div><div>${d}</div></th>`;
   }
   h+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:38px;font-size:.65rem;border-left:2px solid rgba(255,255,255,.4)">Q1</th>`;
   h+=`<th style="padding:5px 4px;background:var(--ink);color:var(--white);text-align:center;min-width:38px;font-size:.65rem">Q2</th>`;
@@ -93,7 +93,7 @@ function _buildConsuntivoGrid(rows,month,year,resList){
       const wd=new Date(year,month,d).getDay(),isWe=wd===0||wd===6;
       const ore=rd[d]||0;
       const bdr=d===15?';border-right:2px solid var(--stone-3)':'';
-      const bg=ore?'var(--ok-bg)':(isWe?'rgba(109,40,217,.04)':'inherit');
+      const bg=ore?'var(--ok-bg)':(isWe?'rgba(var(--accent-rgb),.04)':'inherit');
       const dd=String(d).padStart(2,'0');
       const dateISO=`${year}-${mm}-${dd}`;
       h+=`<td title="Clicca per modificare" style="border:1px solid var(--line);padding:2px 1px;text-align:center;background:${bg};cursor:pointer${bdr}" onclick="_consuntivoClickCell(this,${res.id},'${dateISO}',${ore})">`;
@@ -126,7 +126,7 @@ async function _consuntivoClickCell(td,risorsaId,dateISO,currentOre){
   const inp=document.createElement('input');
   inp.type='number';inp.min='0';inp.max='24';inp.step='0.5';
   inp.value=currentOre>0?currentOre:'';
-  inp.style.cssText='width:36px;border:none;background:transparent;font-size:.7rem;font-weight:700;color:#6D28D9;text-align:center;outline:2px solid #6D28D9;border-radius:2px;padding:0 2px;';
+  inp.style.cssText='width:36px;border:none;background:transparent;font-size:.7rem;font-weight:700;color:var(--amber);text-align:center;outline:2px solid var(--amber);border-radius:2px;padding:0 2px;';
   td.innerHTML='';td.style.background='var(--amber-bg)';
   td.appendChild(inp);inp.focus();if(inp.value)inp.select();
   let done=false;
@@ -164,9 +164,9 @@ function _consuntivoSummary(q1,q2){
       <div style="font-size:.7rem;color:var(--ink-3);margin-bottom:2px">II Quindicina</div>
       <div style="font-size:1.2rem;font-weight:700;color:var(--ink)">${_fmtOreTot(q2)} h</div>
     </div>
-    <div style="background:rgba(109,40,217,.08);border:1px solid rgba(109,40,217,.25);border-radius:var(--r);padding:10px 18px;text-align:center">
+    <div style="background:rgba(var(--accent-rgb),.08);border:1px solid rgba(var(--accent-rgb),.25);border-radius:var(--r);padding:10px 18px;text-align:center">
       <div style="font-size:.7rem;color:var(--ink-3);margin-bottom:2px">Totale mese</div>
-      <div style="font-size:1.2rem;font-weight:700;color:#6D28D9">${_fmtOreTot(tot)} h</div>
+      <div style="font-size:1.2rem;font-weight:700;color:var(--amber)">${_fmtOreTot(tot)} h</div>
     </div>
   </div>`;
 }

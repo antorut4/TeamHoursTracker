@@ -11,7 +11,7 @@ async function loadEmailLog(){
   catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
   if(!rows.length){el.innerHTML='<p style="color:var(--ink-3);font-size:.82rem;padding:14px 0">Nessun invio registrato.</p>';return;}
-  const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza',sollecito_forecast:'Sollecito Forecast',ticket_reminder:'Reminder ticket',alert_soglia_ticket:'Alert soglia ticket',alert_soglia_ee:'Alert soglia Extra Effort'};
+  const TIPO_LBL={daily_reminder:'Reminder ore',assenza:'Assenza',sollecito_forecast:'Sollecito Forecast',ticket_reminder:'Reminder ticket',alert_soglia_ticket:'Alert soglia ticket',alert_soglia_ee:'Alert soglia Extra Effort',invito:'Invito password',evento_invito:'Invito evento',confronto_richiesta:'Richiesta confronto',confronto_aggiornamento:'Aggiornamento confronto'};
   const _bg=(bg,c,t)=>`<span style="background:${bg};color:${c};border-radius:3px;padding:2px 8px;font-size:.68rem;font-weight:700;white-space:nowrap">${t}</span>`;
   const badge=s=>{
     if(s==='sent')     return _bg('var(--ok-bg)','var(--ok)','INVIATA');

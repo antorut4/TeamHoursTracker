@@ -304,6 +304,11 @@ export const MIGRATIONS = [
       )`,
       sql`CREATE INDEX IF NOT EXISTS confronto_destinatari_risorsa ON confronto_destinatari (risorsa_id)`
     ]
+  },
+  {
+    version: 10,
+    name: 'risorse.tema: colore dell\'app scelto da ogni utente',
+    up: sql => [sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS tema TEXT`]
   }
 ];
 

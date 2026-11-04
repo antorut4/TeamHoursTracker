@@ -23,6 +23,9 @@ async function renderConfronti(){
   showSpinner();
   try{_cf.data=await call('getConfronti',{});}catch(e){hideSpinner();el.innerHTML=`<div class="msg err">Errore: ${_esc(e.message)}</div>`;return;}
   hideSpinner();
+  // Link da email: si apre la richiesta indicata, nella scheda in cui si trova
+  if(_cf.focus){const inBox=_cf.box==='ricevute',c=(inBox?_cf.data.ricevute:_cf.data.inviate).find(x=>x.id===_cf.focus);
+    if(c){_cf.st=(inBox?_cfInSt:_cfOutSt)(c);_cf.tema='';_cf.sel=c.id;}_cf.focus=null;}
   _cfNavBadge();_cfRender();
 }
 // Numero di richieste ricevute ancora da pianificare, accanto alla voce del menu
