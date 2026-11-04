@@ -948,10 +948,13 @@ async function _notifyEvento(eid, ids, ctx){
   ids = ids.filter(id => id !== ctx.id);
   if (!ids.length) return { sent: 0, total: 0 };
   const [[e], dest, org] = await Promise.all([
-    sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da, periodo_a::text AS periodo_a FROM eventi WHERE id=${eid}`,
+    sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da, periodo_a::text AS periodo_a, giorni::text[] AS giorni FROM eventi WHERE id=${eid}`,
     _people(ids), _nameOf(ctx)]);
   const link = siteUrl() ? `${siteUrl()}/?tab=eventi&ev=${eid}` : null;
-  const quando = e.data ? _fmtGiorno(e.data) : e.periodo_da ? `da definire: indica la tua disponibilità tra ${_fmtGiorno(e.periodo_da)} e ${_fmtGiorno(e.periodo_a)}` : 'da definire';
+  const g = e.giorni || [];
+  const quando = e.data ? _fmtGiorno(e.data)
+    : g.length ? `da definire: indica la tua disponibilità ${g.length === 1 ? 'per ' + _fmtGiorno(g[0]) : `per ${g.length} giorni proposti (${g.slice(0, 4).map(_fmtGiorno).join(', ')}${g.length > 4 ? '…' : ''})`}`
+    : e.periodo_da ? `da definire: indica la tua disponibilità tra ${_fmtGiorno(e.periodo_da)} e ${_fmtGiorno(e.periodo_a)}` : 'da definire';
   return _notify('evento_invito', dest, d => ({
     subject: `Sei invitato/a: ${e.nome}`, titolo: e.nome,
     intro: `Ciao <strong>${_esc(d.full_name)}</strong>, <strong>${_esc(org)}</strong> ti ha invitato a un evento.`,
@@ -1011,11 +1014,12 @@ async function _notifyConfrontoUpdate(id, ctx, azione){
 //  Ogni invitato risponde "ci sono / non ci sono" con un commento facoltativo.
 //  Vedono l'evento gli invitati, l'organizzatore e l'admin; lo gestiscono l'organizzatore e l'admin.
 // ════════════════════════════════════════════════════════════════════════
-const EV_MAX_GIORNI = 92;
+const EV_MAX_GIORNI = 92;     // periodo continuo (eventi creati prima dei giorni proposti)
+const EV_MAX_PROPOSTI = 92;   // giorni selezionabili sul calendario (come il vecchio periodo, per poter modificare quegli eventi)
 const _dayDiff = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5);
 async function _evento(id){
   const [e] = await sql`SELECT id, nome, descrizione, luogo, icona, data::text AS data, periodo_da::text AS periodo_da,
-                               periodo_a::text AS periodo_a, creatore_id FROM eventi WHERE id=${V.id(id, 'Evento')}`;
+                               periodo_a::text AS periodo_a, giorni::text[] AS giorni, creatore_id FROM eventi WHERE id=${V.id(id, 'Evento')}`;
   if (!e) throw new HttpError(404, 'Evento non trovato');
   return e;
 }
@@ -1036,10 +1040,14 @@ async function _mustOwnEvento(ctx, id){
 }
 function _evFields(p){
   const data = p.data ? V.isoDate(p.data, 'Data evento') : null;
-  let da = p.periodoDa ? V.isoDate(p.periodoDa, 'Inizio periodo') : null;
-  let a  = p.periodoA  ? V.isoDate(p.periodoA, 'Fine periodo') : null;
-  if (!data && (!da || !a)) throw new HttpError(400, 'Indica la data dell\'evento oppure il periodo in cui raccogliere le disponibilità');
-  if (da && a) {
+  // Giorni proposti scelti sul calendario: il periodo diventa il primo e l'ultimo giorno
+  const giorni = [...new Set(V.arr(p.giorni, 'Giorni proposti', EV_MAX_PROPOSTI).map(g => V.isoDate(g, 'Giorno proposto')))].sort();
+  let da = giorni.length ? giorni[0] : p.periodoDa ? V.isoDate(p.periodoDa, 'Inizio periodo') : null;
+  let a  = giorni.length ? giorni.at(-1) : p.periodoA ? V.isoDate(p.periodoA, 'Fine periodo') : null;
+  if (!data && (!da || !a)) throw new HttpError(400, 'Indica la data dell\'evento oppure seleziona i giorni proposti sul calendario');
+  if (giorni.length) {
+    if (_dayDiff(da, a) > 366) throw new HttpError(400, 'I giorni proposti devono stare entro un anno');
+  } else if (da && a) {
     const n = _dayDiff(da, a);
     if (n < 0) throw new HttpError(400, 'La fine del periodo è prima dell\'inizio');
     if (n >= EV_MAX_GIORNI) throw new HttpError(400, `Periodo troppo lungo: massimo ${EV_MAX_GIORNI} giorni`);
@@ -1049,14 +1057,14 @@ function _evFields(p){
   const icona = V.optText(p.icona, 'Icona', 40);
   if (icona && !/^[a-z0-9-]+$/.test(icona)) throw new HttpError(400, 'Icona non valida');
   return { nome: V.text(p.nome, 'Nome evento', 150), descrizione: V.optText(p.descrizione, 'Descrizione', 4000),
-           luogo: V.optText(p.luogo, 'Luogo', 200), icona, data, da, a, invitati };
+           luogo: V.optText(p.luogo, 'Luogo', 200), icona, data, da, a, giorni: giorni.length ? giorni : null, invitati };
 }
 
 // Elenco: eventi visibili con riepilogo delle risposte e la risposta di chi chiede
 async function getEventi(p, ctx){
   const me = ctx.id || 0, all = !!ctx.admin;
   return sql`
-    SELECT e.id, e.nome, e.descrizione, e.luogo, e.icona, e.data::text AS data, e.periodo_da::text AS periodo_da,
+    SELECT e.id, e.nome, e.descrizione, e.luogo, e.icona, e.data::text AS data, e.periodo_da::text AS periodo_da, e.giorni::text[] AS giorni,
            e.periodo_a::text AS periodo_a, e.creatore_id, c.full_name AS creatore,
            (${all}::boolean OR e.creatore_id = ${me}) AS owner,
            COUNT(i.risorsa_id)::int AS invitati,
@@ -1098,15 +1106,16 @@ async function saveEvento(p, ctx){
     if (e.creatore_id && !f.invitati.includes(+e.creatore_id)) f.invitati.push(+e.creatore_id);
     await sql.transaction([
       sql`UPDATE eventi SET nome=${f.nome}, descrizione=${f.descrizione}, luogo=${f.luogo}, icona=${f.icona}, data=${f.data},
-                 periodo_da=${f.da}, periodo_a=${f.a} WHERE id=${id}`,
+                 periodo_da=${f.da}, periodo_a=${f.a}, giorni=${f.giorni}::date[] WHERE id=${id}`,
       sql`DELETE FROM evento_invitati WHERE evento_id=${id} AND risorsa_id <> ALL(${f.invitati}::int[])`,
       sql`DELETE FROM evento_disponibilita WHERE evento_id=${id}
-            AND (risorsa_id <> ALL(${f.invitati}::int[]) OR ${f.da}::date IS NULL OR data NOT BETWEEN ${f.da}::date AND ${f.a}::date)`,
+            AND (risorsa_id <> ALL(${f.invitati}::int[]) OR ${f.da}::date IS NULL OR data NOT BETWEEN ${f.da}::date AND ${f.a}::date
+                 OR (${f.giorni}::date[] IS NOT NULL AND data <> ALL(${f.giorni}::date[])))`,
       sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`
     ]);
   } else {
-    const [r] = await sql`INSERT INTO eventi (nome, descrizione, luogo, icona, data, periodo_da, periodo_a, creatore_id)
-                          VALUES (${f.nome}, ${f.descrizione}, ${f.luogo}, ${f.icona}, ${f.data}, ${f.da}, ${f.a}, ${ctx.id}) RETURNING id`;
+    const [r] = await sql`INSERT INTO eventi (nome, descrizione, luogo, icona, data, periodo_da, periodo_a, giorni, creatore_id)
+                          VALUES (${f.nome}, ${f.descrizione}, ${f.luogo}, ${f.icona}, ${f.data}, ${f.da}, ${f.a}, ${f.giorni}::date[], ${ctx.id}) RETURNING id`;
     id = +r.id;
     await sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`;
   }
@@ -1133,7 +1142,7 @@ async function setDisponibilita(p, ctx){
   if (e.data) throw new HttpError(409, 'La data dell\'evento è già stata fissata');
   if (!e.periodo_da) throw new HttpError(400, 'Questo evento non raccoglie disponibilità');
   const data = V.isoDate(p.data, 'Giorno');
-  if (data < e.periodo_da || data > e.periodo_a) throw new HttpError(400, 'Giorno fuori dal periodo proposto');
+  if (data < e.periodo_da || data > e.periodo_a || (e.giorni && !e.giorni.includes(data))) throw new HttpError(400, 'Giorno non tra quelli proposti');
   if (!p.stato) { await sql`DELETE FROM evento_disponibilita WHERE evento_id=${e.id} AND risorsa_id=${ctx.id} AND data=${data}`; return; }
   const stato = V.oneOf(p.stato, ['si', 'forse', 'no'], 'Disponibilità');
   await sql`INSERT INTO evento_disponibilita (evento_id, risorsa_id, data, stato) VALUES (${e.id}, ${ctx.id}, ${data}, ${stato})

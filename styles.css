@@ -625,3 +625,23 @@ button.ev-cell:disabled{opacity:.5;cursor:wait}
 .theme-foot .msg{margin-right:auto}
 .user-theme-btn{flex:none;width:30px;height:30px;border-radius:9px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.12);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:.85rem;transition:background .15s}
 .user-theme-btn:hover{background:rgba(255,255,255,.26)}
+
+/* Eventi: calendario dei giorni proposti nel form */
+.ev-pk{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;max-width:360px}
+.ev-pk-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.ev-pk-hd b{font-size:.88rem;color:var(--ink)}
+.ev-pk-g{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.ev-pk-w{font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-2);text-align:center;padding:2px 0}
+.ev-pk-w.we{color:var(--ink-3)}
+.ev-pk-d{aspect-ratio:1;min-height:34px;border:1px solid var(--line);border-radius:9px;background:var(--white);font:600 .8rem var(--f-body);color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s,transform .08s}
+.ev-pk-d.we{background:var(--stone);color:var(--ink-2)}
+.ev-pk-d:hover:not(:disabled){border-color:var(--amber);color:var(--amber);transform:scale(1.05)}
+.ev-pk-d.today{box-shadow:inset 0 0 0 2px var(--amber-rim)}
+.ev-pk-d.on{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(var(--accent-rgb),.3)}
+.ev-pk-d:disabled{opacity:.35;cursor:not-allowed}
+.ev-pk-d:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.ev-pk-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.cf-link.ev-pk-l{color:var(--amber);padding:4px 6px;align-self:auto}
+.ev-pk-sel{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:10px}
+.ev-pk-sel .cf-tag{padding:3px 6px 3px 10px}
+.ev-when{align-items:start}

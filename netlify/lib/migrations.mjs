@@ -309,6 +309,11 @@ export const MIGRATIONS = [
     version: 10,
     name: 'risorse.tema: colore dell\'app scelto da ogni utente',
     up: sql => [sql`ALTER TABLE risorse ADD COLUMN IF NOT EXISTS tema TEXT`]
+  },
+  {
+    version: 11,
+    name: 'eventi.giorni: giorni proposti scelti dall\'organizzatore sul calendario',
+    up: sql => [sql`ALTER TABLE eventi ADD COLUMN IF NOT EXISTS giorni DATE[]`]
   }
 ];
 

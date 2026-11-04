@@ -19,6 +19,8 @@ const _evCap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 function _evLong(iso){return _evCap(_evDate(iso).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'}));}
 function _evShort(iso){return _evDate(iso).toLocaleDateString('it-IT',{day:'numeric',month:'short'});}
 function _evDays(da,a){const out=[];for(let d=_evDate(da);d<=_evDate(a);d.setDate(d.getDate()+1))out.push(_isoLocal(d));return out;}
+// Giorni su cui si raccolgono le disponibilità: quelli scelti sul calendario o, per gli eventi più vecchi, tutto il periodo
+function _evCands(e){return e.giorni&&e.giorni.length?e.giorni.slice().sort():e.periodo_da?_evDays(e.periodo_da,e.periodo_a):[];}
 function _isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function _evToday(){return _isoLocal(new Date());}
 function _evMe(){return isAdmin?null:(RESOURCES.find(r=>r.fullName===currentUser)||null);}
@@ -26,6 +28,7 @@ function _evInitials(n){return String(n||'?').split(' ').filter(Boolean).map(w=>
 function _evAvatar(n){return `<span class="ev-av" style="background:${colorFor(n)}">${_esc(_evInitials(n))}</span>`;}
 function _evWhen(e){
   if(e.data)return `<i class="fa-regular fa-calendar-check"></i> ${_esc(_evLong(e.data))}`;
+  if(e.giorni&&e.giorni.length)return `<i class="fa-regular fa-calendar"></i> Data da definire · ${e.giorni.length===1?'1 giorno proposto':e.giorni.length+' giorni proposti'} (${e.giorni.length===1?_esc(_evShort(e.giorni[0])):`dal ${_esc(_evShort(e.periodo_da))} al ${_esc(_evShort(e.periodo_a))}`})`;
   if(e.periodo_da)return `<i class="fa-regular fa-calendar"></i> Data da definire · disponibilità dal ${_esc(_evShort(e.periodo_da))} al ${_esc(_evShort(e.periodo_a))}`;
   return '<i class="fa-regular fa-calendar"></i> Data da definire';
 }
@@ -79,7 +82,7 @@ async function _evLoadDetail(id){
 function _evBest(d){
   if(!d.periodo_da)return null;
   let best=null;
-  _evDays(d.periodo_da,d.periodo_a).forEach(day=>{
+  _evCands(d).forEach(day=>{
     const rows=d.disponibilita.filter(x=>x.data===day),si=rows.filter(x=>x.stato==='si').length,fo=rows.filter(x=>x.stato==='forse').length;
     if(si+fo&&(!best||si>best.si||(si===best.si&&fo>best.fo)))best={day,si,fo};
   });
@@ -126,7 +129,7 @@ function _evRenderDetail(){
   el.innerHTML=`${head}<div class="ev-layout"><div class="ev-main">${info}${cal}</div><div class="ev-aside">${dateCard}${part}${resp}</div></div>`;
 }
 function _evCalendar(d,best,me){
-  const days=_evDays(d.periodo_da,d.periodo_a),open=!d.data;
+  const days=_evCands(d),open=!d.data;
   const st={};d.disponibilita.forEach(x=>{st[x.risorsa_id+'|'+x.data]=x.stato;});
   const rows=d.invitati.slice().sort((a,b)=>(me&&b.risorsa_id===me.id)-(me&&a.risorsa_id===me.id)||a.full_name.localeCompare(b.full_name,'it'));
   const wk=i=>_evCap(_evDate(i).toLocaleDateString('it-IT',{weekday:'short'}).replace('.',''));
@@ -189,7 +192,9 @@ function evDelete(){
 function evOpenForm(id){
   const d=id&&_ev.data&&_ev.data.id===id?_ev.data:null;
   const me=_evMe();
-  _ev.view='form';_ev.form={id:d?d.id:null,icona:_evIc(d),inv:new Set(d?d.invitati.map(i=>i.risorsa_id):(me?[me.id]:[])),owner:d?d.creatore_id:(me?me.id:null),src:d};
+  const days=new Set(d?_evCands(d):[]),first=[...days].sort()[0];
+  const m0=first?_evDate(first):new Date();
+  _ev.view='form';_ev.form={id:d?d.id:null,days,cm:new Date(m0.getFullYear(),m0.getMonth(),1),icona:_evIc(d),inv:new Set(d?d.invitati.map(i=>i.risorsa_id):(me?[me.id]:[])),owner:d?d.creatore_id:(me?me.id:null),src:d};
   _evRenderForm();window.scrollTo(0,0);
 }
 function _evRenderForm(){
@@ -205,7 +210,9 @@ function _evRenderForm(){
     <div class="ev-when">
       <div class="ev-when-b"><div class="ev-when-t"><i class="fa-regular fa-calendar-check"></i> Data già decisa</div><div class="field"><label for="evData">Data dell'evento</label><input type="date" id="evData" value="${_esc(d.data||'')}"/></div></div>
       <div class="ev-when-or">oppure</div>
-      <div class="ev-when-b"><div class="ev-when-t"><i class="fa-regular fa-calendar-days"></i> Da decidere insieme</div><div class="field-row" style="margin:0"><div class="field"><label for="evDa">Disponibilità dal</label><input type="date" id="evDa" value="${_esc(d.periodo_da||'')}"/></div><div class="field"><label for="evA">al</label><input type="date" id="evA" value="${_esc(d.periodo_a||'')}"/></div></div><p class="ev-hint">Gli invitati segneranno i giorni in cui sono disponibili; poi sceglierai tu la data (massimo 92 giorni).</p></div>
+      <div class="ev-when-b"><div class="ev-when-t"><i class="fa-regular fa-calendar-days"></i> Da decidere insieme <span class="badge badge-amber" id="evPickCount"></span></div>
+        <p class="ev-hint" style="margin:0 0 8px">Seleziona sul calendario i giorni in cui si potrebbe fare l'evento: gli invitati indicheranno la disponibilità solo per quelli, poi sceglierai tu la data.</p>
+        <div id="evPick"></div></div>
     </div>
     <div class="ev-inv-hd"><label>Invitati *</label><span id="evInvCount" class="badge badge-amber"></span></div>
     <div class="search-row"><input type="text" id="evInvSearch" placeholder="Cerca una persona…" oninput="_evRenderInv()"/>
@@ -214,8 +221,44 @@ function _evRenderForm(){
     <div class="ev-inv" id="evInvList"></div>
     <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:16px"><button class="btn btn-amber" onclick="evSave()"><i class="fa-solid fa-paper-plane"></i> ${f.id?'Salva modifiche':'Crea e invita'}</button><button class="btn btn-ghost2" onclick="${f.id?`evOpen(${+f.id})`:'evBack()'}">Annulla</button><div id="evFormMsg" class="msg"></div></div>
   </div>`;
-  _evRenderInv();
+  _evRenderInv();_evRenderPick();
 }
+// Calendario dei giorni proposti: clic sul giorno per aggiungerlo o toglierlo
+const EV_MAX_DAYS=92;   // come sul server
+const EV_WD=['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+function _evRenderPick(){
+  const f=_ev.form,el=document.getElementById('evPick');if(!f||!el)return;
+  const y=f.cm.getFullYear(),m=f.cm.getMonth(),today=_evToday();
+  const lead=(new Date(y,m,1).getDay()+6)%7,n=new Date(y,m+1,0).getDate();
+  const cells=[];for(let i=0;i<lead;i++)cells.push('<span></span>');
+  for(let g=1;g<=n;g++){
+    const iso=_isoLocal(new Date(y,m,g)),wd=(lead+g-1)%7,on=f.days.has(iso),past=iso<today;
+    cells.push(`<button type="button" class="ev-pk-d${on?' on':''}${wd>4?' we':''}${iso===today?' today':''}" ${past&&!on?'disabled':''} aria-pressed="${on}" aria-label="${_esc(_evLong(iso))}${on?', proposto':''}" onclick="evToggleDay('${iso}')">${g}</button>`);
+  }
+  const mm=_evCap(new Date(y,m,1).toLocaleDateString('it-IT',{month:'long',year:'numeric'}));
+  const sel=[...f.days].sort(),inMonth=sel.filter(s=>s.startsWith(`${y}-${String(m+1).padStart(2,'0')}`)).length;
+  el.innerHTML=`<div class="ev-pk">
+      <div class="ev-pk-hd"><button type="button" class="btn-icon" onclick="evPickMonth(-1)" aria-label="Mese precedente"><i class="fa-solid fa-chevron-left"></i></button><b>${mm}</b><button type="button" class="btn-icon" onclick="evPickMonth(1)" aria-label="Mese successivo"><i class="fa-solid fa-chevron-right"></i></button></div>
+      <div class="ev-pk-g">${EV_WD.map((w,i)=>`<span class="ev-pk-w${i>4?' we':''}">${w}</span>`).join('')}${cells.join('')}</div>
+      <div class="ev-pk-act"><button type="button" class="cf-link ev-pk-l" onclick="evPickWeekdays()"><i class="fa-solid fa-briefcase"></i> Tutti i feriali del mese</button>${inMonth?`<button type="button" class="cf-link ev-pk-l" onclick="evPickClearMonth()"><i class="fa-solid fa-eraser"></i> Svuota il mese</button>`:''}</div>
+    </div>
+    ${sel.length?`<div class="ev-pk-sel">${sel.map(s=>`<span class="cf-tag">${_esc(_evShort(s))}<button type="button" onclick="evToggleDay('${s}')" aria-label="Togli ${_esc(_evLong(s))}"><i class="fa-solid fa-xmark"></i></button></span>`).join('')}${sel.length>1?`<button type="button" class="cf-link ev-pk-l" onclick="evPickClear()">Togli tutti</button>`:''}</div>`:''}`;
+  const c=document.getElementById('evPickCount');if(c){c.textContent=sel.length?(sel.length===1?'1 giorno':sel.length+' giorni'):'';c.style.display=sel.length?'':'none';}
+}
+function evPickMonth(k){const f=_ev.form;if(!f)return;f.cm=new Date(f.cm.getFullYear(),f.cm.getMonth()+k,1);_evRenderPick();}
+function evToggleDay(iso){
+  const f=_ev.form;if(!f)return;
+  if(f.days.has(iso))f.days.delete(iso);
+  else{if(f.days.size>=EV_MAX_DAYS){showMsg('evFormMsg',`Puoi proporre al massimo ${EV_MAX_DAYS} giorni.`,'err');return;}f.days.add(iso);}
+  _evRenderPick();
+}
+function evPickWeekdays(){
+  const f=_ev.form;if(!f)return;const y=f.cm.getFullYear(),m=f.cm.getMonth(),today=_evToday();
+  for(let g=1;g<=new Date(y,m+1,0).getDate();g++){const d=new Date(y,m,g),iso=_isoLocal(d);if(d.getDay()%6&&iso>=today&&f.days.size<EV_MAX_DAYS)f.days.add(iso);}
+  _evRenderPick();
+}
+function evPickClearMonth(){const f=_ev.form;if(!f)return;const pre=`${f.cm.getFullYear()}-${String(f.cm.getMonth()+1).padStart(2,'0')}`;[...f.days].forEach(s=>{if(s.startsWith(pre))f.days.delete(s);});_evRenderPick();}
+function evPickClear(){const f=_ev.form;if(!f)return;f.days.clear();_evRenderPick();}
 function _evRenderInv(){
   const f=_ev.form,el=document.getElementById('evInvList');if(!f||!el)return;
   const q=(document.getElementById('evInvSearch')?.value||'').trim().toLowerCase();
@@ -235,10 +278,9 @@ function evAddProject(p){const f=_ev.form;if(!f||!p)return;RESOURCES.filter(r=>(
 async function evSave(){
   const f=_ev.form;if(!f)return;
   const v=id=>(document.getElementById(id)?.value||'').trim();
-  const p={nome:v('evNome'),luogo:v('evLuogo'),icona:f.icona,descrizione:v('evDesc'),data:v('evData')||null,periodoDa:v('evDa')||null,periodoA:v('evA')||null,invitati:[...f.inv]};
+  const p={nome:v('evNome'),luogo:v('evLuogo'),icona:f.icona,descrizione:v('evDesc'),data:v('evData')||null,giorni:[...f.days].sort(),invitati:[...f.inv]};
   if(!p.nome){showMsg('evFormMsg','Inserisci il nome dell\'evento.','err');return;}
-  if(!p.data&&(!p.periodoDa||!p.periodoA)){showMsg('evFormMsg','Indica la data dell\'evento oppure il periodo in cui raccogliere le disponibilità.','err');return;}
-  if((p.periodoDa&&!p.periodoA)||(!p.periodoDa&&p.periodoA)){showMsg('evFormMsg','Per il periodo servono sia la data di inizio sia quella di fine.','err');return;}
+  if(!p.data&&!p.giorni.length){showMsg('evFormMsg','Indica la data dell\'evento oppure seleziona sul calendario i giorni proposti.','err');return;}
   if(!p.invitati.length){showMsg('evFormMsg','Aggiungi almeno un invitato.','err');return;}
   if(f.id)p.id=f.id;
   showSpinner();let r;

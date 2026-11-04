@@ -607,3 +607,24 @@ test('tema: ognuno salva il proprio, predefinito viola, valori non validi rifiut
   assert.equal((await call('bootstrap', {}, T.anna)).data.tema, 'verde');
   await call('setTema', { tema: 'viola' }, T.anna);
 });
+
+test('eventi: giorni proposti scelti sul calendario', async () => {
+  const cr = await call('saveEvento', { nome: 'Cena', giorni: ['2026-12-18', '2026-12-10', '2026-12-11', '2026-12-10'], invitati: [ID.anna] }, T.luca);
+  assert.equal(cr.status, 200, cr.error);
+  const id = cr.data.id;
+  const e = (await call('getEvento', { id }, T.anna)).data;
+  assert.deepEqual(e.giorni, ['2026-12-10', '2026-12-11', '2026-12-18'], 'ordinati e senza doppioni');
+  assert.equal(e.periodo_da, '2026-12-10'); assert.equal(e.periodo_a, '2026-12-18');
+  assert.match(mails.at(-1).text, /3 giorni proposti/);
+  // Disponibilità solo sui giorni proposti, non su quelli in mezzo
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-11', stato: 'si' }, T.anna)).status, 200);
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-18', stato: 'forse' }, T.anna)).status, 200);
+  assert.equal((await call('setDisponibilita', { eventoId: id, data: '2026-12-15', stato: 'si' }, T.anna)).status, 400);
+  // Tolto l'11 dai giorni proposti: sparisce anche la disponibilità di quel giorno
+  await call('saveEvento', { id, nome: 'Cena', giorni: ['2026-12-10', '2026-12-18'], invitati: [ID.anna] }, T.luca);
+  const d2 = (await call('getEvento', { id }, T.anna)).data.disponibilita.map(x => x.data);
+  assert.deepEqual(d2, ['2026-12-18']);
+  assert.equal((await call('saveEvento', { nome: 'X', giorni: ['2026-02-30'], invitati: [ID.anna] }, T.luca)).status, 400, 'data non valida');
+  assert.equal((await call('saveEvento', { nome: 'X', giorni: [], invitati: [ID.anna] }, T.luca)).status, 400, 'né data né giorni');
+  await call('deleteEvento', { id }, T.luca);
+});
