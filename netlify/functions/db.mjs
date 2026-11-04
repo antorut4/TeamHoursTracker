@@ -1023,6 +1023,89 @@ async function setPartecipazione(p, ctx){
             WHERE evento_id=${e.id} AND risorsa_id=${ctx.id}`;
 }
 
+
+// ════════════════════════════════════════════════════════════════════════
+//  Confronto & Feedback: ogni risorsa chiede un confronto a una o più persone, indicando tema,
+//  argomenti, motivi, priorità e preferenze. Ogni destinatario gestisce la propria copia:
+//  pianifica l'incontro, risponde, lo segna come completato o rifiuta. Il richiedente vede
+//  lo stato per ciascun destinatario e può ritirare la richiesta. L'admin non partecipa.
+// ════════════════════════════════════════════════════════════════════════
+const CONF_TEMI = ['crescita', 'feedback', 'organizzazione', 'progetti', 'team', 'benessere', 'altro'];
+const CONF_AZIONI = { pianifica: 'pianificato', completa: 'completato', rifiuta: 'rifiutato', riapri: 'da_pianificare', rispondi: null };
+async function getConfronti(p, ctx){
+  mustPerson(ctx);
+  const me = ctx.id;
+  const [ricevute, inviate] = await Promise.all([
+    sql`SELECT c.id, c.tema, c.messaggio, c.argomenti, c.priorita, c.periodo_da::text AS periodo_da, c.periodo_a::text AS periodo_a,
+               c.durata_min, c.note, c.created_at::text AS created_at, c.richiedente_id, r.full_name AS richiedente,
+               d.stato, d.data_incontro::text AS data_incontro, d.ora_incontro, d.luogo, d.risposta, d.updated_at::text AS updated_at,
+               (SELECT COUNT(*)::int FROM confronto_destinatari x WHERE x.confronto_id = c.id) AS n_destinatari
+        FROM confronto_destinatari d JOIN confronti c ON c.id = d.confronto_id JOIN risorse r ON r.id = c.richiedente_id
+        WHERE d.risorsa_id = ${me} ORDER BY c.created_at DESC`,
+    sql`SELECT c.id, c.tema, c.messaggio, c.argomenti, c.priorita, c.periodo_da::text AS periodo_da, c.periodo_a::text AS periodo_a,
+               c.durata_min, c.note, c.created_at::text AS created_at,
+               COALESCE((SELECT json_agg(json_build_object('risorsa_id', d.risorsa_id, 'full_name', r.full_name, 'stato', d.stato,
+                         'data_incontro', d.data_incontro::text, 'ora_incontro', d.ora_incontro, 'luogo', d.luogo, 'risposta', d.risposta)
+                         ORDER BY r.cognome, r.nome)
+                         FROM confronto_destinatari d JOIN risorse r ON r.id = d.risorsa_id WHERE d.confronto_id = c.id), '[]'::json) AS destinatari
+        FROM confronti c WHERE c.richiedente_id = ${me} ORDER BY c.created_at DESC`
+  ]);
+  return { ricevute, inviate };
+}
+async function saveConfronto(p, ctx){
+  mustPerson(ctx);
+  const dest = [...new Set(V.arr(p.destinatari, 'Destinatari', 200).map(x => V.id(x, 'Destinatario')))].filter(x => x !== ctx.id);
+  if (!dest.length) throw new HttpError(400, 'Scegli almeno una persona con cui confrontarti');
+  const ok = await sql`SELECT id FROM risorse WHERE id = ANY(${dest}::int[])`;
+  if (ok.length !== dest.length) throw new HttpError(400, 'Una o più persone non esistono più');
+  const tema = V.oneOf(p.tema, CONF_TEMI, 'Tema');
+  const messaggio = V.text(p.messaggio, 'Motivo del confronto', 2000);
+  const argomenti = V.arr(p.argomenti, 'Argomenti', 15).map(a => V.optText(a, 'Argomento', 200)).filter(Boolean);
+  const priorita = V.oneOf(p.priorita || 'media', ['alta', 'media', 'bassa'], 'Priorità');
+  const da = p.periodoDa ? V.isoDate(p.periodoDa, 'Periodo dal') : null, a = p.periodoA ? V.isoDate(p.periodoA, 'Periodo al') : null;
+  if (da && a && a < da) throw new HttpError(400, 'La fine del periodo preferito è prima dell\'inizio');
+  const durata = p.durata ? V.int(p.durata, 'Durata', 5, 480) : null;
+  const note = V.optText(p.note, 'Note', 1000);
+  const [r] = await sql`INSERT INTO confronti (richiedente_id, tema, messaggio, argomenti, priorita, periodo_da, periodo_a, durata_min, note)
+                        VALUES (${ctx.id}, ${tema}, ${messaggio}, ${argomenti}::text[], ${priorita}, ${da}, ${a}, ${durata}, ${note}) RETURNING id`;
+  await sql`INSERT INTO confronto_destinatari (confronto_id, risorsa_id) SELECT ${r.id}, x FROM unnest(${dest}::int[]) AS x`;
+  return { id: +r.id };
+}
+// Solo il richiedente ritira la propria richiesta (sparisce per tutti i destinatari)
+async function deleteConfronto(p, ctx){
+  mustPerson(ctx);
+  const id = V.id(p.id, 'Richiesta');
+  const r = await sql`DELETE FROM confronti WHERE id=${id} AND richiedente_id=${ctx.id} RETURNING id`;
+  if (!r.length) throw new HttpError(404, 'Richiesta non trovata');
+}
+// Il destinatario aggiorna solo la propria copia della richiesta
+async function updateConfronto(p, ctx){
+  mustPerson(ctx);
+  const id = V.id(p.id, 'Richiesta');
+  if (!Object.hasOwn(CONF_AZIONI, p.azione)) throw new HttpError(400, 'Azione non valida');
+  const [d] = await sql`SELECT stato FROM confronto_destinatari WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
+  if (!d) throw new HttpError(404, 'Richiesta non trovata');
+  const risposta = p.risposta === undefined ? undefined : V.optText(p.risposta, 'Risposta', 2000);
+  if (p.azione === 'pianifica') {
+    const data = V.isoDate(p.data, 'Data dell\'incontro'), ora = V.optTime(p.ora, 'Ora'), luogo = V.optText(p.luogo, 'Luogo o link', 300);
+    await sql`UPDATE confronto_destinatari SET stato='pianificato', data_incontro=${data}, ora_incontro=${ora}, luogo=${luogo},
+              risposta = CASE WHEN ${risposta === undefined}::boolean THEN risposta ELSE ${risposta ?? null} END, updated_at=NOW()
+              WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
+    return;
+  }
+  if (p.azione === 'rispondi') {
+    await sql`UPDATE confronto_destinatari SET risposta=${risposta ?? null}, updated_at=NOW() WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
+    return;
+  }
+  const stato = CONF_AZIONI[p.azione];
+  // Riaprire toglie la data; rifiutare o completare la conserva come promemoria
+  await sql`UPDATE confronto_destinatari SET stato=${stato},
+            data_incontro = CASE WHEN ${stato === 'da_pianificare'}::boolean THEN NULL ELSE data_incontro END,
+            ora_incontro  = CASE WHEN ${stato === 'da_pianificare'}::boolean THEN NULL ELSE ora_incontro END,
+            risposta = CASE WHEN ${risposta === undefined}::boolean THEN risposta ELSE ${risposta ?? null} END, updated_at=NOW()
+            WHERE confronto_id=${id} AND risorsa_id=${ctx.id}`;
+}
+
 // ── Benchmark per progetto (config benchmark_{progettoId}): FTE venduti, tempi medi dei ticket, Pyr.
 //    Modificabile da chiunque; i campi vuoti restano null. ──
 const BENCH_FIELDS = { fteTot: 'FTE venduti TOT', fteCr: 'FTE CR', fteTicket: 'FTE Ticket/Extra', tL1: 'Tempo L1 (h)', tL2: 'Tempo L2 (h)', tL3: 'Tempo L3 (h)', pyr: 'Pyr' };
@@ -2101,6 +2184,12 @@ const ACTIONS = {
   setEventoData:     (p, c) => setEventoData(p, c),
   setDisponibilita:  (p, c) => setDisponibilita(p, c),
   setPartecipazione: (p, c) => setPartecipazione(p, c),
+
+  // ── confronto & feedback (solo risorse; permessi negli handler) ──
+  getConfronti:    (p, c) => getConfronti(p, c),
+  saveConfronto:   (p, c) => saveConfronto(p, c),
+  deleteConfronto: (p, c) => deleteConfronto(p, c),
+  updateConfronto: (p, c) => updateConfronto(p, c),
 
   // ── solo admin ──
   setAdminPwd: (p, c) => { mustAdmin(c); return setAdminPwd(p); },

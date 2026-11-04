@@ -485,3 +485,44 @@ test('eventi: icona salvata, modificata e validata', async () => {
   assert.equal((await call('getEvento', { id }, T.anna)).data.icona, 'beer-mug-empty');
   await call('deleteEvento', { id }, T.luca);
 });
+
+// ── Confronto & Feedback ──
+test('confronti: richiesta a più persone, gestione per destinatario, visibilità', async () => {
+  // Validazione
+  assert.equal((await call('saveConfronto', { destinatari: [ID.anna], tema: 'crescita' }, T.sara)).status, 400, 'motivo obbligatorio');
+  assert.equal((await call('saveConfronto', { destinatari: [ID.sara], tema: 'crescita', messaggio: 'x' }, T.sara)).status, 400, 'non a sé stessi');
+  assert.equal((await call('saveConfronto', { destinatari: [ID.anna], tema: 'boh', messaggio: 'x' }, T.sara)).status, 400, 'tema');
+  assert.equal((await call('saveConfronto', { destinatari: [ID.anna], tema: 'crescita', messaggio: 'x' }, T.admin)).status, 403, 'admin escluso');
+  // Sara chiede un confronto a Mario e Luca
+  const cr = await call('saveConfronto', { destinatari: [ID.mario, ID.luca], tema: 'crescita', messaggio: 'Vorrei parlare del mio percorso',
+    argomenti: ['Percorso di crescita', '', 'Nuove responsabilità'], priorita: 'alta', periodoDa: '2026-12-01', periodoA: '2026-12-15', durata: 30, note: 'Anche in pausa pranzo' }, T.sara);
+  assert.equal(cr.status, 200, cr.error);
+  const id = cr.data.id;
+  const rm = (await call('getConfronti', {}, T.mario)).data.ricevute.find(r => r.id === id);
+  assert.equal(rm.richiedente, 'Sara Neri');
+  assert.deepEqual(rm.argomenti, ['Percorso di crescita', 'Nuove responsabilità']);
+  assert.equal(rm.stato, 'da_pianificare'); assert.equal(rm.n_destinatari, 2); assert.equal(rm.durata_min, 30);
+  assert.ok(!(await call('getConfronti', {}, T.anna)).data.ricevute.some(r => r.id === id), 'Anna non è destinataria');
+
+  // Mario pianifica e risponde; Luca rifiuta. Ognuno tocca solo la propria copia
+  assert.equal((await call('updateConfronto', { id, azione: 'pianifica', data: '2026-12-03', ora: '10:30', luogo: 'Teams', risposta: 'Volentieri!' }, T.mario)).status, 200);
+  assert.equal((await call('updateConfronto', { id, azione: 'rifiuta', risposta: 'Meglio con il tuo manager' }, T.luca)).status, 200);
+  assert.equal((await call('updateConfronto', { id, azione: 'pianifica', data: '2026-12-03' }, T.anna)).status, 404, 'non destinataria');
+  assert.equal((await call('updateConfronto', { id, azione: 'pianifica', ora: '10:30' }, T.mario)).status, 400, 'data obbligatoria');
+  assert.equal((await call('updateConfronto', { id, azione: 'cancella' }, T.mario)).status, 400);
+  const inv = (await call('getConfronti', {}, T.sara)).data.inviate.find(r => r.id === id);
+  const st = Object.fromEntries(inv.destinatari.map(d => [d.full_name, d.stato + '|' + (d.data_incontro || '') + '|' + (d.risposta || '')]));
+  assert.deepEqual(st, { 'Mario Rossi': 'pianificato|2026-12-03|Volentieri!', 'Luca Verdi': 'rifiutato||Meglio con il tuo manager' });
+
+  // Completato, poi riaperto (la data si azzera)
+  await call('updateConfronto', { id, azione: 'completa' }, T.mario);
+  assert.equal((await call('getConfronti', {}, T.mario)).data.ricevute.find(r => r.id === id).stato, 'completato');
+  await call('updateConfronto', { id, azione: 'riapri' }, T.mario);
+  const ri = (await call('getConfronti', {}, T.mario)).data.ricevute.find(r => r.id === id);
+  assert.equal(ri.stato, 'da_pianificare'); assert.equal(ri.data_incontro, null); assert.equal(ri.risposta, 'Volentieri!');
+
+  // Solo il richiedente ritira la richiesta
+  assert.equal((await call('deleteConfronto', { id }, T.mario)).status, 404);
+  assert.equal((await call('deleteConfronto', { id }, T.sara)).status, 200);
+  assert.ok(!(await call('getConfronti', {}, T.mario)).data.ricevute.some(r => r.id === id));
+});

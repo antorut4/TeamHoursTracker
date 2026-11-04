@@ -271,6 +271,39 @@ export const MIGRATIONS = [
     version: 8,
     name: 'eventi.icona: icona scelta dall\'organizzatore',
     up: sql => [sql`ALTER TABLE eventi ADD COLUMN IF NOT EXISTS icona TEXT`]
+  },
+  {
+    version: 9,
+    name: 'confronti: richieste di confronto e feedback verso una o più risorse',
+    up: sql => [
+      sql`CREATE TABLE IF NOT EXISTS confronti (
+        id             SERIAL    PRIMARY KEY,
+        richiedente_id INTEGER   NOT NULL REFERENCES risorse(id) ON DELETE CASCADE,
+        tema           TEXT      NOT NULL,
+        messaggio      TEXT      NOT NULL,
+        argomenti      TEXT[]    NOT NULL DEFAULT '{}',
+        priorita       TEXT      NOT NULL DEFAULT 'media' CHECK (priorita IN ('alta', 'media', 'bassa')),
+        periodo_da     DATE,
+        periodo_a      DATE,
+        durata_min     INTEGER   CHECK (durata_min IS NULL OR durata_min BETWEEN 5 AND 480),
+        note           TEXT,
+        created_at     TIMESTAMP NOT NULL DEFAULT NOW()
+      )`,
+      sql`CREATE INDEX IF NOT EXISTS confronti_richiedente ON confronti (richiedente_id)`,
+      sql`CREATE TABLE IF NOT EXISTS confronto_destinatari (
+        confronto_id INTEGER   NOT NULL REFERENCES confronti(id) ON DELETE CASCADE,
+        risorsa_id   INTEGER   NOT NULL REFERENCES risorse(id)   ON DELETE CASCADE,
+        stato        TEXT      NOT NULL DEFAULT 'da_pianificare'
+                     CHECK (stato IN ('da_pianificare', 'pianificato', 'completato', 'rifiutato')),
+        data_incontro DATE,
+        ora_incontro  TEXT,
+        luogo         TEXT,
+        risposta      TEXT,
+        updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (confronto_id, risorsa_id)
+      )`,
+      sql`CREATE INDEX IF NOT EXISTS confronto_destinatari_risorsa ON confronto_destinatari (risorsa_id)`
+    ]
   }
 ];
 

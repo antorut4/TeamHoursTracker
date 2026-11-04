@@ -99,7 +99,7 @@ async function doAdminLogin(){
   errEl.style.display='none';document.getElementById('adminPwd').value='';
   await _startSession(res.token,'ADMIN',true);
 }
-function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isSeniorManager=false;isProjectTL=false;_ev={view:'list',id:null,list:[],data:null,form:null};_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
+function doLogout(){_setToken(null);clearInterval(_renewT);try{sessionStorage.removeItem(TAB_KEY);}catch{}document.getElementById('alertBanner')?.classList.remove('visible');currentUser=null;isAdmin=false;isTeamLead=false;isSeniorManager=false;isProjectTL=false;_ev={view:'list',id:null,list:[],data:null,form:null};_cf={box:'ricevute',st:'da_pianificare',tema:'',sel:null,data:null,form:null,act:null};document.querySelector('#navConfronti .nav-badge')?.remove();_loginRisorsaId=null;_loginFullName='';RESOURCES=[];_cache={res:[],prj:[],hrs:[],fer:[],rep:[],pres:[],wbs:{},repTipi:{},aree:[],soglie:{},soglieArea:{}};document.getElementById('loginScreen').style.display='flex';document.getElementById('app').style.display='none';goStepSelect();}
 async function launchApp(){
   let lastTab=null;try{lastTab=sessionStorage.getItem(TAB_KEY);}catch{}
   document.getElementById('loginScreen').style.display='none';document.getElementById('app').style.display='block';
@@ -119,6 +119,7 @@ async function launchApp(){
   navVis('navFteTrend',isAdmin||_andProjects().length>0);
   navVis('navBenchmark',true);
   navVis('navEventi',true);
+  navVis('navConfronti',!isAdmin);
   navVis('navSectionTeam',isAdmin||isTeamLead);
   navVis('navDashboard',isAdmin||isTeamLead);
   navVis('navRiepilogo',isAdmin||isTeamLead);
@@ -128,6 +129,7 @@ async function launchApp(){
   navVis('navSectionAdmin',isAdmin||isTeamLead);
   navVis('navAdmin',isAdmin||isTeamLead);
   initApp();
+  cfRefreshBadge();
   if(isAdmin||isTeamLead)showTab('dashboard');else showTab('ore');
   // Deep link dalle email (es. alert soglia → ?tab=andamento&prj=ID&area=ID)
   const qs=new URLSearchParams(location.search),qTab=qs.get('tab');
