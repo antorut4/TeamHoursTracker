@@ -4,6 +4,16 @@
 let _ev={view:'list',id:null,list:[],data:null,form:null};
 const EV_ST={si:{l:'Disponibile',ic:'fa-check',cls:'si'},forse:{l:'Forse',ic:'fa-question',cls:'forse'},no:{l:'Non disponibile',ic:'fa-xmark',cls:'no'}};
 const EV_NEXT={'':'si',si:'forse',forse:'no',no:''};
+// Icone tra cui scegliere (Font Awesome 6 free, stile solid), raggruppate per tipo di evento
+const EV_ICONS=[
+  {g:'Festa',l:[['champagne-glasses','Brindisi'],['cake-candles','Compleanno'],['gift','Regali'],['music','Musica'],['microphone','Karaoke'],['guitar','Concerto'],['masks-theater','Teatro'],['star','Speciale']]},
+  {g:'Cibo e bevande',l:[['beer-mug-empty','Birra'],['wine-glass','Vino'],['martini-glass-citrus','Aperitivo'],['utensils','Cena'],['pizza-slice','Pizza'],['burger','Burger'],['mug-hot','Caffè'],['ice-cream','Gelato']]},
+  {g:'Sport',l:[['futbol','Calcio'],['basketball','Basket'],['volleyball','Pallavolo'],['table-tennis-paddle-ball','Ping pong'],['bowling-ball','Bowling'],['golf-ball-tee','Golf'],['person-running','Corsa'],['person-biking','Bici'],['person-swimming','Nuoto'],['dumbbell','Palestra'],['trophy','Torneo'],['medal','Gara']]},
+  {g:'Viaggi e outdoor',l:[['plane','Volo'],['train','Treno'],['bus','Gita'],['car','Auto'],['ship','Crociera'],['hotel','Hotel'],['umbrella-beach','Mare'],['mountain','Montagna'],['person-hiking','Escursione'],['person-skiing','Sci'],['campground','Campeggio'],['tree','Natura']]},
+  {g:'Lavoro e svago',l:[['people-group','Team'],['handshake','Incontro'],['chalkboard-user','Workshop'],['laptop-code','Hackathon'],['lightbulb','Idee'],['graduation-cap','Formazione'],['gamepad','Videogiochi'],['dice','Giochi'],['film','Cinema'],['camera','Foto'],['palette','Arte'],['heart','Beneficenza']]}
+];
+const EV_ICON_DEF='champagne-glasses';
+const _evIc=e=>(e&&e.icona&&/^[a-z0-9-]+$/.test(e.icona))?e.icona:EV_ICON_DEF;
 const _evDate=iso=>new Date(iso+'T00:00:00');
 const _evCap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 function _evLong(iso){return _evCap(_evDate(iso).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'}));}
@@ -45,7 +55,7 @@ function _evRenderList(){
       :e.mia_risposta==='no'?'<span class="badge badge-danger"><i class="fa-solid fa-xmark"></i> Non ci sono</span>'
       :e.invitato?'<span class="badge badge-warn"><i class="fa-regular fa-clock"></i> Da rispondere</span>':'';
     return `<div class="card ev-card" role="button" tabindex="0" onclick="evOpen(${+e.id})" onkeydown="if(event.key==='Enter')evOpen(${+e.id})">
-      <div class="ev-card-ic"><i class="fa-solid fa-champagne-glasses"></i></div>
+      <div class="ev-card-ic"><i class="fa-solid fa-${_evIc(e)}"></i></div>
       <div class="ev-card-body">
         <div class="ev-card-hd"><b>${_esc(e.nome)}</b>${e.owner?'<span class="badge badge-amber"><i class="fa-solid fa-crown"></i> Organizzatore</span>':''}</div>
         ${e.luogo?`<div class="ev-meta"><i class="fa-solid fa-location-dot"></i> ${_esc(e.luogo)}</div>`:''}
@@ -80,7 +90,7 @@ function _evRenderDetail(){
   const me=_evMe(),best=_evBest(d),compiled=new Set(d.disponibilita.map(x=>x.risorsa_id)).size;
   const head=`<div class="and-crumb"><a href="#" onclick="evBack();return false"><i class="fa-solid fa-arrow-left"></i> Tutti gli eventi</a><span>/</span><b>${_esc(d.nome)}</b></div>`;
   const info=`<div class="card ev-hero">
-      <div class="ev-hero-ic"><i class="fa-solid fa-champagne-glasses"></i></div>
+      <div class="ev-hero-ic"><i class="fa-solid fa-${_evIc(d)}"></i></div>
       <div class="ev-hero-body">
         <h2>${_esc(d.nome)}</h2>
         ${d.luogo?`<div class="ev-meta"><i class="fa-solid fa-location-dot"></i> ${_esc(d.luogo)}</div>`:''}
@@ -179,7 +189,7 @@ function evDelete(){
 function evOpenForm(id){
   const d=id&&_ev.data&&_ev.data.id===id?_ev.data:null;
   const me=_evMe();
-  _ev.view='form';_ev.form={id:d?d.id:null,inv:new Set(d?d.invitati.map(i=>i.risorsa_id):(me?[me.id]:[])),owner:d?d.creatore_id:(me?me.id:null),src:d};
+  _ev.view='form';_ev.form={id:d?d.id:null,icona:_evIc(d),inv:new Set(d?d.invitati.map(i=>i.risorsa_id):(me?[me.id]:[])),owner:d?d.creatore_id:(me?me.id:null),src:d};
   _evRenderForm();window.scrollTo(0,0);
 }
 function _evRenderForm(){
@@ -189,6 +199,8 @@ function _evRenderForm(){
   <div class="card"><div class="card-title"><i class="fa-solid fa-${f.id?'pen':'calendar-plus'}"></i> ${f.id?'Modifica evento':'Nuovo evento'}</div>
     <div class="field-row"><div class="field" style="flex:2;min-width:220px"><label for="evNome">Nome dell'evento *</label><input type="text" id="evNome" maxlength="150" placeholder="Es. Team Building 2026" value="${_esc(d.nome||'')}"/></div>
       <div class="field" style="min-width:200px"><label for="evLuogo">Luogo</label><input type="text" id="evLuogo" maxlength="200" placeholder="Es. Villa delle Colline, Firenze" value="${_esc(d.luogo||'')}"/></div></div>
+    <div class="ev-ic-hd"><label>Icona</label><span class="ev-ic-prev" id="evIcPrev"><i class="fa-solid fa-${_esc(f.icona)}"></i></span></div>
+    <div class="ev-ic-pick" role="radiogroup" aria-label="Icona dell'evento">${EV_ICONS.map(g=>`<div class="ev-ic-g"><span>${g.g}</span><div>${g.l.map(([ic,l])=>`<button type="button" role="radio" class="ev-ic-b${ic===f.icona?' on':''}" data-ic="${ic}" aria-checked="${ic===f.icona}" title="${l}" aria-label="${l}" onclick="evPickIcon('${ic}')"><i class="fa-solid fa-${ic}"></i></button>`).join('')}</div></div>`).join('')}</div>
     <div class="field" style="margin-bottom:12px"><label for="evDesc">Cosa faremo</label><textarea id="evDesc" rows="3" maxlength="4000" placeholder="Descrivi l'evento: programma, attività, cosa portare…">${_esc(d.descrizione||'')}</textarea></div>
     <div class="ev-when">
       <div class="ev-when-b"><div class="ev-when-t"><i class="fa-regular fa-calendar-check"></i> Data già decisa</div><div class="field"><label for="evData">Data dell'evento</label><input type="date" id="evData" value="${_esc(d.data||'')}"/></div></div>
@@ -212,13 +224,18 @@ function _evRenderInv(){
     :'<p class="ev-note">Nessuna persona trovata.</p>';
   const c=document.getElementById('evInvCount');if(c)c.textContent=f.inv.size+(f.inv.size===1?' invitato':' invitati');
 }
+function evPickIcon(ic){
+  const f=_ev.form;if(!f)return;f.icona=ic;
+  document.querySelectorAll('.ev-ic-b').forEach(b=>{const on=b.dataset.ic===ic;b.classList.toggle('on',on);b.setAttribute('aria-checked',on);});
+  const p=document.getElementById('evIcPrev');if(p)p.innerHTML=`<i class="fa-solid fa-${ic}"></i>`;
+}
 function evInvToggle(id,on){const f=_ev.form;if(!f)return;on?f.inv.add(id):f.inv.delete(id);_evRenderInv();}
 function evInvAll(on){const f=_ev.form;if(!f)return;if(on)RESOURCES.forEach(r=>f.inv.add(r.id));else{f.inv.clear();if(f.owner)f.inv.add(f.owner);}_evRenderInv();}
 function evAddProject(p){const f=_ev.form;if(!f||!p)return;RESOURCES.filter(r=>(r.progetti||[]).includes(p)).forEach(r=>f.inv.add(r.id));_evRenderInv();}
 async function evSave(){
   const f=_ev.form;if(!f)return;
   const v=id=>(document.getElementById(id)?.value||'').trim();
-  const p={nome:v('evNome'),luogo:v('evLuogo'),descrizione:v('evDesc'),data:v('evData')||null,periodoDa:v('evDa')||null,periodoA:v('evA')||null,invitati:[...f.inv]};
+  const p={nome:v('evNome'),luogo:v('evLuogo'),icona:f.icona,descrizione:v('evDesc'),data:v('evData')||null,periodoDa:v('evDa')||null,periodoA:v('evA')||null,invitati:[...f.inv]};
   if(!p.nome){showMsg('evFormMsg','Inserisci il nome dell\'evento.','err');return;}
   if(!p.data&&(!p.periodoDa||!p.periodoA)){showMsg('evFormMsg','Indica la data dell\'evento oppure il periodo in cui raccogliere le disponibilità.','err');return;}
   if((p.periodoDa&&!p.periodoA)||(!p.periodoDa&&p.periodoA)){showMsg('evFormMsg','Per il periodo servono sia la data di inizio sia quella di fine.','err');return;}

@@ -474,3 +474,14 @@ test('eventi: creazione, visibilità, disponibilità, data fissata e partecipazi
   assert.equal((await call('deleteEvento', { id }, T.luca)).status, 200);
   assert.equal((await call('getEvento', { id }, T.luca)).status, 404);
 });
+
+test('eventi: icona salvata, modificata e validata', async () => {
+  const bad = await call('saveEvento', { nome: 'Icona', data: '2026-12-01', icona: 'x" onclick="1', invitati: [ID.anna] }, T.luca);
+  assert.equal(bad.status, 400);
+  const { data: { id } } = await call('saveEvento', { nome: 'Partita', data: '2026-12-01', icona: 'futbol', invitati: [ID.anna] }, T.luca);
+  assert.equal((await call('getEvento', { id }, T.anna)).data.icona, 'futbol');
+  assert.equal((await call('getEventi', {}, T.anna)).data.find(e => e.id === id).icona, 'futbol');
+  await call('saveEvento', { id, nome: 'Birra', data: '2026-12-01', icona: 'beer-mug-empty', invitati: [ID.anna] }, T.luca);
+  assert.equal((await call('getEvento', { id }, T.anna)).data.icona, 'beer-mug-empty');
+  await call('deleteEvento', { id }, T.luca);
+});

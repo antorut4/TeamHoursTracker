@@ -892,7 +892,7 @@ async function saveRepExport(p){
 const EV_MAX_GIORNI = 92;
 const _dayDiff = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5);
 async function _evento(id){
-  const [e] = await sql`SELECT id, nome, descrizione, luogo, data::text AS data, periodo_da::text AS periodo_da,
+  const [e] = await sql`SELECT id, nome, descrizione, luogo, icona, data::text AS data, periodo_da::text AS periodo_da,
                                periodo_a::text AS periodo_a, creatore_id FROM eventi WHERE id=${V.id(id, 'Evento')}`;
   if (!e) throw new HttpError(404, 'Evento non trovato');
   return e;
@@ -923,15 +923,18 @@ function _evFields(p){
     if (n >= EV_MAX_GIORNI) throw new HttpError(400, `Periodo troppo lungo: massimo ${EV_MAX_GIORNI} giorni`);
   } else { da = null; a = null; }
   const invitati = [...new Set(V.arr(p.invitati, 'Invitati', 1000).map(x => V.id(x, 'Invitato')))];
+  // Icona: nome di un'icona Font Awesome scelta nel form (solo lettere minuscole, cifre e trattini)
+  const icona = V.optText(p.icona, 'Icona', 40);
+  if (icona && !/^[a-z0-9-]+$/.test(icona)) throw new HttpError(400, 'Icona non valida');
   return { nome: V.text(p.nome, 'Nome evento', 150), descrizione: V.optText(p.descrizione, 'Descrizione', 4000),
-           luogo: V.optText(p.luogo, 'Luogo', 200), data, da, a, invitati };
+           luogo: V.optText(p.luogo, 'Luogo', 200), icona, data, da, a, invitati };
 }
 
 // Elenco: eventi visibili con riepilogo delle risposte e la risposta di chi chiede
 async function getEventi(p, ctx){
   const me = ctx.id || 0, all = !!ctx.admin;
   return sql`
-    SELECT e.id, e.nome, e.descrizione, e.luogo, e.data::text AS data, e.periodo_da::text AS periodo_da,
+    SELECT e.id, e.nome, e.descrizione, e.luogo, e.icona, e.data::text AS data, e.periodo_da::text AS periodo_da,
            e.periodo_a::text AS periodo_a, e.creatore_id, c.full_name AS creatore,
            (${all}::boolean OR e.creatore_id = ${me}) AS owner,
            COUNT(i.risorsa_id)::int AS invitati,
@@ -971,7 +974,7 @@ async function saveEvento(p, ctx){
     const e = await _mustOwnEvento(ctx, p.id); id = e.id;
     if (e.creatore_id && !f.invitati.includes(+e.creatore_id)) f.invitati.push(+e.creatore_id);
     await sql.transaction([
-      sql`UPDATE eventi SET nome=${f.nome}, descrizione=${f.descrizione}, luogo=${f.luogo}, data=${f.data},
+      sql`UPDATE eventi SET nome=${f.nome}, descrizione=${f.descrizione}, luogo=${f.luogo}, icona=${f.icona}, data=${f.data},
                  periodo_da=${f.da}, periodo_a=${f.a} WHERE id=${id}`,
       sql`DELETE FROM evento_invitati WHERE evento_id=${id} AND risorsa_id <> ALL(${f.invitati}::int[])`,
       sql`DELETE FROM evento_disponibilita WHERE evento_id=${id}
@@ -979,8 +982,8 @@ async function saveEvento(p, ctx){
       sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`
     ]);
   } else {
-    const [r] = await sql`INSERT INTO eventi (nome, descrizione, luogo, data, periodo_da, periodo_a, creatore_id)
-                          VALUES (${f.nome}, ${f.descrizione}, ${f.luogo}, ${f.data}, ${f.da}, ${f.a}, ${ctx.id}) RETURNING id`;
+    const [r] = await sql`INSERT INTO eventi (nome, descrizione, luogo, icona, data, periodo_da, periodo_a, creatore_id)
+                          VALUES (${f.nome}, ${f.descrizione}, ${f.luogo}, ${f.icona}, ${f.data}, ${f.da}, ${f.a}, ${ctx.id}) RETURNING id`;
     id = +r.id;
     await sql`INSERT INTO evento_invitati (evento_id, risorsa_id) SELECT ${id}, x FROM unnest(${f.invitati}::int[]) AS x ON CONFLICT DO NOTHING`;
   }

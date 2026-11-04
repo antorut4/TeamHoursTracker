@@ -266,6 +266,11 @@ export const MIGRATIONS = [
         PRIMARY KEY (evento_id, risorsa_id, data)
       )`
     ]
+  },
+  {
+    version: 8,
+    name: 'eventi.icona: icona scelta dall\'organizzatore',
+    up: sql => [sql`ALTER TABLE eventi ADD COLUMN IF NOT EXISTS icona TEXT`]
   }
 ];
 

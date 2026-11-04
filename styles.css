@@ -489,3 +489,16 @@ button.ev-cell:disabled{opacity:.5;cursor:wait}
 .ev-inv-i span{display:flex;flex-direction:column;min-width:0}
 .ev-inv-i small{font-size:.7rem;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:768px){.ev-top .btn{margin:0 0 14px}}
+
+/* Eventi: scelta dell'icona */
+.ev-ic-hd{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.ev-ic-hd label{margin:0}
+.ev-ic-prev{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;background:var(--sb-grad);color:#fff;font-size:.95rem}
+.ev-ic-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px 16px;padding:12px 14px;margin-bottom:14px;background:var(--stone);border:1px solid var(--line);border-radius:var(--r)}
+.ev-ic-g>span{display:block;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-2);margin-bottom:5px}
+.ev-ic-g>div{display:flex;flex-wrap:wrap;gap:5px}
+.ev-ic-b{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid var(--line-s);background:var(--white);color:var(--ink-2);font-size:.95rem;cursor:pointer;transition:all .12s}
+.ev-ic-b:hover{border-color:var(--amber-rim);color:var(--amber);transform:translateY(-1px)}
+.ev-ic-b.on{background:var(--sb-grad);border-color:transparent;color:#fff;box-shadow:0 4px 12px rgba(76,29,149,.3)}
+.ev-ic-b:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.ev-card .badge i{margin-right:4px}
